@@ -134,6 +134,14 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Node.js
+node_modules/
+.npm
+.yarn
+.pnpm-store/
+.next/
+.out/
+
 # Environments
 .env
 .envrc
