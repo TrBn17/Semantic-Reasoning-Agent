@@ -106,7 +106,7 @@ services:
     working_dir: /workspace
     command: >
       sh -c "pip install --no-cache-dir -e '.[dev]'
-      && python apps/backend/serve.py"
+      && sh apps/backend/entrypoint.sh"
     volumes:
       - ../..:/workspace
     ports:
@@ -163,7 +163,7 @@ services:
     working_dir: /workspace
     command: >
       sh -c "pip install --no-cache-dir -e '.[dev]'
-      && python apps/backend/worker/serve.py"
+      && sh apps/backend/worker-entrypoint.sh"
     volumes:
       - ../..:/workspace
     environment:
