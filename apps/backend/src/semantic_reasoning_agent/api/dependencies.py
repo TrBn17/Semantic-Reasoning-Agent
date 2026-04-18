@@ -5,9 +5,11 @@ from semantic_reasoning_agent.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService
 from semantic_reasoning_agent.services.conversation_service import ConversationService
 from semantic_reasoning_agent.services.document_service import DocumentService
+from semantic_reasoning_agent.services.agent_profile_service import AgentProfileService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
+from semantic_reasoning_agent.services.secret_service import SecretService
 
 def get_db_manager() -> DatabaseManager:
     return get_app_container().database_manager
@@ -17,8 +19,16 @@ def get_conversation_service() -> ConversationService:
     return get_app_container().conversation_service
 
 
+def get_agent_profile_service() -> AgentProfileService:
+    return get_app_container().agent_profile_service
+
+
 def get_model_config_service() -> ModelConfigService:
     return get_app_container().model_config_service
+
+
+def get_secret_service() -> SecretService:
+    return get_app_container().secret_service
 
 
 def get_adapter_registry() -> AdapterRegistry:

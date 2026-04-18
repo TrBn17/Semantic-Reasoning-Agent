@@ -1,7 +1,14 @@
 from semantic_reasoning_agent.llm.registry import AdapterRegistry
-from semantic_reasoning_agent.schemas.chat import ChatReply, SendMessageRequest
+from semantic_reasoning_agent.schemas.chat import (
+    ChatReply,
+    ConversationModelSelectionRequest,
+    SendMessageRequest,
+)
 from semantic_reasoning_agent.schemas.retrieval import Citation
-from semantic_reasoning_agent.services.conversation_service import ConversationService
+from semantic_reasoning_agent.services.conversation_service import (
+    ConversationPolicyError,
+    ConversationService,
+)
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 
@@ -24,22 +31,38 @@ class ChatStreamService:
         self._retrieval_service = retrieval_service
 
     def send_message(self, payload: SendMessageRequest) -> ChatReply:
-        if not self._model_config_service.is_ready(payload.provider, payload.model):
-            raise ProviderNotReadyError(
-                f"Provider '{payload.provider}' with model '{payload.model}' is not ready yet."
-            )
-
-        adapter = self._adapter_registry.get(payload.provider)
-        if adapter is None:
-            raise ProviderNotReadyError(f"No adapter is registered for provider '{payload.provider}'.")
-
         conversation = self._conversation_service.get_conversation(payload.conversation_id)
-        if conversation.provider != payload.provider or conversation.model != payload.model:
-            self._conversation_service.update_runtime_selection(
-                conversation_id=payload.conversation_id,
-                provider=payload.provider,
-                model=payload.model,
+        runtime_provider = conversation.provider
+        runtime_model = conversation.model
+
+        if payload.provider and payload.model:
+            if conversation.provider != payload.provider or conversation.model != payload.model:
+                updated = self._conversation_service.update_runtime_selection(
+                    payload.conversation_id,
+                    ConversationModelSelectionRequest(
+                        provider=payload.provider,
+                        model=payload.model,
+                        workspace_id=payload.workspace_id or conversation.workspace_id,
+                    ),
+                )
+                runtime_provider = updated.provider
+                runtime_model = updated.model
+            else:
+                runtime_provider = payload.provider
+                runtime_model = payload.model
+
+        if not self._model_config_service.is_ready(
+            runtime_provider,
+            runtime_model,
+            payload.workspace_id or conversation.workspace_id,
+        ):
+            raise ProviderNotReadyError(
+                f"Provider '{runtime_provider}' with model '{runtime_model}' is not ready yet."
             )
+
+        adapter = self._adapter_registry.get(runtime_provider)
+        if adapter is None:
+            raise ProviderNotReadyError(f"No adapter is registered for provider '{runtime_provider}'.")
 
         self._conversation_service.append_message(
             conversation_id=payload.conversation_id,
@@ -48,11 +71,12 @@ class ChatStreamService:
         )
 
         citations: list[Citation] = []
-        reply_text = adapter.generate_reply(payload.content)
+        system_prompt = self._conversation_service.get_system_prompt(payload.conversation_id)
+        reply_text = adapter.generate_reply(payload.content, system_prompt=system_prompt)
         if payload.use_retrieval:
             search_response = self._retrieval_service.search(
                 query=payload.content,
-                workspace_id=payload.workspace_id,
+                workspace_id=payload.workspace_id or conversation.workspace_id,
                 document_ids=payload.document_ids,
                 top_k=payload.top_k,
             )

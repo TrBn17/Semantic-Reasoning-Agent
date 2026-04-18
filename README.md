@@ -44,31 +44,34 @@ This repository now has a production-oriented refactor baseline for `Phase 3 - O
 ## Quick start
 
 1. Create a local environment file from `.env.example`.
-2. Start infrastructure services:
+
+Set `POSTGRES_PASSWORD` to a strong value. Keep `DATABASE_URL` for host-run API/worker and `DATABASE_URL_DOCKER` for docker-compose API/worker containers.
+
+1. Start infrastructure services:
 
 ```powershell
 docker compose -f infrastructure/docker/docker-compose.yml up -d postgres redis neo4j
 ```
 
-3. Install backend dependencies:
+1. Install backend dependencies:
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -e .[dev]
 ```
 
-4. Run API:
+1. Run API:
 
 ```powershell
 .venv\Scripts\python.exe apps/backend/serve.py
 ```
 
-5. Run worker:
+1. Run worker:
 
 ```powershell
 .venv\Scripts\python.exe apps/backend/worker/serve.py
 ```
 
-6. Run frontend:
+1. Run frontend:
 
 ```powershell
 cd apps/frontend

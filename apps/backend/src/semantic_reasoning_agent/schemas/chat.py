@@ -19,15 +19,32 @@ class Message(BaseModel):
 
 class ConversationCreateRequest(BaseModel):
     title: str
-    provider: str = "echo"
-    model: str = "local-echo"
+    workspace_id: str | None = None
+    agent_profile_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
+class ConversationModelSelectionRequest(BaseModel):
+    provider: str
+    model: str
+    workspace_id: str | None = None
+
+
+class ConversationAgentProfileRequest(BaseModel):
+    agent_profile_id: str | None = None
+    workspace_id: str | None = None
+    clear_model_override: bool = False
 
 
 class ConversationResponse(BaseModel):
     id: str
     title: str
+    workspace_id: str
+    agent_profile_id: str | None = None
     provider: str
     model: str
+    uses_model_override: bool = False
     created_at: datetime
     updated_at: datetime
     messages: list[Message]
@@ -36,8 +53,8 @@ class ConversationResponse(BaseModel):
 class SendMessageRequest(BaseModel):
     conversation_id: str
     content: str
-    provider: str
-    model: str
+    provider: str | None = None
+    model: str | None = None
     use_retrieval: bool = False
     workspace_id: str | None = None
     document_ids: list[str] = Field(default_factory=list)

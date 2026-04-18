@@ -12,12 +12,14 @@ from semantic_reasoning_agent.infrastructure.ontology import (
     RuleSeedExtractor,
 )
 from semantic_reasoning_agent.llm.registry import AdapterRegistry, build_adapter_registry
+from semantic_reasoning_agent.services.agent_profile_service import AgentProfileService
 from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService
 from semantic_reasoning_agent.services.conversation_service import ConversationService
 from semantic_reasoning_agent.services.document_service import DocumentService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
+from semantic_reasoning_agent.services.secret_service import DatabaseSecretRepository, SecretService
 from semantic_reasoning_agent.task_dispatcher import TaskDispatcher
 
 
@@ -25,6 +27,8 @@ from semantic_reasoning_agent.task_dispatcher import TaskDispatcher
 class AppContainer:
     settings: Settings
     database_manager: DatabaseManager
+    secret_service: SecretService
+    agent_profile_service: AgentProfileService
     model_config_service: ModelConfigService
     adapter_registry: AdapterRegistry
     graph_store: GraphStore
@@ -40,11 +44,23 @@ class AppContainer:
 def get_app_container() -> AppContainer:
     settings = get_settings()
     database_manager = get_database_manager()
-    model_config_service = ModelConfigService(settings=settings)
     adapter_registry = build_adapter_registry()
+    secret_service = SecretService(DatabaseSecretRepository(database_manager))
+    agent_profile_service = AgentProfileService(database_manager, settings)
+    model_config_service = ModelConfigService(
+        database_manager=database_manager,
+        adapter_registry=adapter_registry,
+        secret_service=secret_service,
+        settings=settings,
+    )
     graph_store = build_graph_store(settings)
     retrieval_service = RetrievalService(settings, database_manager)
-    conversation_service = ConversationService(database_manager)
+    conversation_service = ConversationService(
+        database_manager,
+        model_config_service,
+        agent_profile_service,
+        settings,
+    )
     task_dispatcher = TaskDispatcher()
     document_service = DocumentService(
         settings,
@@ -58,7 +74,7 @@ def get_app_container() -> AppContainer:
         task_dispatcher,
         graph_store,
         ontology_extractor=HybridOntologyExtractor(
-            llm_extractor=LLMStructuredExtractor(settings),
+            llm_extractor=LLMStructuredExtractor(settings, model_config_service),
             rule_extractor=RuleSeedExtractor(),
         ),
     )
@@ -71,6 +87,8 @@ def get_app_container() -> AppContainer:
     return AppContainer(
         settings=settings,
         database_manager=database_manager,
+        secret_service=secret_service,
+        agent_profile_service=agent_profile_service,
         model_config_service=model_config_service,
         adapter_registry=adapter_registry,
         graph_store=graph_store,

@@ -15,6 +15,7 @@ from semantic_reasoning_agent.domain.ontology.models import (
 )
 from semantic_reasoning_agent.infrastructure.ontology.llm_prompts import build_extraction_prompt
 from semantic_reasoning_agent.infrastructure.ontology.rule_extractor import RuleSeedExtractor
+from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 
 
 class _LLMEntity(BaseModel):
@@ -43,15 +44,28 @@ class _LLMExtraction(BaseModel):
 
 
 class LLMStructuredExtractor:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, model_config_service: ModelConfigService) -> None:
         self._settings = settings
+        self._model_config_service = model_config_service
         self._rule_extractor = RuleSeedExtractor()
 
     def classify_document_domain(self, chunks: list[DocumentChunkORM]) -> str:
         return self._rule_extractor.classify_document_domain(chunks)
 
-    def extract_ontology_candidates(self, chunks: list[DocumentChunkORM]) -> ExtractionResult:
-        if not self._settings.ontology_llm_enabled or not self._settings.anthropic_api_key:
+    def extract_ontology_candidates(
+        self,
+        chunks: list[DocumentChunkORM],
+        workspace_id: str | None = None,
+    ) -> ExtractionResult:
+        provider, model = self._model_config_service.resolve_task_model(
+            "ontology_extraction",
+            workspace_id,
+        )
+        if (
+            not self._settings.ontology_llm_enabled
+            or provider != "anthropic"
+            or not self._model_config_service.is_ready(provider, model, workspace_id)
+        ):
             return ExtractionResult(domain=self.classify_document_domain(chunks), entities=[], relations=[])
         if not chunks:
             return ExtractionResult(domain="general", entities=[], relations=[])
@@ -63,16 +77,22 @@ class LLMStructuredExtractor:
             text=text,
             prompt_version=self._settings.ontology_prompt_version,
         )
-        payload = self._invoke_anthropic(prompt)
+        payload = self._invoke_anthropic(prompt, model=model)
         extraction = self._parse_payload(payload)
-        return self._to_domain_result(extraction, domain=domain, chunks=chunks)
+        return self._to_domain_result(
+            extraction,
+            domain=domain,
+            chunks=chunks,
+            provider=provider,
+            model=model,
+        )
 
-    def _invoke_anthropic(self, prompt: str) -> str:
+    def _invoke_anthropic(self, prompt: str, *, model: str) -> str:
         from anthropic import Anthropic
 
         client = Anthropic(api_key=self._settings.anthropic_api_key)
         response = client.messages.create(
-            model=self._settings.ontology_llm_model,
+            model=model,
             max_tokens=3000,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
@@ -101,13 +121,15 @@ class LLMStructuredExtractor:
         *,
         domain: str,
         chunks: Iterable[DocumentChunkORM],
+        provider: str,
+        model: str,
     ) -> ExtractionResult:
         first_chunk = next(iter(chunks), None)
         source_chunk_id = first_chunk.chunk_id if first_chunk is not None else None
         base_provenance: dict[str, Any] = {
             "extractor": "llm",
-            "provider": self._settings.ontology_llm_provider,
-            "model": self._settings.ontology_llm_model,
+            "provider": provider,
+            "model": model,
             "prompt_version": self._settings.ontology_prompt_version,
             "source_chunk_id": source_chunk_id,
         }

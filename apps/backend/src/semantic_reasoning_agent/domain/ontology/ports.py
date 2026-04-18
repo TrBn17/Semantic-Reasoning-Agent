@@ -10,5 +10,9 @@ class OntologyExtractorPort(Protocol):
     def classify_document_domain(self, chunks: list[DocumentChunkORM]) -> str:
         ...
 
-    def extract_ontology_candidates(self, chunks: list[DocumentChunkORM]) -> ExtractionResult:
+    def extract_ontology_candidates(
+        self,
+        chunks: list[DocumentChunkORM],
+        workspace_id: str | None = None,
+    ) -> ExtractionResult:
         ...

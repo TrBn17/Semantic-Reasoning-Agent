@@ -4,13 +4,21 @@ from uuid import uuid4
 from sqlalchemy import desc, select
 from sqlalchemy.orm import selectinload
 
+from semantic_reasoning_agent.config import Settings, get_settings
 from semantic_reasoning_agent.db.database import DatabaseManager
-from semantic_reasoning_agent.db.models import ConversationORM, MessageORM
+from semantic_reasoning_agent.db.models import AgentProfileORM, ConversationORM, MessageORM
 from semantic_reasoning_agent.schemas.chat import (
+    ConversationAgentProfileRequest,
     ConversationCreateRequest,
+    ConversationModelSelectionRequest,
     ConversationResponse,
     Message,
 )
+from semantic_reasoning_agent.services.agent_profile_service import (
+    AgentProfileNotFoundError,
+    AgentProfileService,
+)
+from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 
 
 def utc_now() -> datetime:
@@ -21,9 +29,22 @@ class ConversationNotFoundError(ValueError):
     """Raised when a conversation id does not exist."""
 
 
+class ConversationPolicyError(ValueError):
+    """Raised when a conversation action violates profile policy."""
+
+
 class ConversationService:
-    def __init__(self, database_manager: DatabaseManager) -> None:
+    def __init__(
+        self,
+        database_manager: DatabaseManager,
+        model_config_service: ModelConfigService,
+        agent_profile_service: AgentProfileService,
+        settings: Settings | None = None,
+    ) -> None:
         self._database_manager = database_manager
+        self._model_config_service = model_config_service
+        self._agent_profile_service = agent_profile_service
+        self._settings = settings or get_settings()
 
     def list_conversations(self) -> list[ConversationResponse]:
         with self._database_manager.session() as session:
@@ -35,11 +56,31 @@ class ConversationService:
             return [self._to_schema(conversation) for conversation in conversations]
 
     def create_conversation(self, payload: ConversationCreateRequest) -> ConversationResponse:
+        workspace_id = payload.workspace_id or self._settings.default_workspace_id
+        agent_profile_id = payload.agent_profile_id
+        if agent_profile_id is None:
+            default_profile = self._agent_profile_service.get_default_profile(workspace_id)
+            agent_profile_id = None if default_profile is None else default_profile.id
+
+        if payload.provider and payload.model:
+            provider, model = payload.provider, payload.model
+            uses_override = True
+        else:
+            provider, model = self._model_config_service.resolve_task_model(
+                "chat",
+                workspace_id,
+                agent_profile_id,
+            )
+            uses_override = False
+
         conversation = ConversationORM(
             id=str(uuid4()),
             title=payload.title,
-            provider=payload.provider,
-            model=payload.model,
+            workspace_id=workspace_id,
+            agent_profile_id=agent_profile_id,
+            provider=provider,
+            model=model,
+            uses_model_override=uses_override,
             created_at=utc_now(),
             updated_at=utc_now(),
         )
@@ -63,18 +104,57 @@ class ConversationService:
     def update_runtime_selection(
         self,
         conversation_id: str,
-        provider: str,
-        model: str,
+        payload: ConversationModelSelectionRequest,
     ) -> ConversationResponse:
         with self._database_manager.session() as session:
             conversation = session.get(ConversationORM, conversation_id)
             if conversation is None:
                 raise ConversationNotFoundError(f"Conversation '{conversation_id}' was not found.")
-
-            conversation.provider = provider
-            conversation.model = model
+            profile = self._get_profile_record(session, conversation.agent_profile_id)
+            if profile is not None and not profile.allow_chat_model_override:
+                raise ConversationPolicyError(
+                    f"Conversation '{conversation_id}' does not allow chat model override."
+                )
+            conversation.provider = payload.provider
+            conversation.model = payload.model
+            conversation.uses_model_override = True
             conversation.updated_at = utc_now()
             session.flush()
+            session.refresh(conversation)
+            return self._to_schema(conversation)
+
+    def update_agent_profile(
+        self,
+        conversation_id: str,
+        payload: ConversationAgentProfileRequest,
+    ) -> ConversationResponse:
+        with self._database_manager.session() as session:
+            conversation = session.get(ConversationORM, conversation_id)
+            if conversation is None:
+                raise ConversationNotFoundError(f"Conversation '{conversation_id}' was not found.")
+            if payload.agent_profile_id is not None:
+                profile = session.get(AgentProfileORM, payload.agent_profile_id)
+                if profile is None:
+                    raise AgentProfileNotFoundError(
+                        f"Agent profile '{payload.agent_profile_id}' was not found."
+                    )
+                conversation.agent_profile_id = profile.id
+            else:
+                conversation.agent_profile_id = None
+
+            if payload.clear_model_override or not conversation.uses_model_override:
+                provider, model = self._model_config_service.resolve_task_model(
+                    "chat",
+                    payload.workspace_id or conversation.workspace_id,
+                    conversation.agent_profile_id,
+                )
+                conversation.provider = provider
+                conversation.model = model
+                conversation.uses_model_override = False
+
+            conversation.updated_at = utc_now()
+            session.flush()
+            session.refresh(conversation)
             return self._to_schema(conversation)
 
     def append_message(self, conversation_id: str, role: str, content: str) -> ConversationResponse:
@@ -86,7 +166,6 @@ class ConversationService:
             )
             if conversation is None:
                 raise ConversationNotFoundError(f"Conversation '{conversation_id}' was not found.")
-
             message = MessageORM(
                 id=str(uuid4()),
                 conversation_id=conversation_id,
@@ -98,6 +177,19 @@ class ConversationService:
             conversation.updated_at = message.created_at
             session.flush()
             return self._to_schema(conversation)
+
+    def get_system_prompt(self, conversation_id: str) -> str | None:
+        with self._database_manager.session() as session:
+            conversation = session.get(ConversationORM, conversation_id)
+            if conversation is None:
+                raise ConversationNotFoundError(f"Conversation '{conversation_id}' was not found.")
+            profile = self._get_profile_record(session, conversation.agent_profile_id)
+            return None if profile is None or not profile.system_prompt.strip() else profile.system_prompt
+
+    def _get_profile_record(self, session, profile_id: str | None) -> AgentProfileORM | None:
+        if profile_id is None:
+            return None
+        return session.get(AgentProfileORM, profile_id)
 
     def _to_schema(self, conversation: ConversationORM) -> ConversationResponse:
         messages = [
@@ -112,8 +204,11 @@ class ConversationService:
         return ConversationResponse(
             id=conversation.id,
             title=conversation.title,
+            workspace_id=conversation.workspace_id,
+            agent_profile_id=conversation.agent_profile_id,
             provider=conversation.provider,
             model=conversation.model,
+            uses_model_override=conversation.uses_model_override,
             created_at=conversation.created_at,
             updated_at=conversation.updated_at,
             messages=messages,

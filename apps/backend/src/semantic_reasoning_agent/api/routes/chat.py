@@ -3,7 +3,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from semantic_reasoning_agent.api.dependencies import get_chat_stream_service
 from semantic_reasoning_agent.schemas.chat import ChatReply, SendMessageRequest
 from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService, ProviderNotReadyError
-from semantic_reasoning_agent.services.conversation_service import ConversationNotFoundError
+from semantic_reasoning_agent.services.conversation_service import (
+    ConversationNotFoundError,
+    ConversationPolicyError,
+)
 
 
 router = APIRouter()
@@ -18,5 +21,7 @@ def send_message(
         return chat_stream_service.send_message(payload)
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ConversationPolicyError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ProviderNotReadyError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

@@ -1,9 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "mcp__ide__getDiagnostics",
-      "Bash(npx tsc:*)",
-      "Bash(npx next:*)"
+      "Bash(xargs grep *)",
+      "Bash(xargs wc *)"
     ]
   }
 }

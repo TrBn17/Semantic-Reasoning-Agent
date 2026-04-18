@@ -19,9 +19,16 @@ class HybridOntologyExtractor:
     def classify_document_domain(self, chunks: list[DocumentChunkORM]) -> str:
         return self._rule_extractor.classify_document_domain(chunks)
 
-    def extract_ontology_candidates(self, chunks: list[DocumentChunkORM]) -> ExtractionResult:
+    def extract_ontology_candidates(
+        self,
+        chunks: list[DocumentChunkORM],
+        workspace_id: str | None = None,
+    ) -> ExtractionResult:
         rule_result = self._rule_extractor.extract_ontology_candidates(chunks)
-        llm_result = self._llm_extractor.extract_ontology_candidates(chunks)
+        llm_result = self._llm_extractor.extract_ontology_candidates(
+            chunks,
+            workspace_id=workspace_id,
+        )
         domain = llm_result.domain or rule_result.domain
 
         entities = self._merge_entities(rule_result.entities, llm_result.entities)

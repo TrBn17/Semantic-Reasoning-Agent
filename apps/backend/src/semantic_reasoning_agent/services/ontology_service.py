@@ -291,7 +291,10 @@ class OntologyService:
             self._update_build_state(build_id, status=OntologyBuildStatus.running.value, domain=domain)
 
             self._mark_step_running(build_id, "extract_entities")
-            extraction = self._ontology_extractor.extract_ontology_candidates(chunks)
+            extraction = self._ontology_extractor.extract_ontology_candidates(
+                chunks,
+                workspace_id=build.workspace_id,
+            )
             entity_id_map = self._replace_candidate_entities(
                 build,
                 extraction.entities,
