@@ -11,5 +11,5 @@ from semantic_reasoning_agent.services.alembic_service import AlembicService
 db = get_database_manager()
 db.create_schema()
 AlembicService(db).upgrade()
-print('✓ Database migrations completed successfully')
+print('Database migrations completed successfully')
 "

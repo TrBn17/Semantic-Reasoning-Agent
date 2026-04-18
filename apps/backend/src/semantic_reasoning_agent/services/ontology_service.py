@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
+from collections import defaultdict
 from uuid import uuid4
 
-from sqlalchemy import delete, desc, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.config import Settings
@@ -116,30 +117,19 @@ class OntologyService:
         with self._database_manager.session() as session:
             builds = session.scalars(
                 select(OntologyBuildORM)
-                .options(
-                    selectinload(OntologyBuildORM.steps),
-                    selectinload(OntologyBuildORM.entities),
-                    selectinload(OntologyBuildORM.relations),
-                )
                 .where(OntologyBuildORM.workspace_id == resolved_workspace_id)
                 .order_by(desc(OntologyBuildORM.created_at))
             ).all()
-            return [self._to_build_schema(build) for build in builds]
+            return self._to_build_schemas(session, builds)
 
     def get_build(self, build_id: str) -> OntologyBuildResponse:
         with self._database_manager.session() as session:
             build = session.scalar(
-                select(OntologyBuildORM)
-                .options(
-                    selectinload(OntologyBuildORM.steps),
-                    selectinload(OntologyBuildORM.entities),
-                    selectinload(OntologyBuildORM.relations),
-                )
-                .where(OntologyBuildORM.id == build_id)
+                select(OntologyBuildORM).where(OntologyBuildORM.id == build_id)
             )
             if build is None:
                 raise OntologyBuildNotFoundError(f"Ontology build '{build_id}' was not found.")
-            return self._to_build_schema(build)
+            return self._to_build_schemas(session, [build])[0]
 
     def list_build_entities(
         self,
@@ -836,16 +826,118 @@ class OntologyService:
             )
         return step
 
-    def _to_build_schema(self, build: OntologyBuildORM) -> OntologyBuildResponse:
-        pending_entity_count = sum(
-            1 for entity in build.entities if entity.status == OntologyReviewStatus.pending_review.value
+    def _to_build_schemas(
+        self,
+        session,
+        builds: list[OntologyBuildORM],
+    ) -> list[OntologyBuildResponse]:
+        build_ids = [build.id for build in builds]
+        counts = self._load_build_counts(session, build_ids)
+        steps_by_build = self._load_build_steps(session, build_ids)
+        return [
+            self._to_build_schema(
+                build,
+                entity_count=counts[build.id][0],
+                relation_count=counts[build.id][1],
+                pending_entity_count=counts[build.id][2],
+                pending_relation_count=counts[build.id][3],
+                steps=steps_by_build.get(build.id, []),
+            )
+            for build in builds
+        ]
+
+    def _load_build_counts(
+        self,
+        session,
+        build_ids: list[str],
+    ) -> dict[str, tuple[int, int, int, int]]:
+        if not build_ids:
+            return {}
+
+        entity_counts = dict(
+            session.execute(
+                select(
+                    OntologyCandidateEntityORM.build_id,
+                    func.count(OntologyCandidateEntityORM.id),
+                )
+                .where(OntologyCandidateEntityORM.build_id.in_(build_ids))
+                .group_by(OntologyCandidateEntityORM.build_id)
+            ).all()
         )
-        pending_relation_count = sum(
-            1
-            for relation in build.relations
-            if relation.status == OntologyReviewStatus.pending_review.value
+        relation_counts = dict(
+            session.execute(
+                select(
+                    OntologyCandidateRelationORM.build_id,
+                    func.count(OntologyCandidateRelationORM.id),
+                )
+                .where(OntologyCandidateRelationORM.build_id.in_(build_ids))
+                .group_by(OntologyCandidateRelationORM.build_id)
+            ).all()
         )
-        ordered_steps = sorted(build.steps, key=self._step_sort_key)
+        pending_entity_counts = dict(
+            session.execute(
+                select(
+                    OntologyCandidateEntityORM.build_id,
+                    func.count(OntologyCandidateEntityORM.id),
+                )
+                .where(
+                    OntologyCandidateEntityORM.build_id.in_(build_ids),
+                    OntologyCandidateEntityORM.status == OntologyReviewStatus.pending_review.value,
+                )
+                .group_by(OntologyCandidateEntityORM.build_id)
+            ).all()
+        )
+        pending_relation_counts = dict(
+            session.execute(
+                select(
+                    OntologyCandidateRelationORM.build_id,
+                    func.count(OntologyCandidateRelationORM.id),
+                )
+                .where(
+                    OntologyCandidateRelationORM.build_id.in_(build_ids),
+                    OntologyCandidateRelationORM.status == OntologyReviewStatus.pending_review.value,
+                )
+                .group_by(OntologyCandidateRelationORM.build_id)
+            ).all()
+        )
+
+        return {
+            build_id: (
+                int(entity_counts.get(build_id, 0)),
+                int(relation_counts.get(build_id, 0)),
+                int(pending_entity_counts.get(build_id, 0)),
+                int(pending_relation_counts.get(build_id, 0)),
+            )
+            for build_id in build_ids
+        }
+
+    def _load_build_steps(
+        self,
+        session,
+        build_ids: list[str],
+    ) -> dict[str, list[OntologyBuildStepORM]]:
+        if not build_ids:
+            return {}
+        steps_by_build: dict[str, list[OntologyBuildStepORM]] = defaultdict(list)
+        steps = session.scalars(
+            select(OntologyBuildStepORM).where(OntologyBuildStepORM.build_id.in_(build_ids))
+        ).all()
+        for step in steps:
+            steps_by_build[step.build_id].append(step)
+        for build_steps in steps_by_build.values():
+            build_steps.sort(key=self._step_sort_key)
+        return steps_by_build
+
+    def _to_build_schema(
+        self,
+        build: OntologyBuildORM,
+        *,
+        entity_count: int,
+        relation_count: int,
+        pending_entity_count: int,
+        pending_relation_count: int,
+        steps: list[OntologyBuildStepORM],
+    ) -> OntologyBuildResponse:
         return OntologyBuildResponse(
             id=build.id,
             document_id=build.document_id,
@@ -858,11 +950,11 @@ class OntologyService:
             updated_at=build.updated_at,
             error_message=build.error_message,
             published_version_id=build.published_version_id,
-            entity_count=len(build.entities),
-            relation_count=len(build.relations),
+            entity_count=entity_count,
+            relation_count=relation_count,
             pending_entity_count=pending_entity_count,
             pending_relation_count=pending_relation_count,
-            steps=[self._to_step_schema(step) for step in ordered_steps],
+            steps=[self._to_step_schema(step) for step in steps],
         )
 
     @staticmethod

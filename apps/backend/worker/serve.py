@@ -8,7 +8,7 @@ from pathlib import Path
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
-    api_src = repo_root / "apps" / "api" / "src"
+    api_src = repo_root / "apps" / "backend" / "src"
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{api_src}{os.pathsep}{pythonpath}" if pythonpath else str(api_src)
@@ -19,6 +19,10 @@ def main() -> int:
         "-A",
         "semantic_reasoning_agent.celery_app.celery_app",
         "worker",
+        "--uid",
+        "nobody",
+        "--gid",
+        "nogroup",
         "--loglevel",
         "INFO",
         "--pool",

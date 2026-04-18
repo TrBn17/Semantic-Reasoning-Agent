@@ -98,7 +98,8 @@ class Neo4jGraphStore(GraphStore):
             with self._driver.session(database=self._database) as session:
                 version_record = session.run(
                     """
-                    MATCH (version:OntologyVersion {workspace_id: $workspace_id})
+                    MATCH (version:OntologyVersion)
+                    WHERE version.workspace_id = $workspace_id
                     RETURN version
                     ORDER BY version.version_number DESC
                     LIMIT 1
@@ -111,7 +112,8 @@ class Neo4jGraphStore(GraphStore):
                 version = self._deserialize_version(version_record["version"])
                 entity_records = session.run(
                     """
-                    MATCH (:OntologyVersion {id: $version_id})-[:HAS_ENTITY]->(entity:OntologyEntity)
+                    MATCH (ov:OntologyVersion)-[:HAS_ENTITY]->(entity:OntologyEntity)
+                    WHERE ov.id = $version_id
                     RETURN entity
                     ORDER BY entity.name
                     """,
@@ -119,9 +121,10 @@ class Neo4jGraphStore(GraphStore):
                 )
                 relation_records = session.run(
                     """
-                    MATCH (source:OntologyEntity {version_id: $version_id})
-                    -[relation:ONTOLOGY_RELATION {version_id: $version_id}]->
-                    (target:OntologyEntity {version_id: $version_id})
+                    MATCH (source:OntologyEntity)-[relation:ONTOLOGY_RELATION]->(target:OntologyEntity)
+                    WHERE source.version_id = $version_id 
+                      AND relation.version_id = $version_id 
+                      AND target.version_id = $version_id
                     RETURN relation, source.id AS source_entity_id, target.id AS target_entity_id
                     ORDER BY relation.relation_type, source.name, target.name
                     """,
@@ -157,7 +160,8 @@ class Neo4jGraphStore(GraphStore):
     def _replace_version_snapshot(tx, parameters: dict) -> None:
         tx.run(
             """
-            MATCH (version:OntologyVersion {id: $version_id})
+            MATCH (version:OntologyVersion)
+            WHERE version.id = $version_id
             OPTIONAL MATCH (version)-[:HAS_ENTITY]->(entity:OntologyEntity)
             DETACH DELETE entity
             """,
@@ -165,7 +169,8 @@ class Neo4jGraphStore(GraphStore):
         )
         tx.run(
             """
-            MATCH (version:OntologyVersion {id: $version_id})
+            MATCH (version:OntologyVersion)
+            WHERE version.id = $version_id
             DETACH DELETE version
             """,
             version_id=parameters["version"]["id"],
@@ -185,7 +190,8 @@ class Neo4jGraphStore(GraphStore):
         tx.run(
             """
             UNWIND $entities AS entity
-            MATCH (version:OntologyVersion {id: $version_id})
+            MATCH (version:OntologyVersion)
+            WHERE version.id = $version_id
             CREATE (node:OntologyEntity {
                 id: entity.id,
                 version_id: entity.version_id,
@@ -206,8 +212,10 @@ class Neo4jGraphStore(GraphStore):
         tx.run(
             """
             UNWIND $relations AS relation
-            MATCH (source:OntologyEntity {id: relation.source_entity_id, version_id: relation.version_id})
-            MATCH (target:OntologyEntity {id: relation.target_entity_id, version_id: relation.version_id})
+            MATCH (source:OntologyEntity)
+            WHERE source.id = relation.source_entity_id AND source.version_id = relation.version_id
+            MATCH (target:OntologyEntity)
+            WHERE target.id = relation.target_entity_id AND target.version_id = relation.version_id
             MERGE (source)-[edge:ONTOLOGY_RELATION {id: relation.id}]->(target)
             SET edge.version_id = relation.version_id,
                 edge.workspace_id = relation.workspace_id,
