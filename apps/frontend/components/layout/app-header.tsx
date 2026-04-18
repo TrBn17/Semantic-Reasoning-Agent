@@ -1,3 +1,5 @@
+"use client";
+
 import { WorkspaceBadge } from "@/components/layout/workspace-badge";
 
 export function AppHeader({ title }: { title?: string }) {
