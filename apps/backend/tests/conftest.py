@@ -19,15 +19,15 @@ if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
 from semantic_reasoning_agent.api.dependencies import (  # noqa: E402
-    get_db_manager,
     get_document_service,
     get_ontology_service,
 )
+from semantic_reasoning_agent.container import get_app_container  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def reset_database() -> None:
-    get_db_manager().reset_schema()
+    get_app_container().database_manager.reset_schema()
 
 
 @pytest.fixture
