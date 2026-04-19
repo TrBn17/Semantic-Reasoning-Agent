@@ -45,7 +45,7 @@ export function ConversationList() {
       }),
     onSuccess: (conversation) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations.all });
-      router.push(`/chat/${conversation.id}`);
+      router.push(`/ask/${conversation.id}`);
       toast.success("Conversation created");
     },
     onError: (err) => toast.error(`Failed to create: ${(err as Error).message}`),
@@ -85,7 +85,7 @@ export function ConversationList() {
             return (
               <Link
                 key={c.id}
-                href={`/chat/${c.id}`}
+                href={`/ask/${c.id}`}
                 className={cn(
                   "block rounded-md px-3 py-2 text-sm transition-colors",
                   active

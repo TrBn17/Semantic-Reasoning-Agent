@@ -39,7 +39,7 @@ export default function ChatLandingPage() {
       }),
     onSuccess: (c) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations.all });
-      router.push(`/chat/${c.id}`);
+      router.push(`/ask/${c.id}`);
     },
     onError: (err) => toast.error(`Failed to create: ${(err as Error).message}`),
   });
