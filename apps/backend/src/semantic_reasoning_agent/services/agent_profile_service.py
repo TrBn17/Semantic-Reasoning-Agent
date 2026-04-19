@@ -6,9 +6,9 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from semantic_reasoning_agent.config import Settings, get_settings
-from semantic_reasoning_agent.db.database import DatabaseManager
-from semantic_reasoning_agent.db.models import AgentProfileORM, AgentProfileTaskModelORM
+from semantic_reasoning_agent.core.config import Settings, get_settings
+from semantic_reasoning_agent.persistence.database import DatabaseManager
+from semantic_reasoning_agent.persistence.models import AgentProfileORM, AgentProfileTaskModelORM
 from semantic_reasoning_agent.schemas.agent_profiles import (
     AgentProfileCreateRequest,
     AgentProfileResponse,

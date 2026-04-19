@@ -4,7 +4,7 @@ from semantic_reasoning_agent.domain.ontology.models import (
     ExtractionResult,
 )
 from semantic_reasoning_agent.domain.ontology.pipeline_steps import ONTOLOGY_BUILD_STEP_NAMES
-from semantic_reasoning_agent.domain.ontology.ports import OntologyExtractorPort
+from semantic_reasoning_agent.ports.ontology_extractor import OntologyExtractorPort
 
 __all__ = [
     "ExtractedEntity",

@@ -5,12 +5,12 @@ from uuid import uuid4
 from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import selectinload
 
-from semantic_reasoning_agent.config import Settings
-from semantic_reasoning_agent.db.database import DatabaseManager
-from semantic_reasoning_agent.db.models import DocumentChunkORM, DocumentJobORM, DocumentORM
+from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.persistence.database import DatabaseManager
+from semantic_reasoning_agent.persistence.models import DocumentChunkORM, DocumentJobORM, DocumentORM
 from semantic_reasoning_agent.infrastructure.storage import DatabaseBlobStore
 from semantic_reasoning_agent.ports.object_store import ObjectStorePort
-from semantic_reasoning_agent.retrieval.parsers import PARSER_VERSION, UnsupportedDocumentTypeError, parse_document
+from semantic_reasoning_agent.infrastructure.parsers.local_parser import PARSER_VERSION, UnsupportedDocumentTypeError, parse_document
 from semantic_reasoning_agent.schemas.documents import (
     DocumentJobResponse,
     DocumentReprocessResponse,
@@ -19,7 +19,7 @@ from semantic_reasoning_agent.schemas.documents import (
     JobStatus,
 )
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
-from semantic_reasoning_agent.task_dispatcher import TaskDispatcher
+from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
 
 def utc_now() -> datetime:

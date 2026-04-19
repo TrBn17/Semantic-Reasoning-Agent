@@ -3,12 +3,12 @@ from uuid import uuid4
 
 from sqlalchemy import delete, select
 
-from semantic_reasoning_agent.config import Settings
-from semantic_reasoning_agent.db.database import DatabaseManager
-from semantic_reasoning_agent.db.models import DocumentChunkORM
+from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.persistence.database import DatabaseManager
+from semantic_reasoning_agent.persistence.models import DocumentChunkORM
 from semantic_reasoning_agent.infrastructure.vector import TokenVectorBackend
 from semantic_reasoning_agent.ports.vector_backend import VectorBackendPort
-from semantic_reasoning_agent.retrieval.models import IndexedChunk, ParsedDocument
+from semantic_reasoning_agent.infrastructure.parsers.models import IndexedChunk, ParsedDocument
 from semantic_reasoning_agent.schemas.documents import DocumentResponse
 from semantic_reasoning_agent.schemas.retrieval import Citation, RetrievalResult, RetrievalSearchResponse
 

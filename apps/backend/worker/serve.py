@@ -17,7 +17,7 @@ def main() -> int:
         "-m",
         "celery",
         "-A",
-        "semantic_reasoning_agent.celery_app.celery_app",
+        "semantic_reasoning_agent.workers.celery_app.celery_app",
         "worker",
         "--uid",
         "nobody",

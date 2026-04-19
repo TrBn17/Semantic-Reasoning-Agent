@@ -5,9 +5,9 @@ from uuid import uuid4
 from sqlalchemy import delete, desc, func, select
 from sqlalchemy.orm import selectinload
 
-from semantic_reasoning_agent.config import Settings
-from semantic_reasoning_agent.db.database import DatabaseManager
-from semantic_reasoning_agent.db.models import (
+from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.persistence.database import DatabaseManager
+from semantic_reasoning_agent.persistence.models import (
     DocumentChunkORM,
     DocumentORM,
     OntologyBuildORM,
@@ -20,8 +20,8 @@ from semantic_reasoning_agent.db.models import (
 )
 from semantic_reasoning_agent.domain.ontology.models import ExtractedEntity, ExtractedRelation
 from semantic_reasoning_agent.domain.ontology.pipeline_steps import ONTOLOGY_BUILD_STEP_NAMES
-from semantic_reasoning_agent.domain.ontology.ports import OntologyExtractorPort
-from semantic_reasoning_agent.graphdb.store import GraphStore, GraphStoreError, PublishedOntologySnapshot
+from semantic_reasoning_agent.ports.ontology_extractor import OntologyExtractorPort
+from semantic_reasoning_agent.ports.graph_store import GraphStore, GraphStoreError, PublishedOntologySnapshot
 from semantic_reasoning_agent.schemas.documents import DocumentStatus
 from semantic_reasoning_agent.schemas.ontology import (
     OntologyBuildCreateRequest,
@@ -39,7 +39,7 @@ from semantic_reasoning_agent.schemas.ontology import (
     OntologyStepStatus,
     OntologyVersionResponse,
 )
-from semantic_reasoning_agent.task_dispatcher import TaskDispatcher
+from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
 
 def utc_now() -> datetime:

@@ -1,4 +1,4 @@
-from semantic_reasoning_agent.llm.registry import AdapterRegistry
+from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.schemas.chat import (
     ChatReply,
     ConversationModelSelectionRequest,

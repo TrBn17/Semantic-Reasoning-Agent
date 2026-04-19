@@ -1,51 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from semantic_reasoning_agent.db.database import DatabaseManager
-from semantic_reasoning_agent.db.models import ProviderSecretORM
+from semantic_reasoning_agent.persistence.database import DatabaseManager
+from semantic_reasoning_agent.persistence.models import ProviderSecretORM
+from semantic_reasoning_agent.ports.secret_repo import SecretDescriptor, SecretRepository
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@dataclass(frozen=True)
-class SecretDescriptor:
-    configured: bool
-    source: str
-    masked_value: str = ""
-
-
-class SecretRepository:
-    def set_provider_secret(
-        self,
-        workspace_id: str,
-        provider: str,
-        field_key: str,
-        value: str,
-    ) -> None:
-        raise NotImplementedError
-
-    def get_provider_secret(self, workspace_id: str, provider: str, field_key: str) -> str | None:
-        raise NotImplementedError
-
-    def delete_provider_secret(self, workspace_id: str, provider: str, field_key: str) -> None:
-        raise NotImplementedError
-
-    def describe_provider_secret(
-        self,
-        workspace_id: str,
-        provider: str,
-        field_key: str,
-    ) -> SecretDescriptor:
-        raise NotImplementedError
-
-
-class DatabaseSecretRepository(SecretRepository):
+class DatabaseSecretRepository:
     def __init__(self, database_manager: DatabaseManager) -> None:
         self._database_manager = database_manager
 

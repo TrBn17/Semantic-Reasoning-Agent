@@ -3,9 +3,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from semantic_reasoning_agent.api.router import api_router
-from semantic_reasoning_agent.config import get_settings
-from semantic_reasoning_agent.db.database import get_database_manager
+from semantic_reasoning_agent.entrypoints.router import api_router
+from semantic_reasoning_agent.core.config import get_settings
+from semantic_reasoning_agent.persistence.database import get_database_manager
 from semantic_reasoning_agent.services.alembic_service import AlembicService
 
 

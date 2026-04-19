@@ -5,8 +5,8 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
-from semantic_reasoning_agent.config import Settings, get_settings
-from semantic_reasoning_agent.db.database import DatabaseManager
+from semantic_reasoning_agent.core.config import Settings, get_settings
+from semantic_reasoning_agent.persistence.database import DatabaseManager
 
 
 class AlembicService:

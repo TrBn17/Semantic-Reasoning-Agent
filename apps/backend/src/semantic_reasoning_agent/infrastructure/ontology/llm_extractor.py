@@ -6,8 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-from semantic_reasoning_agent.config import Settings
-from semantic_reasoning_agent.db.models import DocumentChunkORM
+from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.persistence.models import DocumentChunkORM
 from semantic_reasoning_agent.domain.ontology.models import (
     ExtractedEntity,
     ExtractedRelation,
