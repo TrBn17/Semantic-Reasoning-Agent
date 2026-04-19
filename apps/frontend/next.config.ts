@@ -14,6 +14,11 @@ const nextConfig: NextConfig = {
         destination: "/ask/:conversationId",
         permanent: true,
       },
+      {
+        source: "/retrieval",
+        destination: "/evidence",
+        permanent: true,
+      },
     ];
   },
 };
