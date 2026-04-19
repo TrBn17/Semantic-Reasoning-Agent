@@ -1,5 +1,3 @@
-from semantic_reasoning_agent.infrastructure.ontology.hybrid_extractor import HybridOntologyExtractor
-from semantic_reasoning_agent.infrastructure.ontology.llm_extractor import LLMStructuredExtractor
-from semantic_reasoning_agent.infrastructure.ontology.rule_extractor import RuleSeedExtractor
+from semantic_reasoning_agent.infrastructure.ontology.llm_extractor import OpenDomainLLMExtractor
 
-__all__ = ["HybridOntologyExtractor", "LLMStructuredExtractor", "RuleSeedExtractor"]
+__all__ = ["OpenDomainLLMExtractor"]

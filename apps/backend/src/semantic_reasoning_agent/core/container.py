@@ -7,12 +7,9 @@ from semantic_reasoning_agent.core.config import Settings, get_settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager, get_database_manager
 from semantic_reasoning_agent.infrastructure.graph import build_graph_store
 from semantic_reasoning_agent.ports.graph_store import GraphStore
-from semantic_reasoning_agent.infrastructure.ontology import (
-    HybridOntologyExtractor,
-    LLMStructuredExtractor,
-    RuleSeedExtractor,
-)
+from semantic_reasoning_agent.infrastructure.ontology import OpenDomainLLMExtractor
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry, build_adapter_registry
+from semantic_reasoning_agent.persistence.repositories.ontology_repo import OntologyRepository
 from semantic_reasoning_agent.services.agent_profile_service import AgentProfileService
 from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService
 from semantic_reasoning_agent.services.conversation_service import ConversationService
@@ -21,6 +18,7 @@ from semantic_reasoning_agent.services.model_config_service import ModelConfigSe
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 from semantic_reasoning_agent.services.secret_service import DatabaseSecretRepository, SecretService
+from semantic_reasoning_agent.tools.ontology.schema_registry import OntologySchemaRegistry
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
 
@@ -69,14 +67,17 @@ def get_app_container() -> AppContainer:
         database_manager,
         task_dispatcher,
     )
+    ontology_repository = OntologyRepository(database_manager)
+    schema_registry = OntologySchemaRegistry(ontology_repository)
     ontology_service = OntologyService(
         settings,
         database_manager,
         task_dispatcher,
         graph_store,
-        ontology_extractor=HybridOntologyExtractor(
-            llm_extractor=LLMStructuredExtractor(settings, model_config_service),
-            rule_extractor=RuleSeedExtractor(),
+        ontology_extractor=OpenDomainLLMExtractor(
+            settings=settings,
+            model_config_service=model_config_service,
+            schema_registry=schema_registry,
         ),
     )
     chat_stream_service = ChatStreamService(
