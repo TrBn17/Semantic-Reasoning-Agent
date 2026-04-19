@@ -29,11 +29,15 @@ import {
   listDocumentJobs,
   reprocessDocument,
 } from "@/lib/api/documents";
+import { listBuilds } from "@/lib/api/ontology";
 import { queryKeys } from "@/lib/query/keys";
+import { useWorkspaceStore } from "@/lib/state/workspace-store";
+import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
 
 export function DocumentDetail({ documentId }: { documentId: string }) {
   const queryClient = useQueryClient();
+  const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const { data: doc, isLoading } = useQuery({
     queryKey: queryKeys.documents.detail(documentId),
     queryFn: () => getDocument(documentId),
@@ -44,6 +48,14 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
     queryFn: () => listDocumentJobs(documentId),
     refetchInterval: 3000,
   });
+  const { data: allBuilds } = useQuery({
+    queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
+    queryFn: () => listBuilds(workspaceId ?? undefined),
+  });
+  const documentBuilds = (allBuilds ?? [])
+    .filter((b) => b.document_id === documentId)
+    .slice()
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   const mutation = useMutation({
     mutationFn: () => reprocessDocument(documentId),
     onSuccess: () => {
@@ -152,6 +164,41 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
               )}
             </TableBody>
           </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardTitle className="text-sm">Ontology builds</CardTitle>
+          <Link
+            href="/ontology/builds"
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            All builds
+          </Link>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {documentBuilds.length === 0 && (
+            <p className="px-2 py-3 text-xs text-muted-foreground">
+              No ontology builds for this document yet.
+            </p>
+          )}
+          {documentBuilds.map((b) => (
+            <Link
+              key={b.id}
+              href={`/ontology/builds/${b.id}`}
+              className="flex items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-accent"
+            >
+              <div className="min-w-0">
+                <div className="font-mono text-xs">{b.id.slice(0, 12)}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {b.entity_count} entities · {b.relation_count} relations ·{" "}
+                  {formatDateTime(b.updated_at)}
+                </div>
+              </div>
+              <Badge variant="outline">{b.status}</Badge>
+            </Link>
+          ))}
         </CardContent>
       </Card>
     </div>
