@@ -1,6 +1,6 @@
 # Frontend (Next.js)
 
-ChatGPT-style UI for the Semantic Reasoning Agent. Matches the FastAPI backend at Phase 3 baseline: chat + multi-LLM selector, document upload & retrieval, ontology builds + review + publish.
+Workspace control plane for the Semantic Reasoning Agent. Surfaces include ask (chat + retrieval), documents, evidence, ontology builds/review/publish, and published graph — mapped onto the FastAPI backend.
 
 ## Stack
 

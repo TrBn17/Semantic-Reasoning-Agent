@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useWorkspaceStore } from "@/lib/state/workspace-store";
 
 export interface ComposerSubmitPayload {
   content: string;
@@ -22,7 +21,8 @@ export function MessageComposer({
   onSubmit: (payload: ComposerSubmitPayload) => void;
   disabled?: boolean;
 }) {
-  const { useRetrieval, topK, setUseRetrieval, setTopK } = useWorkspaceStore();
+  const [useRetrieval, setUseRetrieval] = useState(false);
+  const [topK, setTopK] = useState(3);
   const [content, setContent] = useState("");
   const [documentIds, setDocumentIds] = useState("");
 

@@ -60,7 +60,7 @@ export function AppSidebar() {
         })}
       </nav>
       <div className="border-t p-3 text-xs text-muted-foreground">
-        Phase 3 baseline · chat + docs + ontology
+        Workspace control plane
       </div>
     </aside>
   );

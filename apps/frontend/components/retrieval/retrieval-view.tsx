@@ -98,7 +98,7 @@ export function RetrievalView() {
       {result && (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            {result.results.length} result{result.results.length === 1 ? "" : "s"} for "{result.query}"
+            {result.results.length} result{result.results.length === 1 ? "" : "s"} for &quot;{result.query}&quot;
           </p>
           {result.results.map((r) => (
             <Card key={r.chunk_id}>
