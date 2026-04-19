@@ -41,12 +41,25 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
   const { data: doc, isLoading } = useQuery({
     queryKey: queryKeys.documents.detail(documentId),
     queryFn: () => getDocument(documentId),
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (!status) return 5000;
+      return ["uploaded", "queued", "processing", "running"].includes(status)
+        ? 5000
+        : false;
+    },
   });
   const { data: jobs } = useQuery({
     queryKey: queryKeys.documents.jobs(documentId),
     queryFn: () => listDocumentJobs(documentId),
-    refetchInterval: 3000,
+    refetchInterval: (query) => {
+      const rows = query.state.data ?? [];
+      if (rows.length === 0) return 3000;
+      const hasActiveJob = rows.some((job) =>
+        ["pending", "queued", "running", "processing"].includes(job.status),
+      );
+      return hasActiveJob ? 3000 : false;
+    },
   });
   const { data: allBuilds } = useQuery({
     queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),

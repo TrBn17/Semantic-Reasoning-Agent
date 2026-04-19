@@ -1,7 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,8 +18,22 @@ import type {
   GraphEdgeViewModel,
   GraphNodeViewModel,
 } from "@/src/entities/ontology/types";
-import { GraphCanvas } from "@/components/graph/graph-canvas";
 import { formatDateTime } from "@/lib/utils";
+
+const GraphCanvas = dynamic(
+  () =>
+    import("@/components/graph/graph-canvas").then((m) => ({
+      default: m.GraphCanvas,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full min-h-[400px] w-full p-6">
+        <Skeleton className="h-full w-full" />
+      </div>
+    ),
+  },
+);
 
 type Selection =
   | { kind: "node"; node: GraphNodeViewModel }
@@ -33,9 +48,35 @@ export function GraphView() {
   });
   const [selection, setSelection] = useState<Selection>(null);
 
-  const nodes = (data?.entities ?? []).map(entityToNode);
-  const edges = (data?.relations ?? []).map(relationToEdge);
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const nodes = useMemo(() => (data?.entities ?? []).map(entityToNode), [data?.entities]);
+  const edges = useMemo(() => (data?.relations ?? []).map(relationToEdge), [data?.relations]);
+  const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+
+  const handleSelect = useCallback(
+    (sel: { kind: "node"; node: GraphNodeViewModel } | { kind: "edge"; edge: GraphEdgeViewModel } | null) => {
+      if (!sel) {
+        setSelection(null);
+        return;
+      }
+      if (sel.kind === "node") {
+        setSelection({ kind: "node", node: sel.node });
+        track("graph_node_opened", { entity_id: sel.node.id });
+        return;
+      }
+
+      const source = nodeMap.get(sel.edge.sourceId);
+      const target = nodeMap.get(sel.edge.targetId);
+      if (source && target) {
+        setSelection({
+          kind: "edge",
+          edge: sel.edge,
+          source,
+          target,
+        });
+      }
+    },
+    [nodeMap],
+  );
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -84,27 +125,7 @@ export function GraphView() {
             <GraphCanvas
               nodes={nodes}
               edges={edges}
-              onSelect={(sel) => {
-                if (!sel) {
-                  setSelection(null);
-                  return;
-                }
-                if (sel.kind === "node") {
-                  setSelection({ kind: "node", node: sel.node });
-                  track("graph_node_opened", { entity_id: sel.node.id });
-                } else {
-                  const source = nodeMap.get(sel.edge.sourceId);
-                  const target = nodeMap.get(sel.edge.targetId);
-                  if (source && target) {
-                    setSelection({
-                      kind: "edge",
-                      edge: sel.edge,
-                      source,
-                      target,
-                    });
-                  }
-                }
-              }}
+              onSelect={handleSelect}
             />
           )}
         </div>

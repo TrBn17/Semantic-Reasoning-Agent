@@ -1,9 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import { toast } from "sonner";
-import { CitationsDrawer } from "@/components/chat/citations-drawer";
 import { ChatRuntimeControls } from "@/components/chat/chat-runtime-controls";
 import {
   MessageComposer,
@@ -17,6 +17,14 @@ import { listModels } from "@/lib/api/models";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 import type { Citation } from "@/lib/api/types";
+
+const CitationsDrawer = dynamic(
+  () =>
+    import("@/components/chat/citations-drawer").then((m) => ({
+      default: m.CitationsDrawer,
+    })),
+  { ssr: false, loading: () => null },
+);
 
 export function ChatView({ conversationId }: { conversationId: string }) {
   const queryClient = useQueryClient();
