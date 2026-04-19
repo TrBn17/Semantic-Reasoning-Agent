@@ -19,6 +19,7 @@ from semantic_reasoning_agent.persistence.models import (
     OntologyVersionORM,
 )
 from semantic_reasoning_agent.domain.ontology.models import ExtractedEntity, ExtractedRelation
+from semantic_reasoning_agent.domain.ontology.models import OntologySourceChunk
 from semantic_reasoning_agent.domain.ontology.pipeline_steps import ONTOLOGY_BUILD_STEP_NAMES
 from semantic_reasoning_agent.ports.ontology_extractor import OntologyExtractorPort
 from semantic_reasoning_agent.ports.graph_store import GraphStore, GraphStoreError, PublishedOntologySnapshot
@@ -382,7 +383,7 @@ class OntologyService:
                 published_version_id=build.published_version_id,
             )
 
-    def _get_document_chunks(self, document_id: str) -> list[DocumentChunkORM]:
+    def _get_document_chunks(self, document_id: str) -> list[OntologySourceChunk]:
         with self._database_manager.session() as session:
             chunks = session.scalars(
                 select(DocumentChunkORM)
@@ -390,27 +391,9 @@ class OntologyService:
                 .order_by(DocumentChunkORM.chunk_index)
             ).all()
             return [
-                DocumentChunkORM(
+                OntologySourceChunk(
                     chunk_id=chunk.chunk_id,
-                    document_id=chunk.document_id,
-                    workspace_id=chunk.workspace_id,
-                    document_title=chunk.document_title,
-                    document_type=chunk.document_type,
                     text=chunk.text,
-                    chunk_index=chunk.chunk_index,
-                    source_url=chunk.source_url,
-                    parser_version=chunk.parser_version,
-                    created_at=chunk.created_at,
-                    embedding=chunk.embedding,
-                    page_number=chunk.page_number,
-                    section_title=chunk.section_title,
-                    heading_path=chunk.heading_path,
-                    table_index=chunk.table_index,
-                    sheet_name=chunk.sheet_name,
-                    detected_table_id=chunk.detected_table_id,
-                    row_start=chunk.row_start,
-                    row_end=chunk.row_end,
-                    column_headers=chunk.column_headers,
                 )
                 for chunk in chunks
             ]

@@ -33,7 +33,7 @@ lib/
 
 1. Start backend + infra (from repo root):
    ```powershell
-   docker compose -f infrastructure/docker/docker-compose.yml up -d postgres redis neo4j
+   docker compose up -d postgres redis neo4j
    .venv\Scripts\python.exe apps/backend/serve.py
    .venv\Scripts\python.exe apps/backend/worker/serve.py
    ```

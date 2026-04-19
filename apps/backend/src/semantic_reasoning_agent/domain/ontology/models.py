@@ -35,3 +35,9 @@ class ExtractionResult:
     domain: str
     entities: list[ExtractedEntity]
     relations: list[ExtractedRelation]
+
+
+@dataclass(slots=True)
+class OntologySourceChunk:
+    chunk_id: str
+    text: str

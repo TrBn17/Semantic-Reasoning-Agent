@@ -17,7 +17,6 @@ export function CrossBuildReview() {
   const { data: builds, isLoading } = useQuery({
     queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
     queryFn: () => listBuilds(workspaceId ?? undefined),
-    refetchInterval: 5000,
   });
 
   const pending = (builds ?? []).filter(

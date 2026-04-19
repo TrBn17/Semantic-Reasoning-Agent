@@ -3,7 +3,7 @@
 ## Infrastructure
 
 ```powershell
-docker compose -f infrastructure/docker/docker-compose.yml up -d postgres redis neo4j
+docker compose up -d postgres redis neo4j
 ```
 
 ## Python setup

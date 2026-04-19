@@ -1,4 +1,5 @@
 from semantic_reasoning_agent.domain.ontology.models import (
+    OntologySourceChunk,
     ExtractedEntity,
     ExtractedRelation,
     ExtractionResult,
@@ -10,6 +11,7 @@ __all__ = [
     "ExtractedEntity",
     "ExtractedRelation",
     "ExtractionResult",
+    "OntologySourceChunk",
     "OntologyExtractorPort",
     "ONTOLOGY_BUILD_STEP_NAMES",
 ]

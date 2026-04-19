@@ -1,0 +1,15 @@
+# Keep Docker build context clean and deterministic
+.git
+.venv
+.pytest_cache
+__pycache__/
+*.pyc
+
+# Frontend local artifacts that must not be copied from host
+apps/frontend/node_modules/
+apps/frontend/.next/
+apps/frontend/.turbo/
+
+# Backend virtual envs/cache if created under app dirs
+apps/backend/.venv/
+apps/backend/.pytest_cache/

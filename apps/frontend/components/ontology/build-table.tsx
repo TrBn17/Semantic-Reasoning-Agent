@@ -22,7 +22,6 @@ export function BuildTable({ limit }: { limit?: number }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
     queryFn: () => listBuilds(workspaceId ?? undefined),
-    refetchInterval: 5000,
   });
 
   if (isLoading) return <Skeleton className="h-64 w-full" />;

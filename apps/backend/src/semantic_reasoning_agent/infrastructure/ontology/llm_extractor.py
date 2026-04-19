@@ -11,12 +11,12 @@ from semantic_reasoning_agent.domain.ontology.models import (
     ExtractedEntity,
     ExtractedRelation,
     ExtractionResult,
+    OntologySourceChunk,
 )
 from semantic_reasoning_agent.infrastructure.ontology.llm_prompts import (
     build_open_domain_prompt,
 )
-from semantic_reasoning_agent.persistence.models import DocumentChunkORM
-from semantic_reasoning_agent.services.model_config_service import ModelConfigService
+from semantic_reasoning_agent.ports.task_model_resolver import TaskModelResolverPort
 from semantic_reasoning_agent.tools.ontology.schema_registry import OntologySchemaRegistry
 
 
@@ -58,14 +58,14 @@ class OpenDomainLLMExtractor:
     def __init__(
         self,
         settings: Settings,
-        model_config_service: ModelConfigService,
+        model_config_service: TaskModelResolverPort,
         schema_registry: OntologySchemaRegistry,
     ) -> None:
         self._settings = settings
         self._model_config_service = model_config_service
         self._schema_registry = schema_registry
 
-    def classify_document_domain(self, chunks: list[DocumentChunkORM]) -> str:
+    def classify_document_domain(self, chunks: list[OntologySourceChunk]) -> str:
         """Domain is emitted by the LLM in the same call as entities/relations.
 
         Step kept as a pass-through so the orchestrator can continue to
@@ -77,7 +77,7 @@ class OpenDomainLLMExtractor:
 
     def extract_ontology_candidates(
         self,
-        chunks: list[DocumentChunkORM],
+        chunks: list[OntologySourceChunk],
         workspace_id: str | None = None,
     ) -> ExtractionResult:
         if not self._settings.ontology_llm_enabled:
@@ -145,7 +145,7 @@ class OpenDomainLLMExtractor:
         self,
         extraction: _LLMExtraction,
         *,
-        chunks: Iterable[DocumentChunkORM],
+        chunks: Iterable[OntologySourceChunk],
         provider: str,
         model: str,
     ) -> ExtractionResult:

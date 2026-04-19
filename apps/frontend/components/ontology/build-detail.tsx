@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useState } from "react";
 import {
   BuildStatusBadge,
   StepStatusBadge,
@@ -33,10 +34,14 @@ import { queryKeys } from "@/lib/query/keys";
 import { formatDateTime } from "@/lib/utils";
 
 export function BuildDetail({ buildId }: { buildId: string }) {
+  const [activeTab, setActiveTab] = useState("entities");
   const { data: build, isLoading } = useQuery({
     queryKey: queryKeys.ontology.build(buildId),
     queryFn: () => getBuild(buildId),
-    refetchInterval: 4000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "pending" || status === "running" ? 4000 : false;
+    },
   });
 
   if (isLoading) return <Skeleton className="h-64 w-full" />;
@@ -111,17 +116,17 @@ export function BuildDetail({ buildId }: { buildId: string }) {
         </Card>
       </div>
 
-      <Tabs defaultValue="entities">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="entities">Entities</TabsTrigger>
           <TabsTrigger value="relations">Relations</TabsTrigger>
           <TabsTrigger value="steps">Steps</TabsTrigger>
         </TabsList>
         <TabsContent value="entities" className="space-y-3">
-          <CandidateEntitiesTable buildId={build.id} />
+          {activeTab === "entities" && <CandidateEntitiesTable buildId={build.id} />}
         </TabsContent>
         <TabsContent value="relations" className="space-y-3">
-          <CandidateRelationsTable buildId={build.id} />
+          {activeTab === "relations" && <CandidateRelationsTable buildId={build.id} />}
         </TabsContent>
         <TabsContent value="steps">
           <div className="rounded-md border">

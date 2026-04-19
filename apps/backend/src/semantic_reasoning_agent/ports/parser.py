@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from semantic_reasoning_agent.infrastructure.parsers.models import ParsedDocument
+from semantic_reasoning_agent.domain.contracts import ParsedDocument
 
 
 class ParserPort(Protocol):

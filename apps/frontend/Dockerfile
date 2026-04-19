@@ -1,17 +1,14 @@
 FROM node:20-alpine
 
-WORKDIR /workspace
+WORKDIR /app
 
-# Copy root level package files (nếu có monorepo)
-COPY package*.json ./
-
-# Copy frontend package files
-COPY apps/frontend/package*.json ./apps/frontend/
+# Copy only frontend package files
+COPY apps/frontend/package*.json ./
 
 # Install dependencies
-RUN cd apps/frontend && npm install
+RUN npm install
 
-# Copy entire codebase
-COPY . .
+# Copy frontend source code  
+COPY apps/frontend/ ./
 
 # Dev mode sẽ chạy từ docker-compose command

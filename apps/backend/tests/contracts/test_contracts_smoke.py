@@ -16,6 +16,7 @@ from semantic_reasoning_agent.domain.errors import (
     ToolError,
     WorkflowError,
 )
+from semantic_reasoning_agent.domain.ontology.models import OntologySourceChunk
 
 
 def test_tool_envelope_construct() -> None:
@@ -76,3 +77,9 @@ def test_ontology_context_construct() -> None:
 def test_errors_inherit_domain_error() -> None:
     for cls in (ToolError, ExtractionError, WorkflowError):
         assert issubclass(cls, DomainError)
+
+
+def test_ontology_source_chunk_construct() -> None:
+    chunk = OntologySourceChunk(chunk_id="chunk-1", text="domain text")
+    assert chunk.chunk_id == "chunk-1"
+    assert chunk.text == "domain text"

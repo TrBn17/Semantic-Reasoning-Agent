@@ -39,7 +39,9 @@ export function AppSidebar() {
           const active =
             item.href === "/"
               ? pathname === "/"
-              : pathname === item.href || pathname.startsWith(`${item.href}/`);
+              : item.href === "/ontology"
+                ? pathname === "/ontology" || pathname.startsWith("/ontology/review")
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
               key={item.href}
