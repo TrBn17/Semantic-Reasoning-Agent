@@ -10,6 +10,15 @@ export const metadata: Metadata = {
   title: "Semantic Reasoning Agent",
   description:
     "ChatGPT-style workspace for multi-LLM chat, RAG, and ontology graph review.",
+  icons: {
+    icon: [
+      { url: "/logo-badge.svg", type: "image/svg+xml" },
+      { url: "/logo.svg", type: "image/svg+xml" },
+    ],
+    shortcut: ["/logo-badge.svg"],
+    apple: [{ url: "/logo-badge.svg" }],
+  },
+  themeColor: "#111827",
 };
 
 export default function AppLayout({ children }: { children: ReactNode }) {

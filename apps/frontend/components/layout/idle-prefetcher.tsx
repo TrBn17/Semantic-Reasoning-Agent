@@ -20,7 +20,7 @@ export function IdlePrefetcher() {
   useEffect(() => {
     const routes = [...STATIC_ROUTES];
     if (caps.ontologyAvailable) routes.push("/ontology/builds");
-    if (caps.settingsAvailable) routes.push("/agents");
+    if (caps.settingsAvailable) routes.push("/settings");
 
     const w = window as IdleWindow;
 

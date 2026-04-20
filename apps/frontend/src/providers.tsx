@@ -1,8 +1,9 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "@/components/ui/sonner";
+import { useLanguageStore } from "@/src/shared/i18n/use-language";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(
@@ -17,6 +18,11 @@ export function Providers({ children }: { children: ReactNode }) {
         },
       }),
   );
+  const language = useLanguageStore((state) => state.language);
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   return (
     <QueryClientProvider client={client}>

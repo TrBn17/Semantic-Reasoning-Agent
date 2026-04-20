@@ -60,6 +60,9 @@ class Neo4jGraphStore(GraphStore):
     def get_graph(self, workspace_id: str) -> OntologyGraphResponse:
         try:
             with self._driver.session(database=self._database) as session:
+                if not self._label_exists(session, "OntologyVersion"):
+                    return OntologyGraphResponse(workspace_id=workspace_id)
+
                 version_record = session.run(
                     """
                     MATCH (version:OntologyVersion)
@@ -119,6 +122,18 @@ class Neo4jGraphStore(GraphStore):
                 for relation, source_entity_id, target_entity_id in relation_rows
             ],
         )
+
+    @staticmethod
+    def _label_exists(session, label: str) -> bool:
+        record = session.run(
+            """
+            CALL db.labels() YIELD label AS existing_label
+            WITH collect(existing_label) AS labels
+            RETURN $label IN labels AS exists
+            """,
+            label=label,
+        ).single()
+        return bool(record and record["exists"])
 
 
 def _replace_version_snapshot(tx, parameters: dict) -> None:

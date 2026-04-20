@@ -1,10 +1,10 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Binary,
-  Bot,
   FileSearch,
   FileText,
   Home,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCapabilities } from "@/src/shared/capabilities/useCapabilities";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 type NavItem = {
   href: string;
@@ -118,12 +119,6 @@ function buildGroups(caps: ReturnType<typeof useCapabilities>): NavGroup[] {
           icon: Settings,
           available: caps.settingsAvailable,
         },
-        {
-          href: "/agents",
-          label: "Agent profiles",
-          icon: Bot,
-          available: caps.settingsAvailable,
-        },
       ],
     },
   ];
@@ -133,6 +128,7 @@ export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const caps = useCapabilities();
+  const { t } = useI18n();
   const groups = buildGroups(caps).map((g) => ({
     ...g,
     items: g.items.filter((i) => i.available),
@@ -142,8 +138,15 @@ export function AppSidebar() {
     <aside className="flex w-60 shrink-0 flex-col border-r bg-muted/30">
       <div className="flex h-14 items-center border-b px-4">
         <Link href="/" className="flex items-center gap-2 font-semibold">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Network className="h-4 w-4" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-md border bg-slate-100 shadow-sm dark:bg-slate-800/80">
+            <Image
+              src="/logo.svg"
+              alt="Semantic Agent logo"
+              width={16}
+              height={16}
+              className="object-contain"
+              priority
+            />
           </div>
           <span className="truncate">Semantic Agent</span>
         </Link>
@@ -154,7 +157,7 @@ export function AppSidebar() {
           .map((group) => (
             <div key={group.label} className="space-y-1">
               <div className="px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {group.label}
+                {translateGroupLabel(group.label, t)}
               </div>
               {group.items.map((item) => {
                 const Icon = item.icon;
@@ -174,7 +177,7 @@ export function AppSidebar() {
                     )}
                   >
                     <Icon className="h-4 w-4" />
-                    {item.label}
+                    {translateNavLabel(item.label, t)}
                   </Link>
                 );
               })}
@@ -182,10 +185,38 @@ export function AppSidebar() {
           ))}
       </nav>
       <div className="border-t p-3 text-xs text-muted-foreground">
-        Workspace control plane
+        {t.workspaceControlPlane}
       </div>
     </aside>
   );
+}
+
+function translateGroupLabel(label: string, t: ReturnType<typeof useI18n>["t"]) {
+  const map: Record<string, string> = {
+    Work: t.nav.work,
+    Knowledge: t.nav.knowledge,
+    Automation: t.nav.automation,
+    Outputs: t.nav.outputs,
+    Admin: t.nav.admin,
+  };
+  return map[label] ?? label;
+}
+
+function translateNavLabel(label: string, t: ReturnType<typeof useI18n>["t"]) {
+  const map: Record<string, string> = {
+    Home: t.nav.home,
+    Ask: t.nav.ask,
+    Documents: t.nav.documents,
+    Evidence: t.nav.evidence,
+    Ontology: t.nav.ontology,
+    Graph: t.nav.graph,
+    Workflows: t.nav.workflows,
+    Tools: t.nav.tools,
+    Connectors: t.nav.connectors,
+    Artifacts: t.nav.artifacts,
+    Settings: t.nav.settings,
+  };
+  return map[label] ?? label;
 }
 
 function isActive(pathname: string, href: string): boolean {

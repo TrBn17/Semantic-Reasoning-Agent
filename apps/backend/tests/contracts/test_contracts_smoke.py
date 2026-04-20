@@ -5,10 +5,15 @@ from semantic_reasoning_agent.domain.contracts import (
     CitationAnchor,
     Evidence,
     OntologyContext,
+    OntologyContextRef,
     ParsedChunk,
     ParsedDocument,
+    Provenance,
+    ToolConstraints,
     ToolEnvelope,
+    ToolMeta,
     ToolResult,
+    ToolSpec,
 )
 from semantic_reasoning_agent.domain.errors import (
     DomainError,
@@ -20,32 +25,60 @@ from semantic_reasoning_agent.domain.ontology.models import OntologySourceChunk
 
 
 def test_tool_envelope_construct() -> None:
-    env = ToolEnvelope(tool_id="ontology.extract_entities", inputs={"chunks": []})
-    assert env.tool_id == "ontology.extract_entities"
-    assert env.timeout_s == 60.0
+    env = ToolEnvelope(
+        call_id=uuid4(),
+        tool_name="ontology.extract_entities",
+        workspace_id="workspace-demo",
+        task_id=str(uuid4()),
+        task_type="chat.retrieve",
+        arguments={"chunks": []},
+    )
+    assert env.tool_name == "ontology.extract_entities"
+    assert env.constraints.timeout_ms == 15000
+    assert env.ontology_context.entity_hints == ()
 
 
 def test_tool_result_construct() -> None:
-    res = ToolResult(tool_id="x", status="ok", outputs={"entities": 0})
-    assert res.status == "ok"
+    now = datetime.now(timezone.utc)
+    call_id = uuid4()
+    res = ToolResult(
+        call_id=call_id,
+        tool_name="x",
+        status="success",
+        started_at=now,
+        finished_at=now,
+        latency_ms=0,
+    )
+    assert res.status == "success"
     assert res.error_code is None
+    assert res.evidence == ()
+    assert res.meta.provider is None
 
 
 def test_citation_and_evidence_construct() -> None:
-    doc_id = uuid4()
-    anchor = CitationAnchor(document_id=doc_id, page=3)
+    workspace_id = "workspace-demo"
+    doc_id = str(uuid4())
+    anchor = CitationAnchor(anchor_type="page", label="page 3", locator="3")
+    provenance = Provenance(
+        workspace_id=workspace_id,
+        captured_at=datetime.now(timezone.utc),
+        tool_call_id=uuid4(),
+    )
     ev = Evidence(
         evidence_id=uuid4(),
-        kind="extraction",
-        produced_by_tool="ontology.extract_entities",
-        workflow_run_id=None,
-        anchors=(anchor,),
-        payload={"name": "Loan Product"},
-        created_at=datetime.now(timezone.utc),
-        confidence=0.82,
+        source_type="internal_chunk",
+        title="Loan Product Handbook",
+        content="Term loans must be disbursed within 10 business days.",
+        citation_anchor=anchor,
+        provenance=provenance,
+        document_id=doc_id,
+        page=3,
+        score=0.82,
     )
-    assert ev.anchors[0].document_id == doc_id
-    assert ev.kind == "extraction"
+    assert ev.citation_anchor.anchor_type == "page"
+    assert ev.source_type == "internal_chunk"
+    assert ev.document_id == doc_id
+    assert ev.provenance.workspace_id == workspace_id
 
 
 def test_parsed_document_construct() -> None:
@@ -72,6 +105,54 @@ def test_ontology_context_construct() -> None:
     )
     assert "loan_product" in ctx.entity_types
     assert ctx.is_frozen is False
+
+
+def test_ontology_context_ref_defaults() -> None:
+    ref = OntologyContextRef()
+    assert ref.domain is None
+    assert ref.entity_hints == ()
+    assert ref.relation_hints == ()
+    assert ref.normalization_rules == ()
+
+
+def test_tool_constraints_defaults() -> None:
+    c = ToolConstraints()
+    assert c.web_enabled is False
+    assert c.freshness_required is False
+    assert c.max_results == 10
+    assert c.timeout_ms == 15000
+
+
+def test_tool_spec_serialization() -> None:
+    schema: dict = {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    }
+    spec = ToolSpec(
+        tool_name="retrieval.internal",
+        tool_family="retrieval",
+        tool_type="internal_service",
+        version="1.0.0",
+        description="Internal RAG over workspace chunks.",
+        input_schema=schema,
+        input_schema_ref="srag:retrieval.internal.in.v1",
+        capabilities=("citation", "score"),
+    )
+    anthropic = spec.to_anthropic_tool()
+    assert anthropic["name"] == "retrieval.internal"
+    assert anthropic["input_schema"]["required"] == ["query"]
+
+    openai = spec.to_openai_tool()
+    assert openai["type"] == "function"
+    assert openai["function"]["name"] == "retrieval.internal"
+    assert openai["function"]["parameters"]["required"] == ["query"]
+
+
+def test_tool_meta_default() -> None:
+    meta = ToolMeta()
+    assert meta.provider is None
+    assert meta.trace_id is None
 
 
 def test_errors_inherit_domain_error() -> None:

@@ -16,8 +16,11 @@ from semantic_reasoning_agent.services.conversation_service import ConversationS
 from semantic_reasoning_agent.services.document_service import DocumentService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 from semantic_reasoning_agent.services.ontology_service import OntologyService
+from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 from semantic_reasoning_agent.services.secret_service import DatabaseSecretRepository, SecretService
+from semantic_reasoning_agent.services.tool_registry import ToolRegistry, build_tool_registry
+from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
 from semantic_reasoning_agent.tools.ontology.schema_registry import OntologySchemaRegistry
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
@@ -29,6 +32,7 @@ class AppContainer:
     secret_service: SecretService
     agent_profile_service: AgentProfileService
     model_config_service: ModelConfigService
+    provider_models_service: ProviderModelsService
     adapter_registry: AdapterRegistry
     graph_store: GraphStore
     retrieval_service: RetrievalService
@@ -37,6 +41,8 @@ class AppContainer:
     document_service: DocumentService
     ontology_service: OntologyService
     chat_stream_service: ChatStreamService
+    tool_registry: ToolRegistry
+    tool_runtime: ToolRuntime
 
 
 @lru_cache
@@ -46,10 +52,12 @@ def get_app_container() -> AppContainer:
     adapter_registry = build_adapter_registry()
     secret_service = SecretService(DatabaseSecretRepository(database_manager))
     agent_profile_service = AgentProfileService(database_manager, settings)
+    provider_models_service = ProviderModelsService(settings)
     model_config_service = ModelConfigService(
         database_manager=database_manager,
         adapter_registry=adapter_registry,
         secret_service=secret_service,
+        provider_models_service=provider_models_service,
         settings=settings,
     )
     graph_store = build_graph_store(settings)
@@ -86,12 +94,18 @@ def get_app_container() -> AppContainer:
         adapter_registry=adapter_registry,
         retrieval_service=retrieval_service,
     )
+    tool_registry = build_tool_registry(
+        retrieval_service=retrieval_service,
+        ontology_service=ontology_service,
+    )
+    tool_runtime = ToolRuntime(tool_registry)
     return AppContainer(
         settings=settings,
         database_manager=database_manager,
         secret_service=secret_service,
         agent_profile_service=agent_profile_service,
         model_config_service=model_config_service,
+        provider_models_service=provider_models_service,
         adapter_registry=adapter_registry,
         graph_store=graph_store,
         retrieval_service=retrieval_service,
@@ -100,4 +114,6 @@ def get_app_container() -> AppContainer:
         document_service=document_service,
         ontology_service=ontology_service,
         chat_stream_service=chat_stream_service,
+        tool_registry=tool_registry,
+        tool_runtime=tool_runtime,
     )

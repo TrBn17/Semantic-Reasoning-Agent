@@ -3,7 +3,17 @@
     "allow": [
       "Bash(xargs grep *)",
       "Bash(xargs wc *)",
-      "Bash(xargs -I {} bash -c 'echo \"=== {} ===\" && head -15 {}')"
+      "Bash(xargs -I {} bash -c 'echo \"=== {} ===\" && head -15 {}')",
+      "Bash(git checkout *)",
+      "Bash(git rm *)",
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git mv *)",
+      "Bash(npm install *)",
+      "Bash(python -c \"from apps.backend.src.semantic_reasoning_agent.services.provider_models_service import ProviderModelsService, ProviderModel; print\\('ok'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(grep -E \"\\\\.py$\")"
     ]
   }
 }

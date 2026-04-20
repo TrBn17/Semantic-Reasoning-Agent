@@ -13,8 +13,8 @@ SRC_DIR = BASE_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from semantic_reasoning_agent.config import get_settings
-from semantic_reasoning_agent.db.models import Base
+from semantic_reasoning_agent.core.config import get_settings
+from semantic_reasoning_agent.persistence.models import Base
 
 config = context.config
 

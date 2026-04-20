@@ -26,7 +26,7 @@ const DEFAULT_CAPABILITIES: Capabilities = {
 
   tasksAvailable: false,
   workflowsAvailable: false,
-  toolsAvailable: false,
+  toolsAvailable: true,
   artifactsAvailable: false,
   connectorsAvailable: false,
 

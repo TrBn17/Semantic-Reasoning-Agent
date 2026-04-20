@@ -27,6 +27,7 @@ from semantic_reasoning_agent.schemas.agents import (
     TaskType,
 )
 from semantic_reasoning_agent.services.secret_service import SecretService
+from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService, ProviderModel
 
 
 def utc_now() -> datetime:
@@ -124,6 +125,14 @@ PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
                 help_text="API key để gọi model Anthropic.",
                 secret=True,
             ),
+            ProviderFieldSpec(
+                key="ANTHROPIC_BASE_URL",
+                label="Anthropic Base URL",
+                placeholder="https://api.anthropic.com",
+                help_text="Endpoint tùy chỉnh cho Anthropic-compatible gateway (optional).",
+                required=False,
+                secret=False,
+            ),
         ),
     ),
     ProviderSpec(
@@ -156,58 +165,7 @@ PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ),
 )
 
-MODEL_SPECS: tuple[ModelSpec, ...] = (
-    ModelSpec(
-        provider="echo",
-        model="local-echo",
-        label="Local Echo",
-        description="Echo adapter nội bộ để kiểm tra end-to-end flow khi chưa nối LLM thật.",
-        context_window=4_000,
-        supports_streaming=False,
-        supports_structured_output=False,
-        recommended_for=("chat",),
-    ),
-    ModelSpec(
-        provider="openai",
-        model="gpt-5-mini",
-        label="GPT-5 Mini",
-        description="Model cân bằng giữa latency, chi phí và chất lượng cho chat, retrieval và narrative.",
-        context_window=128_000,
-        supports_streaming=True,
-        supports_structured_output=True,
-        recommended_for=("chat", "retrieval", "narrative_generation", "dashboard_generation"),
-    ),
-    ModelSpec(
-        provider="anthropic",
-        model="claude-sonnet-4-5",
-        label="Claude Sonnet 4.5",
-        description="Model mạnh cho reasoning dài ngữ cảnh và structured extraction.",
-        context_window=200_000,
-        supports_streaming=True,
-        supports_structured_output=True,
-        recommended_for=("chat", "ontology_extraction", "narrative_generation"),
-    ),
-    ModelSpec(
-        provider="gemini",
-        model="gemini-2.5-flash",
-        label="Gemini 2.5 Flash",
-        description="Model nhanh cho tác vụ responsive và khối lượng lớn.",
-        context_window=1_000_000,
-        supports_streaming=True,
-        supports_structured_output=True,
-        recommended_for=("chat", "retrieval", "dashboard_generation"),
-    ),
-    ModelSpec(
-        provider="ollama",
-        model="llama3.1",
-        label="Llama 3.1",
-        description="Model local/private để giữ dữ liệu trong hạ tầng nội bộ.",
-        context_window=128_000,
-        supports_streaming=True,
-        supports_structured_output=False,
-        recommended_for=("chat", "retrieval"),
-    ),
-)
+MODEL_SPECS: tuple[ModelSpec, ...] = ()  # Legacy: now using ProviderModelsService for dynamic models
 
 
 class ModelConfigService:
@@ -216,28 +174,121 @@ class ModelConfigService:
         database_manager: DatabaseManager,
         adapter_registry: AdapterRegistry,
         secret_service: SecretService,
+        provider_models_service: ProviderModelsService,
         settings: Settings | None = None,
     ) -> None:
         self._settings = settings or get_settings()
         self._database_manager = database_manager
         self._adapter_registry = adapter_registry
         self._secret_service = secret_service
+        self._provider_models_service = provider_models_service
 
-    def list_models(self, workspace_id: str | None = None) -> list[ModelOption]:
+    async def list_models(self, workspace_id: str | None = None) -> list[ModelOption]:
+        """
+        List all available models from configured providers.
+        Fetches models dynamically from provider APIs instead of hardcoded list.
+        """
         workspace_id = workspace_id or self._settings.default_workspace_id
         provider_configs = self._load_provider_configs(workspace_id)
-        return [self._build_model_option(spec, provider_configs, workspace_id) for spec in MODEL_SPECS]
+        credentials: dict[str, dict[str, str | None]] = {
+            "openai": {
+                "api_key": self._resolve_provider_field_value(
+                    workspace_id,
+                    "openai",
+                    "OPENAI_API_KEY",
+                    provider_configs,
+                    secret=True,
+                ),
+            },
+            "anthropic": {
+                "api_key": self._resolve_provider_field_value(
+                    workspace_id,
+                    "anthropic",
+                    "ANTHROPIC_API_KEY",
+                    provider_configs,
+                    secret=True,
+                ),
+                "base_url": self._resolve_provider_field_value(
+                    workspace_id,
+                    "anthropic",
+                    "ANTHROPIC_BASE_URL",
+                    provider_configs,
+                    secret=False,
+                ),
+            },
+            "gemini": {
+                "api_key": self._resolve_provider_field_value(
+                    workspace_id,
+                    "gemini",
+                    "GOOGLE_API_KEY",
+                    provider_configs,
+                    secret=True,
+                ),
+            },
+            "ollama": {
+                "base_url": self._resolve_provider_field_value(
+                    workspace_id,
+                    "ollama",
+                    "OLLAMA_BASE_URL",
+                    provider_configs,
+                    secret=False,
+                ),
+            },
+        }
+        
+        # Fetch models from all providers
+        all_models: list[ModelOption] = []
+        provider_models = await self._provider_models_service.get_all_provider_models(credentials)
+        
+        for provider, provider_models_list in provider_models.items():
+            provider_spec = next((spec for spec in PROVIDER_SPECS if spec.provider == provider), None)
+            if not provider_spec:
+                continue
+                
+            for model in provider_models_list:
+                model_option = self._provider_model_to_option(
+                    provider,
+                    model,
+                    provider_spec,
+                    provider_configs,
+                    workspace_id,
+                )
+                all_models.append(model_option)
+        
+        return sorted(all_models, key=lambda x: (x.provider, x.model))
+
+    def _resolve_provider_field_value(
+        self,
+        workspace_id: str,
+        provider: str,
+        field_key: str,
+        provider_configs: dict[str, ProviderConfigORM],
+        *,
+        secret: bool,
+    ) -> str | None:
+        if secret:
+            secret_value = self._secret_service.get_provider_secret(workspace_id, provider, field_key)
+            if secret_value:
+                return secret_value
+            return self._runtime_env_value(field_key)
+
+        provider_config = provider_configs.get(provider)
+        if provider_config is not None:
+            configured_value = (provider_config.env_values or {}).get(field_key)
+            if configured_value:
+                return configured_value
+        return self._runtime_env_value(field_key)
 
     def list_tasks(self) -> list[TaskDefinition]:
         return list(TASK_DEFINITIONS)
 
-    def get_catalog(self, workspace_id: str | None = None) -> list[ModelOption]:
-        return self.list_models(workspace_id)
+    async def get_catalog(self, workspace_id: str | None = None) -> list[ModelOption]:
+        return await self.list_models(workspace_id)
 
-    def get_agent_settings(self, workspace_id: str | None = None) -> AgentSettingsResponse:
+    async def get_agent_settings(self, workspace_id: str | None = None) -> AgentSettingsResponse:
         workspace_id = workspace_id or self._settings.default_workspace_id
         provider_configs = self._load_provider_configs(workspace_id)
-        models = [self._build_model_option(spec, provider_configs, workspace_id) for spec in MODEL_SPECS]
+        models = await self.list_models(workspace_id)
         task_assignments = self._resolve_task_assignments(workspace_id, models)
         return AgentSettingsResponse(
             workspace_id=workspace_id,
@@ -250,7 +301,7 @@ class ModelConfigService:
             task_assignments=task_assignments,
         )
 
-    def update_agent_settings(self, payload: AgentSettingsUpdateRequest) -> AgentSettingsResponse:
+    async def update_agent_settings(self, payload: AgentSettingsUpdateRequest) -> AgentSettingsResponse:
         provider_specs = {spec.provider: spec for spec in PROVIDER_SPECS}
         with self._database_manager.session() as session:
             for provider_update in payload.providers:
@@ -319,13 +370,33 @@ class ModelConfigService:
                     existing_assignment.provider = assignment.provider
                     existing_assignment.model = assignment.model
                     existing_assignment.updated_at = utc_now()
-        return self.get_agent_settings(payload.workspace_id)
+        return await self.get_agent_settings(payload.workspace_id)
 
     def is_ready(self, provider: str, model: str, workspace_id: str | None = None) -> bool:
-        return any(
-            item.provider == provider and item.model == model and item.ready
-            for item in self.list_models(workspace_id)
-        )
+        """
+        Check if a provider/model combination is ready to use.
+        This is a sync method for use in sync contexts like LLM extraction.
+        Returns True if provider is enabled, configured, and has an adapter.
+        """
+        workspace_id = workspace_id or self._settings.default_workspace_id
+        provider_configs = self._load_provider_configs(workspace_id)
+        provider_spec = next((spec for spec in PROVIDER_SPECS if spec.provider == provider), None)
+        
+        if not provider_spec:
+            return False
+            
+        provider_config = provider_configs.get(provider)
+        enabled = provider_config.enabled if provider_config is not None else True
+        
+        if not enabled:
+            return False
+            
+        missing_env_fields = self._missing_env_fields(provider_spec, provider_config, workspace_id)
+        if missing_env_fields:
+            return False
+            
+        supports_runtime = self._adapter_registry.get(provider) is not None
+        return supports_runtime
 
     def resolve_task_model(
         self,
@@ -393,6 +464,50 @@ class ModelConfigService:
             if item is None:
                 return None
             return item.provider, item.model
+
+    def _provider_model_to_option(
+        self,
+        provider: str,
+        provider_model: ProviderModel,
+        provider_spec: ProviderSpec,
+        provider_configs: dict[str, ProviderConfigORM],
+        workspace_id: str,
+    ) -> ModelOption:
+        """Convert a ProviderModel to ModelOption with readiness checks."""
+        provider_config = provider_configs.get(provider)
+        enabled = provider_config.enabled if provider_config is not None else True
+        missing_env_fields = self._missing_env_fields(provider_spec, provider_config, workspace_id)
+        supports_runtime = self._adapter_registry.get(provider) is not None
+        
+        if not enabled:
+            ready = False
+            reason = "Provider đang bị tắt trong agent settings."
+        elif missing_env_fields:
+            ready = False
+            reason = f"Thiếu cấu hình: {', '.join(missing_env_fields)}."
+        elif not supports_runtime:
+            ready = False
+            reason = "Đã có cấu hình nhưng adapter runtime chưa được implement trong backend."
+        else:
+            ready = True
+            reason = "Sẵn sàng sử dụng."
+        
+        return ModelOption(
+            provider=provider,
+            model=provider_model.id,
+            label=provider_model.name or provider_model.id,
+            description=provider_model.description or "",
+            ready=ready,
+            enabled=enabled,
+            supports_runtime=supports_runtime,
+            supports_streaming=provider_model.supports_streaming,
+            supports_structured_output=provider_model.supports_structured_output,
+            context_window=provider_model.context_window,
+            recommended_for=[],  # Dynamic models don't have task recommendations
+            required_env_fields=[field.key for field in provider_spec.fields],
+            missing_env_fields=missing_env_fields,
+            reason=reason,
+        )
 
     def _build_model_option(
         self,
@@ -548,6 +663,7 @@ class ModelConfigService:
         attr_by_env = {
             "OPENAI_API_KEY": self._settings.openai_api_key,
             "ANTHROPIC_API_KEY": self._settings.anthropic_api_key,
+            "ANTHROPIC_BASE_URL": self._settings.anthropic_base_url,
             "GOOGLE_API_KEY": self._settings.google_api_key,
             "OLLAMA_BASE_URL": self._settings.ollama_base_url,
         }

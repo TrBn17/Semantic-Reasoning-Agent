@@ -116,7 +116,13 @@ class OpenDomainLLMExtractor:
     def _invoke_anthropic(self, prompt: str, *, model: str) -> str:
         from anthropic import Anthropic
 
-        client = Anthropic(api_key=self._settings.anthropic_api_key)
+        client_kwargs: dict[str, str] = {}
+        if self._settings.anthropic_api_key:
+            client_kwargs["api_key"] = self._settings.anthropic_api_key
+        if self._settings.anthropic_base_url:
+            client_kwargs["base_url"] = self._settings.anthropic_base_url
+
+        client = Anthropic(**client_kwargs)
         response = client.messages.create(
             model=model,
             max_tokens=3000,

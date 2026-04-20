@@ -20,44 +20,36 @@ import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 import { useCapabilities } from "@/src/shared/capabilities/useCapabilities";
 import { formatDateTime } from "@/lib/utils";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 type QuickAction = {
   href: string;
   icon: typeof MessageSquare;
-  title: string;
-  description: string;
 };
 
 const quickActions: QuickAction[] = [
   {
     href: "/ask",
     icon: MessageSquare,
-    title: "Ask a question",
-    description: "Send a grounded query and inspect cited evidence.",
   },
   {
     href: "/documents",
     icon: FileText,
-    title: "Upload document",
-    description: "Parse and index a document for retrieval and ontology.",
   },
   {
     href: "/evidence",
     icon: Search,
-    title: "Browse evidence",
-    description: "Review citations, provenance, and source chunks.",
   },
   {
     href: "/ontology/builds",
     icon: Network,
-    title: "Review ontology builds",
-    description: "Approve candidate entities and publish graph versions.",
   },
 ];
 
 export function HomeView() {
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const caps = useCapabilities();
+  const { t } = useI18n();
 
   const documents = useQuery({
     queryKey: queryKeys.documents.list(),
@@ -92,26 +84,25 @@ export function HomeView() {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
       <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Workspace</h1>
-        <p className="text-sm text-muted-foreground">
-          Knowledge operations cockpit for ask, documents, evidence, ontology,
-          and graph.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t.home.title}</h1>
+        <p className="text-sm text-muted-foreground">{t.home.subtitle}</p>
       </header>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {quickActions.map(({ href, icon: Icon, title, description }) => (
+        {quickActions.map(({ href, icon: Icon }) => (
           <Link key={href} href={href} className="group">
             <Card className="h-full transition-colors group-hover:border-primary/50">
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Icon className="h-4 w-4 text-muted-foreground" />
-                  {title}
+                  {translateQuickActionTitle(href, t)}
                 </CardTitle>
                 <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
               </CardHeader>
               <CardContent>
-                <p className="text-xs text-muted-foreground">{description}</p>
+                <p className="text-xs text-muted-foreground">
+                  {translateQuickActionDescription(href, t)}
+                </p>
               </CardContent>
             </Card>
           </Link>
@@ -121,18 +112,18 @@ export function HomeView() {
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-sm">Recent documents</CardTitle>
+            <CardTitle className="text-sm">{t.home.sections.recentDocuments}</CardTitle>
             <Link
               href="/documents"
               className="text-xs text-muted-foreground hover:text-foreground"
             >
-              View all
+              {t.home.sections.viewAll}
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
             {documents.isLoading && <Skeletons count={3} />}
             {!documents.isLoading && recentDocuments.length === 0 && (
-              <EmptyState text="No documents yet. Upload one to get started." />
+              <EmptyState text={t.home.empty.documents} />
             )}
             {recentDocuments.map((d) => (
               <Link
@@ -154,18 +145,18 @@ export function HomeView() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-sm">Ontology builds</CardTitle>
+            <CardTitle className="text-sm">{t.home.sections.ontologyBuilds}</CardTitle>
             <Link
               href="/ontology/builds"
               className="text-xs text-muted-foreground hover:text-foreground"
             >
-              View all
+              {t.home.sections.viewAll}
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
             {builds.isLoading && <Skeletons count={3} />}
             {!builds.isLoading && activeBuilds.length === 0 && (
-              <EmptyState text="No builds yet. Create one from a document." />
+              <EmptyState text={t.home.empty.builds} />
             )}
             {activeBuilds.map((b) => (
               <Link
@@ -188,12 +179,12 @@ export function HomeView() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Published graph</CardTitle>
+            <CardTitle className="text-sm">{t.home.sections.publishedGraph}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {graph.isLoading && <Skeletons count={2} />}
             {!graph.isLoading && !graph.data?.version && (
-              <EmptyState text="No published ontology version yet." />
+              <EmptyState text={t.home.empty.graph} />
             )}
             {graph.data?.version && (
               <div className="space-y-1">
@@ -209,7 +200,7 @@ export function HomeView() {
                   href="/graph"
                   className="inline-flex items-center gap-1 pt-2 text-xs text-primary hover:underline"
                 >
-                  Open graph explorer <ArrowRight className="h-3 w-3" />
+                  {t.home.openGraphExplorer} <ArrowRight className="h-3 w-3" />
                 </Link>
               </div>
             )}
@@ -218,18 +209,18 @@ export function HomeView() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <CardTitle className="text-sm">Recent conversations</CardTitle>
+            <CardTitle className="text-sm">{t.home.sections.recentConversations}</CardTitle>
             <Link
               href="/ask"
               className="text-xs text-muted-foreground hover:text-foreground"
             >
-              View all
+              {t.home.sections.viewAll}
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
             {conversations.isLoading && <Skeletons count={3} />}
             {!conversations.isLoading && recentConversations.length === 0 && (
-              <EmptyState text="No conversations yet." />
+              <EmptyState text={t.home.empty.conversations} />
             )}
             {recentConversations.map((c) => (
               <Link
@@ -252,16 +243,11 @@ export function HomeView() {
           <Card className="border-dashed">
             <CardHeader className="flex flex-row items-center gap-2 space-y-0 pb-2">
               <Sparkles className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-sm">Tasks & workflows</CardTitle>
-              <Badge variant="secondary" className="ml-2">
-                coming soon
-              </Badge>
+              <CardTitle className="text-sm">{t.home.tasks.title}</CardTitle>
+              <Badge variant="secondary" className="ml-2">{t.home.tasks.badge}</Badge>
             </CardHeader>
             <CardContent>
-              <p className="text-xs text-muted-foreground">
-                Task runtime, workflow catalog, and artifact generation will
-                surface here once the backend control plane exposes them.
-              </p>
+              <p className="text-xs text-muted-foreground">{t.home.tasks.description}</p>
             </CardContent>
           </Card>
         </section>
@@ -291,6 +277,39 @@ function badgeVariant(
 
 function EmptyState({ text }: { text: string }) {
   return <p className="px-2 py-3 text-xs text-muted-foreground">{text}</p>;
+}
+
+function translateQuickActionTitle(href: string, t: ReturnType<typeof useI18n>["t"]) {
+  switch (href) {
+    case "/ask":
+      return t.home.quickActions.ask.title;
+    case "/documents":
+      return t.home.quickActions.documents.title;
+    case "/evidence":
+      return t.home.quickActions.evidence.title;
+    case "/ontology/builds":
+      return t.home.quickActions.ontology.title;
+    default:
+      return href;
+  }
+}
+
+function translateQuickActionDescription(
+  href: string,
+  t: ReturnType<typeof useI18n>["t"],
+) {
+  switch (href) {
+    case "/ask":
+      return t.home.quickActions.ask.description;
+    case "/documents":
+      return t.home.quickActions.documents.description;
+    case "/evidence":
+      return t.home.quickActions.evidence.description;
+    case "/ontology/builds":
+      return t.home.quickActions.ontology.description;
+    default:
+      return href;
+  }
 }
 
 function Skeletons({ count }: { count: number }) {

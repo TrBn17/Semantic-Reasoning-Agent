@@ -36,6 +36,11 @@ NON_CHAT_MODEL_MARKERS: tuple[str, ...] = (
     "realtime",
     "transcribe",
 )
+ANTHROPIC_MAINTAINED_MODELS: tuple[tuple[str, str, int], ...] = (
+    ("claude-opus-4.6", "Claude Opus 4.6", 200_000),
+    ("claude-sonnet-4-6", "Claude Sonnet 4.6", 200_000),
+
+)
 
 
 @dataclass
@@ -233,7 +238,14 @@ class ProviderModelsService:
             resolved_base_url = base_url or self._settings.anthropic_base_url
             if not resolved_api_key:
                 raise ValueError("Anthropic API key not configured")
-            return await AnthropicModelsClient(resolved_api_key, resolved_base_url).get_models()
+            try:
+                return await AnthropicModelsClient(
+                    resolved_api_key,
+                    resolved_base_url,
+                ).get_models()
+            except RuntimeError:
+                # Anthropic-compatible gateways often omit /v1/models.
+                return _anthropic_maintained_catalog()
 
         if provider == "gemini":
             resolved_api_key = api_key or self._settings.google_api_key
@@ -334,3 +346,17 @@ def _infer_ollama_context_window(model_name: str) -> int | None:
         if key in lower:
             return size
     return 4_096
+
+
+def _anthropic_maintained_catalog() -> list[ProviderModel]:
+    return [
+        ProviderModel(
+            id=model_id,
+            name=label,
+            context_window=context_window,
+            supports_streaming=True,
+            supports_structured_output=True,
+            description="Maintained Anthropic model catalog fallback",
+        )
+        for model_id, label, context_window in ANTHROPIC_MAINTAINED_MODELS
+    ]

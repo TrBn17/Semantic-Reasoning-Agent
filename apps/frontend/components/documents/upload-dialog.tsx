@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { uploadDocument } from "@/lib/api/documents";
+import { uploadDocuments } from "@/lib/api/documents";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 
@@ -25,16 +25,14 @@ export function UploadDialog() {
   const queryClient = useQueryClient();
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const [open, setOpen] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [tags, setTags] = useState("");
 
   const mutation = useMutation({
     mutationFn: () => {
-      if (!file) throw new Error("Select a file to upload");
-      return uploadDocument({
-        file,
-        title: title || undefined,
+      if (files.length === 0) throw new Error("Select at least one file to upload");
+      return uploadDocuments({
+        files,
         workspaceId: workspaceId ?? undefined,
         tags: tags
           .split(",")
@@ -42,13 +40,29 @@ export function UploadDialog() {
           .filter(Boolean),
       });
     },
-    onSuccess: (doc) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.documents.all });
-      toast.success(`Uploaded ${doc.filename}`);
-      setFile(null);
-      setTitle("");
+    onSuccess: ({ uploaded, failed }) => {
+      if (uploaded.length > 0) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.documents.all });
+      }
+
+      if (uploaded.length > 0 && failed.length === 0) {
+        toast.success(`Uploaded ${uploaded.length} file(s)`);
+        setOpen(false);
+      } else if (uploaded.length > 0) {
+        toast.warning(
+          `Uploaded ${uploaded.length} file(s), failed ${failed.length}: ${failed
+            .slice(0, 2)
+            .map((f) => f.filename)
+            .join(", ")}`,
+        );
+      } else {
+        toast.error(
+          `Upload failed: ${failed.slice(0, 2).map((f) => f.reason).join(" | ")}`,
+        );
+      }
+
+      setFiles([]);
       setTags("");
-      setOpen(false);
     },
     onError: (err) => toast.error(`Upload failed: ${(err as Error).message}`),
   });
@@ -75,17 +89,15 @@ export function UploadDialog() {
               id="file"
               type="file"
               accept=".pdf,.docx,.xlsx"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              multiple
+              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
             />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="title">Title (optional)</Label>
-            <Input
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Defaults to filename"
-            />
+            {files.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Selected {files.length} file(s): {files.slice(0, 3).map((f) => f.name).join(", ")}
+                {files.length > 3 ? "..." : ""}
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <Label htmlFor="tags">Tags (comma separated)</Label>
@@ -105,9 +117,9 @@ export function UploadDialog() {
           </DialogClose>
           <Button
             onClick={() => mutation.mutate()}
-            disabled={mutation.isPending || !file}
+            disabled={mutation.isPending || files.length === 0}
           >
-            {mutation.isPending ? "Uploading..." : "Upload"}
+            {mutation.isPending ? "Uploading..." : "Upload selected"}
           </Button>
         </DialogFooter>
       </DialogContent>

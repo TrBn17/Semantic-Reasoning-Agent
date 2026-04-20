@@ -6,14 +6,16 @@ from semantic_reasoning_agent.domain.contracts.tool_envelope import ToolEnvelope
 
 
 class Tool(ABC):
-    """Atomic execution unit.
+    """Atomic execution unit — AGENTS.md §9.
 
-    Each Tool advertises a stable `tool_id` and consumes a ToolEnvelope
-    whose `inputs` mapping carries the tool-specific arguments. The
-    returned ToolResult must be JSON-serializable.
+    A Tool implementation pairs with a ``ToolSpec`` (metadata) and consumes a
+    ``ToolEnvelope`` whose ``arguments`` map satisfies the spec's ``input_schema``.
+    The returned ``ToolResult`` must be constructed by the tool or, on exception,
+    by the ``ToolRuntime`` wrapper. Tools never block on I/O without honoring the
+    envelope's ``constraints.timeout_ms`` (the runtime enforces this).
     """
 
-    tool_id: str
+    tool_name: str
 
     @abstractmethod
     def run(self, envelope: ToolEnvelope) -> ToolResult: ...

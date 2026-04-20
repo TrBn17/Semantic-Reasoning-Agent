@@ -16,13 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { listDocuments } from "@/lib/api/documents";
 import { createBuild } from "@/lib/api/ontology";
 import { queryKeys } from "@/lib/query/keys";
@@ -32,7 +26,7 @@ export function NewBuildDialog() {
   const queryClient = useQueryClient();
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const [open, setOpen] = useState(false);
-  const [documentId, setDocumentId] = useState<string | undefined>();
+  const [documentIds, setDocumentIds] = useState<string[]>([]);
 
   const { data: documents } = useQuery({
     queryKey: queryKeys.documents.list(),
@@ -40,23 +34,60 @@ export function NewBuildDialog() {
   });
 
   const mutation = useMutation({
-    mutationFn: () => {
-      if (!documentId) throw new Error("Pick a document");
-      return createBuild({
-        document_id: documentId,
-        workspace_id: workspaceId ?? undefined,
+    mutationFn: async () => {
+      if (documentIds.length === 0) throw new Error("Pick at least one document");
+      const queued = await Promise.allSettled(
+        documentIds.map((documentId) =>
+          createBuild({
+            document_id: documentId,
+            workspace_id: workspaceId ?? undefined,
+          }),
+        ),
+      );
+
+      let successCount = 0;
+      const failures: string[] = [];
+      queued.forEach((result) => {
+        if (result.status === "fulfilled") {
+          successCount += 1;
+          return;
+        }
+        failures.push(result.reason instanceof Error ? result.reason.message : "Unknown error");
       });
+
+      return { successCount, failures };
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.ontology.all });
-      toast.success("Build queued");
-      setOpen(false);
-      setDocumentId(undefined);
+    onSuccess: ({ successCount, failures }) => {
+      if (successCount > 0) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.ontology.all });
+      }
+
+      if (successCount > 0 && failures.length === 0) {
+        toast.success(`Queued ${successCount} build(s)`);
+        setOpen(false);
+      } else if (successCount > 0) {
+        toast.warning(
+          `Queued ${successCount} build(s), failed ${failures.length}: ${failures
+            .slice(0, 2)
+            .join(" | ")}`,
+        );
+      } else {
+        toast.error(`Build failed: ${failures.slice(0, 2).join(" | ")}`);
+      }
+
+      setDocumentIds([]);
     },
     onError: (err) => toast.error(`Build failed: ${(err as Error).message}`),
   });
 
   const indexed = (documents ?? []).filter((d) => d.status === "indexed");
+  const toggleSelection = (documentId: string) => {
+    setDocumentIds((current) =>
+      current.includes(documentId)
+        ? current.filter((id) => id !== documentId)
+        : [...current, documentId],
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -75,24 +106,41 @@ export function NewBuildDialog() {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <Label>Document</Label>
-          <Select value={documentId} onValueChange={setDocumentId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select an indexed document" />
-            </SelectTrigger>
-            <SelectContent>
-              {indexed.map((d) => (
-                <SelectItem key={d.id} value={d.id}>
-                  {d.title}
-                </SelectItem>
-              ))}
+          <Label>Documents</Label>
+          <ScrollArea className="h-56 rounded-md border">
+            <div className="space-y-1 p-2">
+              {indexed.map((d) => {
+                const checked = documentIds.includes(d.id);
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition ${
+                      checked
+                        ? "bg-primary/10 text-primary"
+                        : "hover:bg-muted/60"
+                    }`}
+                    onClick={() => toggleSelection(d.id)}
+                  >
+                    <span className="truncate">{d.title}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {checked ? "Selected" : "Select"}
+                    </span>
+                  </button>
+                );
+              })}
               {indexed.length === 0 && (
                 <div className="p-2 text-xs text-muted-foreground">
                   No indexed documents. Upload and wait for indexing to finish.
                 </div>
               )}
-            </SelectContent>
-          </Select>
+            </div>
+          </ScrollArea>
+          {documentIds.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {documentIds.length} document(s) selected.
+            </p>
+          )}
         </div>
         <DialogFooter>
           <DialogClose asChild>
@@ -102,9 +150,9 @@ export function NewBuildDialog() {
           </DialogClose>
           <Button
             onClick={() => mutation.mutate()}
-            disabled={!documentId || mutation.isPending}
+            disabled={documentIds.length === 0 || mutation.isPending}
           >
-            {mutation.isPending ? "Queueing..." : "Start build"}
+            {mutation.isPending ? "Queueing..." : "Start selected builds"}
           </Button>
         </DialogFooter>
       </DialogContent>

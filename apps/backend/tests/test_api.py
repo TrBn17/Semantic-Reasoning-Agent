@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from semantic_reasoning_agent.main import app
+from semantic_reasoning_agent.services.provider_models_service import AnthropicModelsClient
 
 
 client = TestClient(app)
@@ -87,6 +88,42 @@ def test_model_catalog_uses_workspace_specific_provider_config() -> None:
     openai = next(item for item in models if item["provider"] == "openai")
     assert openai["missing_env_fields"] == []
     assert openai["ready"] is False
+
+
+def test_model_catalog_falls_back_to_maintained_anthropic_catalog(monkeypatch) -> None:
+    async def _raise_runtime_error(self):
+        raise RuntimeError("upstream list-models unavailable")
+
+    monkeypatch.setattr(AnthropicModelsClient, "get_models", _raise_runtime_error)
+
+    update_response = client.put(
+        "/api/v1/agents/settings",
+        json={
+            "workspace_id": "workspace-anthropic",
+            "providers": [
+                {
+                    "provider": "anthropic",
+                    "enabled": True,
+                    "values": {
+                        "ANTHROPIC_API_KEY": "demo-ant-key",
+                        "ANTHROPIC_BASE_URL": "https://example.invalid",
+                    },
+                }
+            ],
+            "task_assignments": [],
+        },
+    )
+    assert update_response.status_code == 200
+
+    response = client.get("/api/v1/models", params={"workspace_id": "workspace-anthropic"})
+    assert response.status_code == 200
+    models = response.json()
+
+    anthropic_models = [item for item in models if item["provider"] == "anthropic"]
+    assert anthropic_models
+    assert any(item["model"] == "claude-sonnet-4-5" for item in anthropic_models)
+    assert any(item["model"] == "claude-opus-4-0" and item["label"] == "Claude Opus 4.0" for item in anthropic_models)
+    assert any(item["model"] == "claude-sonnet-4-5" and item["label"] == "Claude Sonnet 4.5" for item in anthropic_models)
 
 
 def test_create_conversation_and_send_echo_message() -> None:

@@ -807,22 +807,43 @@ Artifact phải thể hiện rõ:
 
 ## 11.13. `/tools` — Tool Registry
 
+### Trạng thái: **Shipped 2026-04-20**
+
+Backend AGENTS.md §9 landed (ToolSpec, ToolRegistry, ToolRuntime, 2 tools) trong PR-1 → PR-3, frontend wire-up shipped cùng ngày.
+
 ### Mục tiêu
 UI dành cho admin/engineer/operator.
 
 ### Nội dung
-- list tools
-- capability metadata
-- risk level
+- list tools (với mỗi `ToolSpec`: family, type, version, description, input_schema, capabilities)
+- risk level badge (low / medium / high, color-coded)
 - side effect level
-- requires confirmation
-- timeout
+- requires confirmation (tool sẽ bị runtime block nếu chưa có confirmation token)
+- timeout (`timeout_ms` hiển thị theo giây)
 - supports parallel / streaming
 - workspace scope
+- **Invoke dialog** — JSON argument editor với default khác nhau theo tool (ví dụ `retrieval.internal` default `{query, top_k}`; `ontology.lookup` default `{mode}`). `call_id` + `task_id` tự generate `crypto.randomUUID()`. Hiển thị result: status badge, latency, `trace_id` short-hash, evidence list (source_type, title, anchor, score, content line-clamped), `next_action_hints`, `error_code` / `error_message`
+
+### Files đã ship
+- `apps/frontend/src/app/tools/page.tsx`
+- `apps/frontend/components/tools/tools-table.tsx`
+- `apps/frontend/components/tools/tool-invoke-dialog.tsx`
+- `apps/frontend/lib/api/tools.ts` — `listTools({family, maxRisk})`, `invokeTool(name, payload)`
+- `apps/frontend/lib/api/types.ts` — `ToolSpec`, `StandardToolInput`, `StandardToolOutput`, `Evidence`, `CitationAnchor`, `Provenance`, `ToolMeta`, `ToolConstraints`, `OntologyContextRef` + enums
+- `apps/frontend/lib/query/keys.ts` — `queryKeys.tools.list(family, maxRisk)`, `queryKeys.tools.spec(name)`
+- `apps/frontend/src/shared/capabilities/capabilities.ts` — `toolsAvailable: true`
+
+### Tools hiện có (từ backend registry)
+- `retrieval.internal` — wrap `RetrievalService.search`, emit Evidence với page/section/sheet_row anchor
+- `ontology.lookup` — wrap `OntologyService.get_graph`, emit `graph_node` + `graph_edge` Evidence
+
+### Chưa có (đợi backend)
+- `web.extract`, `mcp.invoke`, `evidence.promote`, `artifact.generate`, `graph.publish` (Phase 5 + Phase 6)
+- streaming result panel (adapter chưa stream)
 
 ### Lợi ích
 - giúp debug runtime
-- giúp audit
+- giúp audit — mỗi invoke trả `trace_id` để cross-reference với backend log
 - giúp người vận hành hiểu hệ thống đang có khả năng gì
 
 ---
@@ -1083,12 +1104,14 @@ Map sang:
 - `POST /api/v1/workflows/{id}/run`
 
 ### Tools
-#### Hiện tại
-disabled / not available
+#### Hiện tại (shipped 2026-04-20)
+- `GET /api/v1/tools` — list registry specs (có filter `family`, `max_risk`)
+- `POST /api/v1/tools/{tool_name}/invoke` — invoke với `StandardToolInput` envelope, trả `StandardToolOutput`
+- UI: `/tools` page với tools-table + invoke dialog (JSON argument editor + evidence panel)
 
 #### Tương lai
-Map sang:
-- `GET /api/v1/tools`
+- khi agentic loop (`/tasks/resolve`) lên, tools sẽ được dispatch từ chat thay vì invoke thủ công
+- streaming tool result qua SSE khi adapter hỗ trợ
 
 ### Artifacts
 #### Hiện tại
@@ -1420,11 +1443,11 @@ Nếu sản phẩm hướng tới đội dùng tiếng Việt + tiếng Anh:
 
 ## 23.4. Sprint 5 — Tasks + Workflows + Tools
 Triển khai khi backend control-plane APIs bắt đầu sẵn sàng:
-- Tasks
-- Workflows
+- Tasks (chờ `/api/v1/tasks/resolve`)
+- Workflows (chờ `/api/v1/workflows*`)
 - Workflow detail/run
-- Tools
-- Connectors
+- **Tools — shipped 2026-04-20** (`/tools` page, list + invoke dialog)
+- Connectors (chờ MCP gateway)
 
 ---
 

@@ -9,8 +9,8 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[ModelOption])
-def list_models(
+async def list_models(
     workspace_id: str | None = Query(default=None),
     model_config_service: ModelConfigService = Depends(get_model_config_service),
 ) -> list[ModelOption]:
-    return model_config_service.list_models(workspace_id)
+    return await model_config_service.list_models(workspace_id)

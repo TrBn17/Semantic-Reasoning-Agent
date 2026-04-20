@@ -6,8 +6,11 @@ from semantic_reasoning_agent.services.document_service import DocumentService
 from semantic_reasoning_agent.services.agent_profile_service import AgentProfileService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 from semantic_reasoning_agent.services.ontology_service import OntologyService
+from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 from semantic_reasoning_agent.services.secret_service import SecretService
+from semantic_reasoning_agent.services.tool_registry import ToolRegistry
+from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
 
 
 def get_conversation_service() -> ConversationService:
@@ -44,3 +47,15 @@ def get_retrieval_service() -> RetrievalService:
 
 def get_chat_stream_service() -> ChatStreamService:
     return get_app_container().chat_stream_service
+
+
+def get_provider_models_service() -> ProviderModelsService:
+    return get_app_container().provider_models_service
+
+
+def get_tool_registry() -> ToolRegistry:
+    return get_app_container().tool_registry
+
+
+def get_tool_runtime() -> ToolRuntime:
+    return get_app_container().tool_runtime

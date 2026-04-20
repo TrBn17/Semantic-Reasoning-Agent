@@ -71,6 +71,71 @@ Out of scope for this upgrade step:
 
 ---
 
+## 2.5 Current Implementation Status
+
+**Last updated:** 2026-04-20 — after backend Phase-3 groundwork (PR-1 → PR-3).
+
+### Shipped
+
+- **§9 Tool Registry Model** — `ToolSpec` dataclass + `ToolRegistry` service at
+  `apps/backend/src/semantic_reasoning_agent/services/tool_registry.py`. Registry
+  lookup by name, filter by family + risk ceiling.
+- **§9 Standard Tool Input / Output** — `ToolEnvelope` (with `call_id`, `task_type`,
+  `task_payload`, `OntologyContextRef`, `ToolConstraints`, `workflow_id`) and
+  `ToolResult` (with `started_at`, `finished_at`, `latency_ms`, `evidence`,
+  `artifacts`, `state_patch`, `next_action_hints`, `ToolMeta`) at
+  `domain/contracts/tool_envelope.py`.
+- **§9 Unified Evidence Contract** — `Evidence` + typed `CitationAnchor`
+  (`anchor_type`, `label`, `locator`) + typed `Provenance` at
+  `domain/contracts/evidence.py`.
+- **Native function-calling adapters** — `AnthropicAdapter` (messages.create with
+  `tool_use` / `tool_result` blocks) and `OpenAIAdapter` (chat.completions with
+  function tool calls) under `infrastructure/llm/`, sharing a unified
+  `LLMMessage` / `LLMToolCall` / `LLMResponse` envelope at
+  `domain/contracts/llm.py`. `EchoAdapter` keeps the test path working.
+- **ToolRuntime** — `services/tool_runtime.py`: timeout via ThreadPoolExecutor,
+  exception wrapping into `failed` result, latency measurement, `trace_id`
+  stamping, `tool_call_id` propagation into each evidence's provenance.
+- **Concrete tools (Phase-3 scope)** — `retrieval.internal` (wraps
+  `RetrievalService.search`, maps per-chunk results to §9 Evidence with page /
+  section / sheet-row anchors) and `ontology.lookup` (wraps
+  `OntologyService.get_graph`, emits `graph_node` + `graph_edge` Evidence from
+  the current published ontology version — no hardcoded type names, emergent
+  schema only).
+- **API endpoints** — `GET /api/v1/tools` (list registered specs, filterable by
+  family / max_risk) and `POST /api/v1/tools/{tool_name}/invoke` (admin-facing
+  execution with the full §9 input/output envelopes).
+- **Integration verified** — end-to-end test uploads a PDF, invokes
+  `retrieval.internal`, and asserts every §9 Evidence field is populated.
+
+### Not yet implemented (deferred)
+
+- **Task runtime** — `TaskInterpreter`, `OntologyGrounding`,
+  `WorkflowSelector`, `AgenticLoop`. The LLM still runs single-shot inside
+  `chat_stream_service.ChatStreamService.send_message` with `tools=()`. Chat
+  has native function calling machinery wired underneath but no tool execution
+  loop yet.
+- **Workflows** — no `WorkflowRegistry`, no `/api/v1/workflows*`,
+  no `/api/v1/tasks/resolve`. Document ingestion and ontology build still run
+  on Celery as deterministic Celery tasks, not as workflow runtime entries.
+- **Additional tool families** — `web.extract`, `mcp.invoke`,
+  `evidence.promote`, `artifact.generate`, `graph.publish` not yet registered.
+  These are the Phase 5 + Phase 6 targets.
+- **Sufficiency / conflict checks** — §9 steps 7-8 (sufficiency gate, conflict
+  merge) are out-of-scope for the current shipment and belong with the agentic
+  loop work.
+- **Durable persistence of tool calls and evidence** — `ToolResult` /
+  `Evidence` exist only within a request lifecycle. No `task_runs`,
+  `tool_calls`, or `evidence_promotions` tables yet.
+- **Streaming tool calls** — adapters return complete `LLMResponse` only; SSE
+  tokenwise streaming with partial-JSON accumulation is deferred.
+- **Gemini adapter** — `google-genai` SDK is installed but no adapter.
+- **Runtime framework choice (LangGraph / DeepAgents)** — framework adoption
+  is still out-of-scope per §2; the current contracts are framework-agnostic so
+  PR-4 can slot either in without changing §9 boundaries.
+
+---
+
 ## 3. Core Architectural Principles
 
 1. **Tool-first, not chat-first**  
@@ -1119,12 +1184,18 @@ Current stable API families:
 - `POST /api/v1/ontology/builds/{id}/publish`
 - `GET /api/v1/ontology/graph`
 
-Upgrade API boundaries to add:
+### Tools (shipped in PR-3)
+- `GET /api/v1/tools` — lists registered `ToolSpec` records; supports `?family=`
+  and `?max_risk=` filters.
+- `POST /api/v1/tools/{tool_name}/invoke` — admin execution with the §9
+  Standard Tool Input / Output envelopes. `ToolRuntime` handles timeout,
+  latency, trace id, and exception wrapping.
+
+Upgrade API boundaries still to add:
 
 - `POST /api/v1/tasks/resolve`
 - `GET /api/v1/workflows`
 - `POST /api/v1/workflows/{id}/run`
-- `GET /api/v1/tools`
 - `POST /api/v1/evidence/promotions`
 - `POST /api/v1/artifacts/generate`
 - `POST /api/v1/web/extract`
@@ -1159,12 +1230,25 @@ API rule:
 - improve chunk and citation quality
 - keep current Postgres retrieval path while preparing Qdrant as a later backend
 
-### Phase 3: Tool Calling + Retrieval Policy
+### Phase 3: Tool Calling + Retrieval Policy — **in progress (2026-04-20)**
 
-- add tool registry and tool runtime
-- define workflow selection policy
-- support internal, web, and hybrid retrieval modes
-- introduce task resolution endpoint and evidence normalization
+Shipped:
+
+- tool registry (`ToolRegistry` + `ToolSpec`) and tool runtime
+  (`ToolRuntime.invoke` with timeout, trace, latency, exception wrapping)
+- native function-calling adapters for Anthropic and OpenAI, plus unified
+  `LLMMessage` / `LLMToolCall` / `LLMResponse` envelope
+- §9 `ToolEnvelope`, `ToolResult`, `Evidence`, `CitationAnchor`, `Provenance`
+  contracts in full shape
+- first two tools wired: `retrieval.internal`, `ontology.lookup`
+- admin endpoints: `GET /api/v1/tools`, `POST /api/v1/tools/{name}/invoke`
+
+Still to land in this phase:
+
+- workflow selection policy + in-code workflow registry
+- hybrid retrieval mode (internal + web fallback)
+- `/api/v1/tasks/resolve` endpoint and agentic loop routing chat through it
+- sufficiency / conflict checks (§9 steps 7-8)
 
 ### Phase 4: Ontology + Graph
 

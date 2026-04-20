@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CircleAlert, Save, Shield, Sparkles } from "lucide-react";
+import { RefreshCcw, Save, Shield, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { getAgentSettings, updateAgentSettings } from "@/lib/api/agents";
 import {
@@ -14,7 +14,9 @@ import {
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 import type {
+  AgentSettingsResponse,
   AgentProfileResponse,
+  ModelOption,
   ProviderConfigUpdate,
   TaskAssignmentUpdate,
 } from "@/lib/api/types";
@@ -38,24 +40,253 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 interface ProviderDraft {
   enabled: boolean;
   values: Record<string, string>;
 }
 
+type AgentProvider = AgentSettingsResponse["providers"][number];
+
 function composeValue(provider: string, model: string) {
   return `${provider}::${model}`;
+}
+
+function parseComposedValue(value?: string | null) {
+  if (!value) return null;
+  const [provider, model] = value.split("::");
+  if (!provider || !model) return null;
+  return { provider, model };
 }
 
 function statusVariant(ready: boolean): "success" | "warning" {
   return ready ? "success" : "warning";
 }
 
+function hydrateProviderDrafts(settings: AgentSettingsResponse): Record<string, ProviderDraft> {
+  return Object.fromEntries(
+    settings.providers.map((provider) => {
+      const fieldByKey = Object.fromEntries(provider.fields.map((field) => [field.key, field]));
+      return [
+        provider.provider,
+        {
+          enabled: provider.enabled,
+          values: Object.fromEntries(
+            provider.values.map((value) => [
+              value.key,
+              value.source === "database" && !fieldByKey[value.key]?.secret
+                ? value.masked_value
+                : "",
+            ]),
+          ),
+        },
+      ] as const;
+    }),
+  );
+}
+
+function hydrateTaskDrafts(settings: AgentSettingsResponse): Record<string, string> {
+  return Object.fromEntries(
+    settings.task_assignments.map((task) => [
+      task.task_type,
+      composeValue(task.provider, task.model),
+    ]),
+  );
+}
+
+function getProviderPreview(provider: AgentProvider, draft?: ProviderDraft) {
+  const enabled = draft?.enabled ?? provider.enabled;
+  const draftValues = draft?.values ?? {};
+  const missingFields = provider.fields
+    .filter((field) => {
+      const valueState = provider.values.find((item) => item.key === field.key);
+      const currentValue = draftValues[field.key]?.trim();
+      return !currentValue && !valueState?.configured && field.required;
+    })
+    .map((field) => field.key);
+  const supportsRuntime = provider.supports_runtime;
+
+  if (!enabled) {
+    return {
+      ready: false,
+      reason: "Provider đang tắt.",
+    };
+  }
+  if (missingFields.length > 0) {
+    return {
+      ready: false,
+      reason: `Thiếu trường bắt buộc: ${missingFields.join(", ")}.`,
+    };
+  }
+  if (!supportsRuntime) {
+    return {
+      ready: false,
+      reason: "Model từ provider này hiện chưa dùng được cho tác vụ.",
+    };
+  }
+  return {
+    ready: true,
+    reason: "Sẵn sàng sử dụng.",
+  };
+}
+
+function getModelPreview(
+  model: ModelOption,
+  providerPreview: { ready: boolean; reason: string },
+): ModelOption {
+  if (!providerPreview.ready) {
+    return {
+      ...model,
+      ready: false,
+      reason: providerPreview.reason,
+    };
+  }
+  if (!model.supports_runtime) {
+    return {
+      ...model,
+      ready: false,
+      reason: "Model này hiện chưa dùng được cho tác vụ.",
+    };
+  }
+  return {
+    ...model,
+    ready: true,
+    reason: "Sẵn sàng sử dụng.",
+  };
+}
+
+interface TaskModelPickerProps {
+  models: ModelOption[];
+  value?: string;
+  onChange: (value: string) => void;
+  labels: {
+    providerPlaceholder: string;
+    allProviders: string;
+    searchModelPlaceholder: string;
+    selectModelPlaceholder: string;
+    noModelMatch: string;
+    assignmentUnavailable: string;
+  };
+}
+
+const TaskModelPicker = memo(function TaskModelPicker({
+  models,
+  value,
+  onChange,
+  labels,
+}: TaskModelPickerProps) {
+  const selected = useMemo(
+    () => models.find((item) => composeValue(item.provider, item.model) === value),
+    [models, value],
+  );
+  const providers = useMemo(
+    () => Array.from(new Set(models.map((item) => item.provider))).sort((a, b) => a.localeCompare(b)),
+    [models],
+  );
+  const [providerFilter, setProviderFilter] = useState<string>(selected?.provider ?? "all");
+  const [searchText, setSearchText] = useState("");
+  const deferredSearchText = useDeferredValue(searchText);
+
+  useEffect(() => {
+    const selectedValue = parseComposedValue(value);
+    if (!selectedValue) {
+      setProviderFilter("all");
+      return;
+    }
+    setProviderFilter(selectedValue.provider);
+  }, [value]);
+
+  const filteredModels = useMemo(() => {
+    const keyword = deferredSearchText.trim().toLowerCase();
+    return models
+      .filter((item) => {
+        if (providerFilter !== "all" && item.provider !== providerFilter) {
+          return false;
+        }
+        if (!keyword) {
+          return true;
+        }
+        return (
+          item.label.toLowerCase().includes(keyword) ||
+          item.model.toLowerCase().includes(keyword) ||
+          item.provider.toLowerCase().includes(keyword)
+        );
+      })
+      .sort((a, b) => {
+        if (a.ready !== b.ready) {
+          return a.ready ? -1 : 1;
+        }
+        return a.label.localeCompare(b.label);
+      });
+  }, [deferredSearchText, models, providerFilter]);
+
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)]">
+        <Select value={providerFilter} onValueChange={setProviderFilter}>
+          <SelectTrigger>
+            <SelectValue placeholder={labels.providerPlaceholder} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{labels.allProviders}</SelectItem>
+            {providers.map((provider) => (
+              <SelectItem key={provider} value={provider}>
+                {provider}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          value={searchText}
+          onChange={(event) =>
+            startTransition(() => {
+              setSearchText(event.target.value);
+            })
+          }
+          placeholder={labels.searchModelPlaceholder}
+        />
+      </div>
+
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger>
+          <SelectValue placeholder={labels.selectModelPlaceholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {filteredModels.map((model) => (
+            <SelectItem
+              key={composeValue(model.provider, model.model)}
+              value={composeValue(model.provider, model.model)}
+            >
+              {model.label} · {model.provider}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {filteredModels.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          {labels.noModelMatch}
+        </p>
+      )}
+      {value && !selected && (
+        <p className="text-xs text-amber-700">
+          {labels.assignmentUnavailable}
+        </p>
+      )}
+    </div>
+  );
+});
+
 export function AgentSettingsView() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
-  const { workspaceId, preferredAgentProfileId, setPreferredAgentProfileId } = useWorkspaceStore();
-  const { data, isLoading } = useQuery({
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
+  const preferredAgentProfileId = useWorkspaceStore((state) => state.preferredAgentProfileId);
+  const setPreferredAgentProfileId = useWorkspaceStore(
+    (state) => state.setPreferredAgentProfileId,
+  );
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: queryKeys.agents.settings(workspaceId),
     queryFn: () => getAgentSettings(workspaceId),
   });
@@ -71,30 +302,13 @@ export function AgentSettingsView() {
   const [profileTaskDrafts, setProfileTaskDrafts] = useState<Record<string, string>>({});
   const [profileDescriptionDraft, setProfileDescriptionDraft] = useState("");
   const [profileAllowOverrideDraft, setProfileAllowOverrideDraft] = useState(true);
+  const [catalogProviderFilter, setCatalogProviderFilter] = useState<string>("all");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     if (!data) return;
-    const nextProviderDrafts: Record<string, ProviderDraft> = {};
-    for (const provider of data.providers) {
-      const fieldByKey = Object.fromEntries(provider.fields.map((field) => [field.key, field]));
-      nextProviderDrafts[provider.provider] = {
-        enabled: provider.enabled,
-        values: Object.fromEntries(
-          provider.values.map((value) => [
-            value.key,
-            value.source === "database" && !fieldByKey[value.key]?.secret
-              ? value.masked_value
-              : "",
-          ]),
-        ),
-      };
-    }
-    const nextTaskDrafts: Record<string, string> = {};
-    for (const task of data.task_assignments) {
-      nextTaskDrafts[task.task_type] = composeValue(task.provider, task.model);
-    }
-    setProviderDrafts(nextProviderDrafts);
-    setTaskDrafts(nextTaskDrafts);
+    setProviderDrafts(hydrateProviderDrafts(data));
+    setTaskDrafts(hydrateTaskDrafts(data));
   }, [data]);
 
   useEffect(() => {
@@ -123,6 +337,41 @@ export function AgentSettingsView() {
     );
   }, [data]);
 
+  const catalogProviders = useMemo(
+    () => Array.from(new Set((data?.models ?? []).map((item) => item.provider))).sort((a, b) => a.localeCompare(b)),
+    [data?.models],
+  );
+
+  const catalogModels = useMemo(() => {
+    const source = data?.models ?? [];
+    if (catalogProviderFilter === "all") {
+      return source;
+    }
+    return source.filter((item) => item.provider === catalogProviderFilter);
+  }, [catalogProviderFilter, data?.models]);
+
+  const providerPreviewByName = useMemo(() => {
+    return Object.fromEntries(
+      (data?.providers ?? []).map((provider) => [
+        provider.provider,
+        getProviderPreview(provider, providerDrafts[provider.provider]),
+      ]),
+    );
+  }, [data?.providers, providerDrafts]);
+
+  const modelPreviewLookup = useMemo(() => {
+    return Object.fromEntries(
+      (data?.models ?? []).map((model) => {
+        const providerPreview = providerPreviewByName[model.provider] ?? {
+          ready: model.ready,
+          reason: model.reason,
+        };
+        const preview = getModelPreview(model, providerPreview);
+        return [composeValue(preview.provider, preview.model), preview];
+      }),
+    );
+  }, [data?.models, providerPreviewByName]);
+
   const mutation = useMutation({
     mutationFn: (payload: {
       providers: ProviderConfigUpdate[];
@@ -132,12 +381,15 @@ export function AgentSettingsView() {
         workspace_id: data?.workspace_id ?? workspaceId ?? "workspace-demo",
         ...payload,
       }),
-    onSuccess: (updated) => {
+    onSuccess: async (updated) => {
       queryClient.setQueryData(queryKeys.agents.settings(workspaceId), updated);
-      queryClient.setQueryData([...queryKeys.models, workspaceId ?? null], updated.models);
-      toast.success("Agent settings saved.");
+      setProviderDrafts(hydrateProviderDrafts(updated));
+      setTaskDrafts(hydrateTaskDrafts(updated));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.agents.settings(workspaceId) });
+      toast.success(t.agentsSettings.toasts.agentSettingsSaved);
     },
-    onError: (err) => toast.error(`Save failed: ${(err as Error).message}`),
+    onError: (err) =>
+      toast.error(`${t.agentsSettings.toasts.saveFailedPrefix} ${(err as Error).message}`),
   });
 
   const createProfileMutation = useMutation({
@@ -159,9 +411,10 @@ export function AgentSettingsView() {
       setNewProfileName("");
       setSelectedProfileId(profile.id);
       setPreferredAgentProfileId(profile.id);
-      toast.success("Agent profile created.");
+      toast.success(t.agentsSettings.toasts.agentProfileCreated);
     },
-    onError: (err) => toast.error(`Create failed: ${(err as Error).message}`),
+    onError: (err) =>
+      toast.error(`${t.agentsSettings.toasts.createFailedPrefix} ${(err as Error).message}`),
   });
 
   const saveProfileMutation = useMutation({
@@ -182,9 +435,10 @@ export function AgentSettingsView() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
-      toast.success("Profile saved.");
+      toast.success(t.agentsSettings.toasts.profileSaved);
     },
-    onError: (err) => toast.error(`Profile save failed: ${(err as Error).message}`),
+    onError: (err) =>
+      toast.error(`${t.agentsSettings.toasts.profileSaveFailedPrefix} ${(err as Error).message}`),
   });
 
   const setDefaultMutation = useMutation({
@@ -192,9 +446,10 @@ export function AgentSettingsView() {
     onSuccess: (profile) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
       setPreferredAgentProfileId(profile.id);
-      toast.success("Default profile updated.");
+      toast.success(t.agentsSettings.toasts.defaultProfileUpdated);
     },
-    onError: (err) => toast.error(`Default update failed: ${(err as Error).message}`),
+    onError: (err) =>
+      toast.error(`${t.agentsSettings.toasts.defaultUpdateFailedPrefix} ${(err as Error).message}`),
   });
 
   if (isLoading || !data) {
@@ -207,93 +462,104 @@ export function AgentSettingsView() {
     );
   }
 
+  const handleSaveSettings = () => {
+    mutation.mutate({
+      providers: data.providers.map((provider) => ({
+        provider: provider.provider,
+        enabled: providerDrafts[provider.provider]?.enabled ?? provider.enabled,
+        values: providerDrafts[provider.provider]?.values ?? {},
+      })),
+      task_assignments: data.tasks
+        .map((task) => {
+          const value = taskDrafts[task.task_type];
+          if (!value) return null;
+          const [provider, model] = value.split("::");
+          if (!provider || !model) return null;
+          return { task_type: task.task_type, provider, model };
+        })
+        .filter(Boolean) as TaskAssignmentUpdate[],
+    });
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 pb-28 sm:space-y-6 sm:pb-32">
+      <div className="fixed inset-x-0 bottom-2 z-30 px-3 sm:bottom-4 sm:px-6">
+        <div className="mx-auto max-w-6xl rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-muted-foreground">
+            {t.agentsSettings.builder.description}
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowAdvanced((current) => !current)}
+              className="w-full"
+            >
+              {showAdvanced
+                ? t.agentsSettings.builder.hideAdvanced
+                : t.agentsSettings.builder.showAdvanced}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void refetch()}
+              disabled={isFetching || mutation.isPending}
+              className="w-full"
+            >
+              <RefreshCcw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+              {t.agentsSettings.builder.refreshCatalog}
+            </Button>
+            <Button
+              onClick={handleSaveSettings}
+              disabled={mutation.isPending}
+              className="col-span-2 w-full sm:col-span-1 sm:min-w-[160px]"
+            >
+              <Save className="h-4 w-4" />
+              {t.agentsSettings.builder.saveSettings}
+            </Button>
+          </div>
+        </div>
+        </div>
+      </div>
+
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle>Agent Builder Settings</CardTitle>
-            <CardDescription>
-              Người dùng có thể nhập env cho provider, xem model catalog và gán
-              model theo từng tác vụ.
-            </CardDescription>
-          </div>
-          <Button
-            onClick={() =>
-              mutation.mutate({
-                providers: data.providers.map((provider) => ({
-                  provider: provider.provider,
-                  enabled: providerDrafts[provider.provider]?.enabled ?? provider.enabled,
-                  values: providerDrafts[provider.provider]?.values ?? {},
-                })),
-                task_assignments: data.tasks
-                  .map((task) => {
-                    const value = taskDrafts[task.task_type];
-                    if (!value) return null;
-                    const [provider, model] = value.split("::");
-                    if (!provider || !model) return null;
-                    return { task_type: task.task_type, provider, model };
-                  })
-                  .filter(Boolean) as TaskAssignmentUpdate[],
-              })
-            }
-            disabled={mutation.isPending}
-          >
-            <Save className="h-4 w-4" />
-            Save Settings
-          </Button>
+        <CardHeader>
+          <CardTitle>{t.agentsSettings.builder.title}</CardTitle>
+          <CardDescription>
+            {t.agentsSettings.builder.description}
+          </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-lg border bg-muted/20 p-4">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">
-              Workspace
-            </div>
-            <div className="mt-2 font-medium">{data.workspace_id}</div>
-          </div>
-          <div className="rounded-lg border bg-muted/20 p-4">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">
-              Models
-            </div>
-            <div className="mt-2 font-medium">{data.models.length}</div>
-          </div>
-          <div className="rounded-lg border bg-muted/20 p-4">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">
-              Tasks
-            </div>
-            <div className="mt-2 font-medium">{data.tasks.length}</div>
-          </div>
+        <CardContent className="text-sm text-muted-foreground">
+          {t.agentsSettings.builder.minimalHint}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Provider Env</CardTitle>
+          <CardTitle>{t.agentsSettings.providerEnv.title}</CardTitle>
           <CardDescription>
-            Cấu hình credential hoặc endpoint cho từng provider. `runtime`
-            nghĩa là backend đang có env hệ thống, `database` là giá trị lưu từ UI.
+            {t.agentsSettings.providerEnv.description}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {data.providers.map((provider) => {
             const draft = providerDrafts[provider.provider];
+            const providerPreview = providerPreviewByName[provider.provider] ?? getProviderPreview(provider, draft);
             return (
-              <div
-                key={provider.provider}
-                className="rounded-xl border p-4"
-              >
+              <div key={provider.provider} className="rounded-xl border p-3 sm:p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold">{provider.label}</h3>
-                      <Badge variant={statusVariant(provider.ready)}>
-                        {provider.ready ? "Ready" : "Needs setup"}
+                      <Badge variant={statusVariant(providerPreview.ready)}>
+                        {providerPreview.ready
+                          ? t.agentsSettings.taskRouting.ready
+                          : t.agentsSettings.providerEnv.needsSetup}
                       </Badge>
-                      {!provider.supports_runtime && (
-                        <Badge variant="outline">No runtime adapter</Badge>
-                      )}
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {provider.reason}
+                      {providerPreview.reason}
                     </p>
                   </div>
                   <Button
@@ -309,13 +575,15 @@ export function AgentSettingsView() {
                       }))
                     }
                   >
-                    {(draft?.enabled ?? provider.enabled) ? "Enabled" : "Disabled"}
+                    {(draft?.enabled ?? provider.enabled)
+                      ? t.agentsSettings.providerEnv.enabled
+                      : t.agentsSettings.providerEnv.disabled}
                   </Button>
                 </div>
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   {provider.fields.length === 0 && (
                     <div className="text-sm text-muted-foreground">
-                      Provider này không cần env bổ sung.
+                      {t.agentsSettings.providerEnv.noAdditionalEnv}
                     </div>
                   )}
                   {provider.fields.map((field) => {
@@ -323,14 +591,10 @@ export function AgentSettingsView() {
                     const currentValue = draft?.values[field.key] ?? "";
                     return (
                       <div key={field.key} className="space-y-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <Label htmlFor={`${provider.provider}-${field.key}`}>
-                            {field.label}
-                          </Label>
-                          <Badge variant="outline">
-                            {valueState?.source ?? "missing"}
-                          </Badge>
-                        </div>
+                        <Label htmlFor={`${provider.provider}-${field.key}`}>
+                          {field.label}
+                          {!field.required ? " (optional)" : ""}
+                        </Label>
                         <Input
                           id={`${provider.provider}-${field.key}`}
                           type={field.secret ? "password" : "text"}
@@ -350,8 +614,9 @@ export function AgentSettingsView() {
                           }
                         />
                         <p className="text-xs text-muted-foreground">
-                          {field.help_text}
-                          {valueState?.configured ? ` Current: ${valueState.masked_value}` : ""}
+                          {valueState?.configured
+                            ? `${t.agentsSettings.providerEnv.currentPrefix} ${valueState.masked_value}`
+                            : ""}
                         </p>
                       </div>
                     );
@@ -365,30 +630,31 @@ export function AgentSettingsView() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Agent Profiles</CardTitle>
+          <CardTitle>{t.agentsSettings.profiles.title}</CardTitle>
           <CardDescription>
-            Hồ sơ agent có prompt riêng, task routing riêng và policy cho phép override model trong chat.
+            {t.agentsSettings.profiles.description}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="grid gap-2 sm:flex sm:flex-wrap">
             <Input
               value={newProfileName}
               onChange={(event) => setNewProfileName(event.target.value)}
-              placeholder="New profile name"
-              className="max-w-sm"
+              placeholder={t.agentsSettings.profiles.newProfileNamePlaceholder}
+              className="w-full sm:max-w-sm"
             />
             <Button
               onClick={() => createProfileMutation.mutate()}
               disabled={createProfileMutation.isPending || !newProfileName.trim()}
+              className="w-full sm:w-auto"
             >
               <Sparkles className="h-4 w-4" />
-              Create Profile
+              {t.agentsSettings.profiles.createProfile}
             </Button>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-            <div className="space-y-3">
+          <div className="grid items-start gap-3 sm:gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
+            <div className="space-y-2 xl:max-h-[560px] xl:overflow-y-auto xl:pr-1">
               {(profiles ?? []).map((profile) => (
                 <button
                   key={profile.id}
@@ -408,13 +674,17 @@ export function AgentSettingsView() {
                       ),
                     );
                   }}
-                  className="w-full rounded-xl border p-4 text-left"
+                  className={`w-full rounded-xl border p-3 text-left transition sm:p-4 ${
+                    selectedProfileId === profile.id
+                      ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                      : "hover:border-primary/50"
+                  }`}
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-semibold">{profile.name}</span>
-                    {profile.is_default && <Badge variant="success">Default</Badge>}
+                    {profile.is_default && <Badge variant="success">{t.agentsSettings.profiles.defaultBadge}</Badge>}
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{profile.description || "No description"}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{profile.description || t.agentsSettings.profiles.noDescription}</p>
                 </button>
               ))}
             </div>
@@ -422,49 +692,32 @@ export function AgentSettingsView() {
             {(() => {
               const selectedProfile = (profiles ?? []).find((item) => item.id === selectedProfileId);
               if (!selectedProfile) {
-                return <div className="rounded-xl border p-4 text-sm text-muted-foreground">No profile selected.</div>;
+                return <div className="rounded-xl border p-4 text-sm text-muted-foreground">{t.agentsSettings.profiles.noProfileSelected}</div>;
               }
               return (
-                <div className="space-y-4 rounded-xl border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-5 rounded-xl border p-4 sm:p-5">
+                  <div className="space-y-1">
                     <div>
                       <h3 className="font-semibold">{selectedProfile.name}</h3>
-                      <p className="text-sm text-muted-foreground">Profile-bound prompt, routing and override policy.</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => setDefaultMutation.mutate(selectedProfile.id)}
-                        disabled={setDefaultMutation.isPending || selectedProfile.is_default}
-                      >
-                        <Shield className="h-4 w-4" />
-                        Set Default
-                      </Button>
-                      <Button
-                        onClick={() => saveProfileMutation.mutate(selectedProfile)}
-                        disabled={saveProfileMutation.isPending}
-                      >
-                        <Save className="h-4 w-4" />
-                        Save Profile
-                      </Button>
+                      <p className="text-sm text-muted-foreground">{t.agentsSettings.profiles.panelDescription}</p>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="profile-description">Description</Label>
+                    <Label htmlFor="profile-description">{t.agentsSettings.profiles.descriptionLabel}</Label>
                     <Input
                       id="profile-description"
                       value={profileDescriptionDraft}
                       onChange={(event) => setProfileDescriptionDraft(event.target.value)}
-                      placeholder="What this agent is for"
+                      placeholder={t.agentsSettings.profiles.descriptionPlaceholder}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="profile-prompt">System Prompt</Label>
+                    <Label htmlFor="profile-prompt">{t.agentsSettings.profiles.systemPromptLabel}</Label>
                     <Textarea
                       id="profile-prompt"
                       value={profilePromptDraft}
                       onChange={(event) => setProfilePromptDraft(event.target.value)}
-                      placeholder="You are an analyst agent..."
+                      placeholder={t.agentsSettings.profiles.systemPromptPlaceholder}
                       className="min-h-[140px]"
                     />
                   </div>
@@ -474,37 +727,47 @@ export function AgentSettingsView() {
                       checked={profileAllowOverrideDraft}
                       onChange={(event) => setProfileAllowOverrideDraft(event.target.checked)}
                     />
-                    Allow chat model override
+                    {t.agentsSettings.profiles.allowChatOverride}
                   </label>
                   <div className="space-y-3">
-                    {data.tasks.map((task) => (
-                      <div key={task.task_type} className="grid gap-2 md:grid-cols-[200px_1fr] md:items-center">
-                        <div>
-                          <div className="font-medium">{task.label}</div>
-                          <div className="text-xs text-muted-foreground">{task.description}</div>
+                    {showAdvanced &&
+                      data.tasks.map((task) => (
+                        <div key={task.task_type} className="grid gap-2 md:grid-cols-[200px_1fr] md:items-center">
+                          <div>
+                            <div className="font-medium">{task.label}</div>
+                            <div className="text-xs text-muted-foreground">{task.description}</div>
+                          </div>
+                          <TaskModelPicker
+                            models={data.models}
+                            value={profileTaskDrafts[task.task_type]}
+                            labels={t.agentsSettings.picker}
+                            onChange={(value) =>
+                              setProfileTaskDrafts((current) => ({ ...current, [task.task_type]: value }))
+                            }
+                          />
                         </div>
-                        <Select
-                          value={profileTaskDrafts[task.task_type]}
-                          onValueChange={(value) =>
-                            setProfileTaskDrafts((current) => ({ ...current, [task.task_type]: value }))
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select model" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {data.models.map((model) => (
-                              <SelectItem
-                                key={`${task.task_type}-${composeValue(model.provider, model.model)}`}
-                                value={composeValue(model.provider, model.model)}
-                              >
-                                {model.label} · {model.provider}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    ))}
+                      ))}
+                  </div>
+                  <div className="sticky bottom-0 -mx-4 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-5 sm:px-5">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                      <Button
+                        variant="outline"
+                        onClick={() => setDefaultMutation.mutate(selectedProfile.id)}
+                        disabled={setDefaultMutation.isPending || selectedProfile.is_default}
+                        className="w-full sm:w-auto"
+                      >
+                        <Shield className="h-4 w-4" />
+                        {t.agentsSettings.profiles.setDefault}
+                      </Button>
+                      <Button
+                        onClick={() => saveProfileMutation.mutate(selectedProfile)}
+                        disabled={saveProfileMutation.isPending}
+                        className="w-full sm:w-auto"
+                      >
+                        <Save className="h-4 w-4" />
+                        {t.agentsSettings.profiles.saveProfile}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               );
@@ -513,18 +776,17 @@ export function AgentSettingsView() {
         </CardContent>
       </Card>
 
-      <Card>
+      {showAdvanced && <Card>
         <CardHeader>
-          <CardTitle>Task Routing</CardTitle>
+          <CardTitle>{t.agentsSettings.taskRouting.title}</CardTitle>
           <CardDescription>
-            Chọn model mặc định cho từng tác vụ. Đây là lớp cấu hình đầu tiên để
-            tiến tới agent builder theo profile.
+            {t.agentsSettings.taskRouting.description}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {data.tasks.map((task) => {
             const selectedValue = taskDrafts[task.task_type];
-            const selectedModel = selectedValue ? modelLookup[selectedValue] : null;
+            const selectedModel = selectedValue ? modelPreviewLookup[selectedValue] ?? null : null;
             return (
               <div
                 key={task.task_type}
@@ -539,67 +801,34 @@ export function AgentSettingsView() {
                   </div>
                   {selectedModel && (
                     <Badge variant={statusVariant(selectedModel.ready)}>
-                      {selectedModel.ready ? "Ready" : "Blocked"}
+                      {selectedModel.ready
+                        ? t.agentsSettings.taskRouting.ready
+                        : t.agentsSettings.taskRouting.blocked}
                     </Badge>
                   )}
                 </div>
                 <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,320px)_1fr]">
-                  <Select
+                  <TaskModelPicker
+                    models={data.models}
                     value={selectedValue}
-                    onValueChange={(value) =>
+                    labels={t.agentsSettings.picker}
+                    onChange={(value) =>
                       setTaskDrafts((current) => ({ ...current, [task.task_type]: value }))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {data.models.map((model) => (
-                        <SelectItem
-                          key={composeValue(model.provider, model.model)}
-                          value={composeValue(model.provider, model.model)}
-                        >
-                          {model.label} · {model.provider}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  />
                   <div className="rounded-lg bg-muted/20 p-4 text-sm">
                     {selectedModel ? (
-                      <div className="space-y-2">
+                      <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          {selectedModel.ready ? (
-                            <Check className="h-4 w-4 text-emerald-600" />
-                          ) : (
-                            <CircleAlert className="h-4 w-4 text-amber-600" />
-                          )}
                           <span className="font-medium">
                             {selectedModel.label} ({selectedModel.provider})
                           </span>
                         </div>
-                        <p className="text-muted-foreground">
-                          {selectedModel.description}
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          <Badge variant="outline">
-                            Context {selectedModel.context_window?.toLocaleString() ?? "n/a"}
-                          </Badge>
-                          <Badge variant="outline">
-                            {selectedModel.supports_structured_output
-                              ? "Structured output"
-                              : "No structured output"}
-                          </Badge>
-                          <Badge variant="outline">
-                            {selectedModel.supports_streaming ? "Streaming" : "No streaming"}
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          {selectedModel.reason}
-                        </p>
+                        <p className="text-xs text-muted-foreground">{selectedModel.reason}</p>
                       </div>
                     ) : (
                       <p className="text-muted-foreground">
-                        Chưa chọn model cho tác vụ này.
+                        {t.agentsSettings.taskRouting.noModelSelected}
                       </p>
                     )}
                   </div>
@@ -608,42 +837,63 @@ export function AgentSettingsView() {
             );
           })}
         </CardContent>
-      </Card>
+      </Card>}
 
-      <Card>
+      {showAdvanced && <Card>
         <CardHeader>
-          <CardTitle>Model Catalog</CardTitle>
+          <CardTitle>{t.agentsSettings.modelCatalog.title}</CardTitle>
           <CardDescription>
-            Metadata của model để người dùng biết model nào hợp chat,
-            extraction, narrative hay dashboard.
+            {t.agentsSettings.modelCatalog.description}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
-          {data.models.map((model) => (
-            <div key={composeValue(model.provider, model.model)} className="rounded-xl border p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-semibold">{model.label}</h3>
-                <Badge variant={statusVariant(model.ready)}>
-                  {model.ready ? "Ready" : "Blocked"}
-                </Badge>
-                {!model.supports_runtime && <Badge variant="outline">Missing adapter</Badge>}
+          <div className="lg:col-span-2 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant={catalogProviderFilter === "all" ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => setCatalogProviderFilter("all")}
+            >
+              {t.agentsSettings.modelCatalog.allProviders}
+            </Button>
+            {catalogProviders.map((provider) => (
+              <Button
+                key={provider}
+                type="button"
+                variant={catalogProviderFilter === provider ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => setCatalogProviderFilter(provider)}
+              >
+                {provider}
+              </Button>
+            ))}
+          </div>
+          {catalogModels.map((model) => {
+            const preview = modelPreviewLookup[composeValue(model.provider, model.model)] ?? model;
+            return (
+              <div key={composeValue(model.provider, model.model)} className="rounded-xl border p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold">{preview.label}</h3>
+                  <Badge variant={statusVariant(preview.ready)}>
+                    {preview.ready
+                      ? t.agentsSettings.modelCatalog.ready
+                      : t.agentsSettings.modelCatalog.blocked}
+                  </Badge>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge variant="outline">{preview.provider}</Badge>
+                  <Badge variant="outline">{preview.model}</Badge>
+                </div>
               </div>
-              <p className="mt-2 text-sm text-muted-foreground">{model.description}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Badge variant="outline">{model.provider}</Badge>
-                <Badge variant="outline">{model.model}</Badge>
-                <Badge variant="outline">
-                  Context {model.context_window?.toLocaleString() ?? "n/a"}
-                </Badge>
-              </div>
-              <div className="mt-3 text-xs text-muted-foreground">
-                Recommended for: {model.recommended_for.join(", ") || "n/a"}
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground">{model.reason}</div>
+            );
+          })}
+          {catalogModels.length === 0 && (
+            <div className="lg:col-span-2 rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+              {t.agentsSettings.modelCatalog.noModelsForFilter}
             </div>
-          ))}
+          )}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }

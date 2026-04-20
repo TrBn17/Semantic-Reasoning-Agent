@@ -1,3 +1,4 @@
+from semantic_reasoning_agent.domain.contracts.llm import LLMMessage
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.schemas.chat import (
     ChatReply,
@@ -72,7 +73,14 @@ class ChatStreamService:
 
         citations: list[Citation] = []
         system_prompt = self._conversation_service.get_system_prompt(payload.conversation_id)
-        reply_text = adapter.generate_reply(payload.content, system_prompt=system_prompt)
+        llm_response = adapter.run(
+            messages=[LLMMessage(role="user", content=payload.content)],
+            tools=(),
+            tool_choice="none",
+            system=system_prompt,
+            model=runtime_model,
+        )
+        reply_text = llm_response.content or ""
         if payload.use_retrieval:
             search_response = self._retrieval_service.search(
                 query=payload.content,
