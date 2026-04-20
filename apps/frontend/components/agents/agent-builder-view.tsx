@@ -32,13 +32,14 @@ import {
   setDefaultAgentProfile,
   updateAgentProfile,
 } from "@/lib/api/agent-profiles";
-import { getAgentSettings } from "@/lib/api/agents";
+import { getAgentSettings, updateAgentSettings } from "@/lib/api/agents";
 import { resolveTask } from "@/lib/api/tasks";
 import { readinessBadgeVariant } from "@/lib/badges/readiness";
 import { composeProviderModel, parseProviderModelValue } from "@/lib/model-routing";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 import type {
+  AgentSettingsResponse,
   AgentProfileResponse,
   AgentProfileTaskModelAssignment,
   ModelOption,
@@ -57,7 +58,26 @@ type ProfileDraft = {
   taskModels: Record<string, string>;
 };
 
+type ProviderDraft = {
+  enabled: boolean;
+  values: Record<string, string>;
+};
+
 const NEW_PROFILE_ID = "__new__";
+
+function hydrateProviderDrafts(
+  providers: AgentSettingsResponse["providers"],
+): Record<string, ProviderDraft> {
+  return Object.fromEntries(
+    providers.map((provider) => [
+      provider.provider,
+      {
+        enabled: provider.enabled,
+        values: {},
+      },
+    ]),
+  );
+}
 
 function profileToDraft(
   profile: AgentProfileResponse | null,
@@ -91,6 +111,7 @@ export function AgentBuilderView() {
   const workspaceId = useWorkspaceStore((state) => state.workspaceId) ?? "workspace-demo";
   const [selectedProfileId, setSelectedProfileId] = useState<string>(NEW_PROFILE_ID);
   const [draft, setDraft] = useState<ProfileDraft | null>(null);
+  const [providerDrafts, setProviderDrafts] = useState<Record<string, ProviderDraft>>({});
   const [testPrompt, setTestPrompt] = useState("");
   const [useRetrieval, setUseRetrieval] = useState(true);
   const [testResult, setTestResult] = useState<TaskResolutionResponse | null>(null);
@@ -126,6 +147,11 @@ export function AgentBuilderView() {
         : selectedProfileId;
     setSelectedProfileId(nextSelected);
   }, [profilesQuery.data, selectedProfileId, settingsQuery.data]);
+
+  useEffect(() => {
+    if (!settingsQuery.data) return;
+    setProviderDrafts(hydrateProviderDrafts(settingsQuery.data.providers));
+  }, [settingsQuery.data]);
 
   useEffect(() => {
     if (!settingsQuery.data) return;
@@ -175,6 +201,31 @@ export function AgentBuilderView() {
       toast.error(`${t.agentsSettings.toasts.profileSaveFailedPrefix} ${(error as Error).message}`),
   });
 
+  const providerSaveMutation = useMutation({
+    mutationFn: async () => {
+      if (!settingsQuery.data) throw new Error(t.common.serviceUnavailable);
+      return updateAgentSettings({
+        workspace_id: workspaceId,
+        providers: settingsQuery.data.providers.map((provider) => ({
+          provider: provider.provider,
+          enabled: providerDrafts[provider.provider]?.enabled ?? provider.enabled,
+          values: providerDrafts[provider.provider]?.values ?? {},
+        })),
+        task_assignments: settingsQuery.data.task_assignments.map((assignment) => ({
+          task_type: assignment.task_type,
+          provider: assignment.provider,
+          model: assignment.model,
+        })),
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.agents.settings(workspaceId) });
+      toast.success(t.agentsSettings.toasts.agentSettingsSaved);
+    },
+    onError: (error) =>
+      toast.error(`${t.agentsSettings.toasts.saveFailedPrefix} ${(error as Error).message}`),
+  });
+
   const defaultMutation = useMutation({
     mutationFn: async () => {
       if (!selectedProfile) throw new Error(t.common.serviceUnavailable);
@@ -220,6 +271,22 @@ export function AgentBuilderView() {
     );
   }, [draft?.taskModels.chat, models]);
 
+  const providerSetupComplete = useMemo(
+    () => (settingsQuery.data?.providers ?? []).some((provider) => provider.enabled && provider.ready),
+    [settingsQuery.data?.providers],
+  );
+
+  const hasProviderDraftChanges = useMemo(() => {
+    const providers = settingsQuery.data?.providers ?? [];
+    if (providers.length === 0) return false;
+    return providers.some((provider) => {
+      const draftState = providerDrafts[provider.provider];
+      if (!draftState) return false;
+      if (draftState.enabled !== provider.enabled) return true;
+      return Object.values(draftState.values).some((value) => value.trim().length > 0);
+    });
+  }, [providerDrafts, settingsQuery.data?.providers]);
+
   const readiness = {
     hasName: Boolean(draft?.name.trim()),
     hasPrompt: Boolean(draft?.systemPrompt.trim()),
@@ -244,10 +311,6 @@ export function AgentBuilderView() {
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
                 {t.agentsPage.subtitle}
               </p>
-              <Link href="/settings" className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline">
-                <Settings2 className="h-4 w-4" />
-                {t.agentsPage.openSettings}
-              </Link>
             </div>
           </div>
           <Card className="border-primary/15 bg-background/70 shadow-none">
@@ -274,6 +337,142 @@ export function AgentBuilderView() {
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1.2fr)_360px]">
+        <Card id="provider-setup" className="surface-panel xl:col-span-3">
+          <CardHeader>
+            <CardTitle className="text-base">{t.agentsSettings.providerEnv.title}</CardTitle>
+            <CardDescription>{t.agentsSettings.providerEnv.description}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {(settingsQuery.data?.providers ?? []).map((provider) => {
+              const draftState = providerDrafts[provider.provider] ?? {
+                enabled: provider.enabled,
+                values: {},
+              };
+              return (
+                <div key={provider.provider} className="rounded-xl border p-3 sm:p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold">{provider.label}</h3>
+                        <Badge variant={readinessBadgeVariant(provider.enabled && provider.ready)}>
+                          {provider.enabled && provider.ready
+                            ? t.agentsSettings.taskRouting.ready
+                            : t.agentsSettings.providerEnv.needsSetup}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">{provider.reason}</p>
+                    </div>
+                    <Button
+                      variant={draftState.enabled ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() =>
+                        setProviderDrafts((current) => ({
+                          ...current,
+                          [provider.provider]: {
+                            enabled: !(current[provider.provider]?.enabled ?? provider.enabled),
+                            values: current[provider.provider]?.values ?? {},
+                          },
+                        }))
+                      }
+                    >
+                      {draftState.enabled
+                        ? t.agentsSettings.providerEnv.enabled
+                        : t.agentsSettings.providerEnv.disabled}
+                    </Button>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    {provider.fields.length === 0 && (
+                      <div className="text-sm text-muted-foreground">
+                        {t.agentsSettings.providerEnv.noAdditionalEnv}
+                      </div>
+                    )}
+                    {provider.fields.map((field) => {
+                      const valueState = provider.values.find((item) => item.key === field.key);
+                      const currentValue = draftState.values[field.key] ?? "";
+                      const placeholder =
+                        currentValue || field.input_type === "select"
+                          ? field.placeholder
+                          : valueState?.masked_value || field.placeholder;
+                      return (
+                        <div key={field.key} className="space-y-2">
+                          <Label htmlFor={`${provider.provider}-${field.key}`}>
+                            {field.label}
+                            {!field.required ? " (optional)" : ""}
+                          </Label>
+                          {field.input_type === "select" ? (
+                            <Select
+                              value={currentValue}
+                              onValueChange={(value) =>
+                                setProviderDrafts((current) => ({
+                                  ...current,
+                                  [provider.provider]: {
+                                    enabled: current[provider.provider]?.enabled ?? provider.enabled,
+                                    values: {
+                                      ...(current[provider.provider]?.values ?? {}),
+                                      [field.key]: value,
+                                    },
+                                  },
+                                }))
+                              }
+                            >
+                              <SelectTrigger id={`${provider.provider}-${field.key}`}>
+                                <SelectValue placeholder={field.placeholder} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {field.options.map((option) => (
+                                  <SelectItem key={option} value={option}>
+                                    {option}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Input
+                              id={`${provider.provider}-${field.key}`}
+                              type={field.secret ? "password" : "text"}
+                              value={currentValue}
+                              placeholder={placeholder}
+                              onChange={(event) =>
+                                setProviderDrafts((current) => ({
+                                  ...current,
+                                  [provider.provider]: {
+                                    enabled: current[provider.provider]?.enabled ?? provider.enabled,
+                                    values: {
+                                      ...(current[provider.provider]?.values ?? {}),
+                                      [field.key]: event.target.value,
+                                    },
+                                  },
+                                }))
+                              }
+                            />
+                          )}
+                          <p className="text-xs text-muted-foreground">
+                            {valueState?.configured
+                              ? `${t.agentsSettings.providerEnv.currentPrefix} ${valueState.masked_value}`
+                              : ""}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-3 py-2">
+              <p className="text-xs text-muted-foreground">{t.agentsSettings.builder.minimalHint}</p>
+              <Button
+                onClick={() => providerSaveMutation.mutate()}
+                disabled={providerSaveMutation.isPending || !hasProviderDraftChanges}
+              >
+                <Save className="h-4 w-4" />
+                {t.agentsSettings.builder.saveSettings}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="surface-panel h-fit">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-3">
@@ -466,12 +665,18 @@ export function AgentBuilderView() {
 
                   <TabsContent value="routing" className="mt-0 px-6 py-6">
                     <div className="grid gap-4">
+                      {!providerSetupComplete && (
+                        <div className="rounded-2xl border border-amber-300/60 bg-amber-50/70 p-4 text-sm text-amber-900">
+                          {t.agentsSettings.providerEnv.description}
+                        </div>
+                      )}
                       {tasks.map((task) => (
                         <RoutingCard
                           key={task.task_type}
                           task={task}
-                          models={models}
+                          models={providerSetupComplete ? models : []}
                           value={draft.taskModels[task.task_type] ?? ""}
+                          setupRequired={!providerSetupComplete}
                           onChange={(value) =>
                             setDraft((current) =>
                               current
@@ -499,16 +704,16 @@ export function AgentBuilderView() {
                       />
                       <Card className="border-border/70 shadow-none">
                         <CardHeader className="pb-3">
-                          <CardTitle className="text-sm">{t.agentsPage.settingsTitle}</CardTitle>
-                          <CardDescription>{t.agentsPage.settingsDescription}</CardDescription>
+                          <CardTitle className="text-sm">{t.agentsSettings.providerEnv.title}</CardTitle>
+                          <CardDescription>{t.agentsSettings.providerEnv.description}</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-3 text-sm text-muted-foreground">
                           <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
-                            {t.agentsPage.settingsHint}
+                            {t.agentsSettings.builder.minimalHint}
                           </div>
-                          <Link href="/settings" className="inline-flex items-center gap-2 text-primary hover:underline">
+                          <Link href="#provider-setup" className="inline-flex items-center gap-2 text-primary hover:underline">
                             <Settings2 className="h-4 w-4" />
-                            {t.agentsPage.openSettings}
+                            {t.agentsSettings.providerEnv.title}
                           </Link>
                         </CardContent>
                       </Card>
@@ -549,12 +754,18 @@ export function AgentBuilderView() {
                 <StatusLine
                   label={t.agentsPage.chatRouting}
                   ready={Boolean(chatModel)}
-                  detail={chatModel ? `${chatModel.provider} / ${chatModel.label}` : t.agentsPage.notAssigned}
+                  detail={
+                    providerSetupComplete
+                      ? chatModel
+                        ? `${chatModel.provider} / ${chatModel.label}`
+                        : t.agentsPage.notAssigned
+                      : t.agentsSettings.providerEnv.needsSetup
+                  }
                 />
                 <StatusLine
                   label={t.agentsPage.chatModelReady}
-                  ready={chatModel?.ready ?? false}
-                  detail={chatModel?.reason ?? t.agentsPage.notAssigned}
+                  ready={providerSetupComplete && (chatModel?.ready ?? false)}
+                  detail={providerSetupComplete ? chatModel?.reason ?? t.agentsPage.notAssigned : t.agentsSettings.providerEnv.description}
                 />
                 <StatusLine
                   label={t.agentsPage.allowOverride}
@@ -580,7 +791,7 @@ export function AgentBuilderView() {
                 </label>
                 <Button
                   onClick={() => testMutation.mutate()}
-                  disabled={testMutation.isPending || !chatModel}
+                  disabled={testMutation.isPending || !providerSetupComplete || !chatModel}
                 >
                   <Play className="h-4 w-4" />
                   {t.agentsPage.testAgent}
@@ -660,11 +871,13 @@ function RoutingCard({
   task,
   models,
   value,
+  setupRequired,
   onChange,
 }: {
   task: TaskDefinition;
   models: ModelOption[];
   value: string;
+  setupRequired: boolean;
   onChange: (value: string) => void;
 }) {
   const { t } = useI18n();
@@ -690,21 +903,27 @@ function RoutingCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Select value={value} onValueChange={onChange}>
-          <SelectTrigger>
-            <SelectValue placeholder={t.common.selectModel} />
-          </SelectTrigger>
-          <SelectContent>
-            {models.map((model) => (
-              <SelectItem
-                key={composeProviderModel(model.provider, model.model)}
-                value={composeProviderModel(model.provider, model.model)}
-              >
-                {model.label} / {model.provider}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {setupRequired ? (
+          <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
+            {t.agentsSettings.providerEnv.description}
+          </div>
+        ) : (
+          <Select value={value} onValueChange={onChange}>
+            <SelectTrigger>
+              <SelectValue placeholder={t.common.selectModel} />
+            </SelectTrigger>
+            <SelectContent>
+              {models.map((model) => (
+                <SelectItem
+                  key={composeProviderModel(model.provider, model.model)}
+                  value={composeProviderModel(model.provider, model.model)}
+                >
+                  {model.label} / {model.provider}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         {selectedModel && (
           <div className="rounded-2xl border border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
             {selectedModel.reason}

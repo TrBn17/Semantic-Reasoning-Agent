@@ -122,9 +122,6 @@ export type Dictionary = {
     description: string;
     languageTitle: string;
     languageDescription: string;
-    agentProfilesTitle: string;
-    agentProfilesDescription: string;
-    openAgents: string;
   };
   agentsPage: {
     heroBadge: string;
@@ -162,10 +159,6 @@ export type Dictionary = {
     promptHint: string;
     previewTitle: string;
     previewDescription: string;
-    settingsTitle: string;
-    settingsDescription: string;
-    settingsHint: string;
-    openSettings: string;
     livePreviewTitle: string;
     livePreviewDescription: string;
     notAssigned: string;
@@ -415,89 +408,30 @@ export type Dictionary = {
     externalSource: string;
   };
   agentsSettings: {
-    picker: {
-      providerPlaceholder: string;
-      allProviders: string;
-      searchModelPlaceholder: string;
-      selectModelPlaceholder: string;
-      noModelMatch: string;
-      assignmentUnavailable: string;
-    };
     toasts: {
       agentSettingsSaved: string;
       saveFailedPrefix: string;
-      agentProfileCreated: string;
-      createFailedPrefix: string;
       profileSaved: string;
       profileSaveFailedPrefix: string;
       defaultProfileUpdated: string;
       defaultUpdateFailedPrefix: string;
     };
     builder: {
-      title: string;
-      description: string;
       minimalHint: string;
-      refreshCatalog: string;
       saveSettings: string;
-      showAdvanced: string;
-      hideAdvanced: string;
-      workspace: string;
-      models: string;
-      tasks: string;
     };
     providerEnv: {
       title: string;
       description: string;
-      catalogOnly: string;
       enabled: string;
       disabled: string;
       needsSetup: string;
       noAdditionalEnv: string;
-      missing: string;
       currentPrefix: string;
-      anthropicCatalogHint: string;
-    };
-    profiles: {
-      title: string;
-      description: string;
-      newProfileNamePlaceholder: string;
-      createProfile: string;
-      defaultBadge: string;
-      noDescription: string;
-      noProfileSelected: string;
-      panelDescription: string;
-      setDefault: string;
-      saveProfile: string;
-      descriptionLabel: string;
-      descriptionPlaceholder: string;
-      systemPromptLabel: string;
-      systemPromptPlaceholder: string;
-      allowChatOverride: string;
     };
     taskRouting: {
-      title: string;
-      description: string;
       ready: string;
       blocked: string;
-      contextPrefix: string;
-      structuredOutput: string;
-      noStructuredOutput: string;
-      streaming: string;
-      noStreaming: string;
-      noModelSelected: string;
-      na: string;
-    };
-    modelCatalog: {
-      title: string;
-      description: string;
-      allProviders: string;
-      catalogOnly: string;
-      ready: string;
-      blocked: string;
-      contextPrefix: string;
-      recommendedFor: string;
-      noModelsForFilter: string;
-      na: string;
     };
   };
   providerModelSelector: {
@@ -699,10 +633,6 @@ export const dictionaries: Record<Language, Dictionary> = {
       description: "Application-level preferences live here.",
       languageTitle: "Language",
       languageDescription: "Choose the UI language for the workspace shell.",
-      agentProfilesTitle: "Agent profiles moved",
-      agentProfilesDescription:
-        "Provider setup, default models, and agent profile management now live on the Agents page.",
-      openAgents: "Open Agents",
     },
     agentsPage: {
       heroBadge: "Agent builder",
@@ -745,12 +675,6 @@ export const dictionaries: Record<Language, Dictionary> = {
       previewTitle: "Authoring preview",
       previewDescription:
         "Fast review of what users should understand about this agent.",
-      settingsTitle: "Workspace connections",
-      settingsDescription:
-        "Provider setup, secrets, and workspace defaults stay in Settings.",
-      settingsHint:
-        "Use Settings when you need to enable a provider, rotate a key, or adjust workspace defaults.",
-      openSettings: "Open workspace settings",
       livePreviewTitle: "Live preview",
       livePreviewDescription:
         "Check the assigned chat model and run a simple runtime test.",
@@ -1023,96 +947,31 @@ export const dictionaries: Record<Language, Dictionary> = {
       externalSource: "External source",
     },
     agentsSettings: {
-      picker: {
-        providerPlaceholder: "Provider",
-        allProviders: "All providers",
-        searchModelPlaceholder: "Search model name",
-        selectModelPlaceholder: "Select model",
-        noModelMatch: "No model matched provider/filter. Try another provider or clear search.",
-        assignmentUnavailable:
-          "Current assignment is no longer available in catalog. Please reselect provider/model.",
-      },
       toasts: {
         agentSettingsSaved: "Agent settings saved.",
         saveFailedPrefix: "Save failed:",
-        agentProfileCreated: "Agent profile created.",
-        createFailedPrefix: "Create failed:",
         profileSaved: "Profile saved.",
         profileSaveFailedPrefix: "Profile save failed:",
         defaultProfileUpdated: "Default profile updated.",
         defaultUpdateFailedPrefix: "Default update failed:",
       },
       builder: {
-        title: "Agent Builder Settings",
-        description:
-          "Start with provider setup and profile defaults. Open Advanced only when needed.",
         minimalHint: "Keep it simple: connect providers, pick defaults, then save. Advanced details are optional.",
-        refreshCatalog: "Refresh Catalog",
         saveSettings: "Save Settings",
-        showAdvanced: "Show Advanced",
-        hideAdvanced: "Hide Advanced",
-        workspace: "Workspace",
-        models: "Models",
-        tasks: "Tasks",
       },
       providerEnv: {
         title: "Provider Setup",
         description:
           "Add the required key or URL for each provider. You can edit these values anytime.",
-        catalogOnly: "Catalog only",
         enabled: "Enabled",
         disabled: "Disabled",
         needsSetup: "Needs setup",
         noAdditionalEnv: "This provider is ready to use without extra setup.",
-        missing: "missing",
         currentPrefix: "Saved:",
-        anthropicCatalogHint:
-          "If live model sync is unavailable, Claude models are shown from a curated fallback list.",
-      },
-      profiles: {
-        title: "Agent Profiles",
-        description:
-          "Each profile stores its own prompt and default model behavior.",
-        newProfileNamePlaceholder: "New profile name",
-        createProfile: "Create Profile",
-        defaultBadge: "Default",
-        noDescription: "No description",
-        noProfileSelected: "No profile selected.",
-        panelDescription: "Profile-bound prompt, routing and override policy.",
-        setDefault: "Set Default",
-        saveProfile: "Save Profile",
-        descriptionLabel: "Description",
-        descriptionPlaceholder: "What this agent is for",
-        systemPromptLabel: "System Prompt",
-        systemPromptPlaceholder: "You are an analyst agent...",
-        allowChatOverride: "Allow chat model override",
       },
       taskRouting: {
-        title: "Task Routing",
-        description:
-          "Choose a default model for each task.",
         ready: "Ready",
         blocked: "Blocked",
-        contextPrefix: "Context",
-        structuredOutput: "Structured output",
-        noStructuredOutput: "No structured output",
-        streaming: "Streaming",
-        noStreaming: "No streaming",
-        noModelSelected: "No model selected for this task yet.",
-        na: "n/a",
-      },
-      modelCatalog: {
-        title: "Model Catalog",
-        description:
-          "Browse available models by provider.",
-        allProviders: "All providers",
-        catalogOnly: "Catalog only",
-        ready: "Ready",
-        blocked: "Blocked",
-        contextPrefix: "Context",
-        recommendedFor: "Recommended for",
-        noModelsForFilter: "No models for this provider filter.",
-        na: "n/a",
       },
     },
     providerModelSelector: {
@@ -1312,10 +1171,6 @@ export const dictionaries: Record<Language, Dictionary> = {
       description: "Các tùy chọn cấp ứng dụng sẽ nằm ở đây.",
       languageTitle: "Ngôn ngữ",
       languageDescription: "Chọn ngôn ngữ giao diện cho lớp điều khiển workspace.",
-      agentProfilesTitle: "Agent profiles đã chuyển chỗ",
-      agentProfilesDescription:
-        "Thiết lập provider, model mặc định và quản lý agent profiles hiện nằm ở trang Agents.",
-      openAgents: "Mở Agents",
     },
     agentsPage: {
       heroBadge: "Trình dựng agent",
@@ -1354,10 +1209,6 @@ export const dictionaries: Record<Language, Dictionary> = {
       promptHint: "Giữ prompt tập trung vào vai trò, ranh giới và dạng đầu ra. Chính sách runtime nên nằm ngoài phần mô tả này.",
       previewTitle: "Xem trước nội dung",
       previewDescription: "Rà nhanh những gì người dùng sẽ hiểu về agent này.",
-      settingsTitle: "Liên kết workspace",
-      settingsDescription: "Provider, secret và mặc định chung vẫn nằm trong Cài đặt.",
-      settingsHint: "Chỉ mở Cài đặt khi cần bật provider, thay key, hoặc đổi mặc định cấp workspace.",
-      openSettings: "Mở Cài đặt workspace",
       livePreviewTitle: "Xem thử nhanh",
       livePreviewDescription: "Kiểm tra model chat đang gán và chạy thử một lượt đơn giản.",
       notAssigned: "Chưa gán",
@@ -1629,96 +1480,31 @@ export const dictionaries: Record<Language, Dictionary> = {
       externalSource: "Nguồn ngoài",
     },
     agentsSettings: {
-      picker: {
-        providerPlaceholder: "Provider",
-        allProviders: "Tất cả provider",
-        searchModelPlaceholder: "Tìm model",
-        selectModelPlaceholder: "Chọn model",
-        noModelMatch: "Không có model phù hợp bộ lọc. Hãy thử provider khác hoặc xóa từ khóa tìm kiếm.",
-        assignmentUnavailable:
-          "Cấu hình hiện tại không còn trong catalog. Vui lòng chọn lại provider/model.",
-      },
       toasts: {
         agentSettingsSaved: "Đã lưu cài đặt agent.",
         saveFailedPrefix: "Lưu thất bại:",
-        agentProfileCreated: "Đã tạo hồ sơ agent.",
-        createFailedPrefix: "Tạo thất bại:",
         profileSaved: "Đã lưu hồ sơ.",
         profileSaveFailedPrefix: "Lưu hồ sơ thất bại:",
         defaultProfileUpdated: "Đã cập nhật hồ sơ mặc định.",
         defaultUpdateFailedPrefix: "Cập nhật mặc định thất bại:",
       },
       builder: {
-        title: "Cài đặt Agent Builder",
-        description:
-          "Bắt đầu với thiết lập provider và profile mặc định. Chỉ mở phần nâng cao khi cần.",
         minimalHint: "Ưu tiên đơn giản: kết nối provider, chọn mặc định, rồi lưu. Phần nâng cao là tùy chọn.",
-        refreshCatalog: "Làm mới catalog",
         saveSettings: "Lưu cài đặt",
-        showAdvanced: "Hiện nâng cao",
-        hideAdvanced: "Ẩn nâng cao",
-        workspace: "Workspace",
-        models: "Models",
-        tasks: "Tác vụ",
       },
       providerEnv: {
         title: "Thiết Lập Provider",
         description:
           "Nhập API key hoặc URL cần thiết cho từng provider. Bạn có thể chỉnh sửa bất cứ lúc nào.",
-        catalogOnly: "Chỉ catalog",
         enabled: "Bật",
         disabled: "Tắt",
         needsSetup: "Cần thiết lập",
         noAdditionalEnv: "Provider này có thể dùng ngay, không cần thiết lập thêm.",
-        missing: "thiếu",
         currentPrefix: "Đã lưu:",
-        anthropicCatalogHint:
-          "Nếu không đồng bộ được danh sách model trực tiếp, hệ thống sẽ hiển thị danh sách Claude dự phòng.",
-      },
-      profiles: {
-        title: "Hồ Sơ Agent",
-        description:
-          "Mỗi hồ sơ có prompt riêng và hành vi model mặc định riêng.",
-        newProfileNamePlaceholder: "Tên hồ sơ mới",
-        createProfile: "Tạo hồ sơ",
-        defaultBadge: "Mặc định",
-        noDescription: "Không có mô tả",
-        noProfileSelected: "Chưa chọn hồ sơ.",
-        panelDescription: "Prompt, routing và policy override gắn theo hồ sơ.",
-        setDefault: "Đặt mặc định",
-        saveProfile: "Lưu hồ sơ",
-        descriptionLabel: "Mô tả",
-        descriptionPlaceholder: "Hồ sơ này dùng để làm gì",
-        systemPromptLabel: "System Prompt",
-        systemPromptPlaceholder: "Bạn là một agent phân tích...",
-        allowChatOverride: "Cho phép chat override model",
       },
       taskRouting: {
-        title: "Task Routing",
-        description:
-          "Chọn model mặc định cho từng tác vụ.",
         ready: "Sẵn sàng",
         blocked: "Bị chặn",
-        contextPrefix: "Context",
-        structuredOutput: "Structured output",
-        noStructuredOutput: "Không hỗ trợ structured output",
-        streaming: "Streaming",
-        noStreaming: "Không streaming",
-        noModelSelected: "Chưa chọn model cho tác vụ này.",
-        na: "n/a",
-      },
-      modelCatalog: {
-        title: "Model Catalog",
-        description:
-          "Xem các model hiện có theo từng provider.",
-        allProviders: "Tất cả provider",
-        catalogOnly: "Chỉ catalog",
-        ready: "Sẵn sàng",
-        blocked: "Bị chặn",
-        contextPrefix: "Context",
-        recommendedFor: "Khuyến nghị cho",
-        noModelsForFilter: "Không có model cho bộ lọc provider này.",
-        na: "n/a",
       },
     },
     providerModelSelector: {

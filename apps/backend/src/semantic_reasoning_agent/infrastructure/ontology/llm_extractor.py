@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.domain.contracts.ontology_architecture import OntologyArchitectureDraft
 from semantic_reasoning_agent.domain.ontology.models import (
     ExtractedEntity,
     ExtractedRelation,
@@ -79,6 +80,7 @@ class OpenDomainLLMExtractor:
         self,
         chunks: list[OntologySourceChunk],
         workspace_id: str | None = None,
+        architecture_draft: OntologyArchitectureDraft | None = None,
     ) -> ExtractionResult:
         if not self._settings.ontology_llm_enabled:
             return ExtractionResult(domain="disabled", entities=[], relations=[])
@@ -98,10 +100,22 @@ class OpenDomainLLMExtractor:
         text = "\n\n".join(chunk.text for chunk in chunks[: self._settings.ontology_chunk_limit])
         resolved_workspace_id = workspace_id or self._settings.default_workspace_id
         schema = self._schema_registry.for_workspace(resolved_workspace_id)
+        draft_entity_types = [
+            item.name for item in architecture_draft.entity_types
+        ] if architecture_draft is not None else []
+        draft_relation_types = [
+            item.name for item in architecture_draft.relation_types
+        ] if architecture_draft is not None else []
+        normalization_hints = (
+            list(architecture_draft.normalization_hints)
+            if architecture_draft is not None
+            else []
+        )
         prompt = build_open_domain_prompt(
             text=text,
-            known_entity_types=schema.entity_types,
-            known_relation_types=schema.relation_types,
+            known_entity_types=tuple(dict.fromkeys((*draft_entity_types, *schema.entity_types))),
+            known_relation_types=tuple(dict.fromkeys((*draft_relation_types, *schema.relation_types))),
+            normalization_hints=normalization_hints,
             prompt_version=self._settings.ontology_prompt_version,
         )
         payload = self._invoke_anthropic(
@@ -177,6 +191,8 @@ class OpenDomainLLMExtractor:
             "prompt_version": self._settings.ontology_prompt_version,
             "source_chunk_id": source_chunk_id,
         }
+        if architecture_draft is not None:
+            base_provenance["architecture_draft_id"] = architecture_draft.draft_id
         entities = [
             ExtractedEntity(
                 name=item.name,

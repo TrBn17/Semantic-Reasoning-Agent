@@ -15,6 +15,8 @@ from semantic_reasoning_agent.services.chat_stream_service import ChatStreamServ
 from semantic_reasoning_agent.services.conversation_service import ConversationService
 from semantic_reasoning_agent.services.document_service import DocumentService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
+from semantic_reasoning_agent.services.ontology_architecture_service import OntologyArchitectureService
+from semantic_reasoning_agent.services.ontology_grounding_service import OntologyGroundingService
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
@@ -47,6 +49,8 @@ class AppContainer:
     task_dispatcher: TaskDispatcher
     document_service: DocumentService
     ontology_service: OntologyService
+    ontology_architecture_service: OntologyArchitectureService
+    ontology_grounding_service: OntologyGroundingService
     runtime_audit_service: RuntimeAuditService
     workflow_registry: WorkflowRegistry
     workflow_runtime: WorkflowRuntime
@@ -88,6 +92,12 @@ def get_app_container() -> AppContainer:
     )
     ontology_repository = OntologyRepository(database_manager)
     schema_registry = OntologySchemaRegistry(ontology_repository)
+    ontology_architecture_service = OntologyArchitectureService(
+        settings=settings,
+        database_manager=database_manager,
+        ontology_repo=ontology_repository,
+        model_config_service=model_config_service,
+    )
     ontology_service = OntologyService(
         settings,
         database_manager,
@@ -98,6 +108,11 @@ def get_app_container() -> AppContainer:
             model_config_service=model_config_service,
             schema_registry=schema_registry,
         ),
+        ontology_architecture_service=ontology_architecture_service,
+    )
+    ontology_grounding_service = OntologyGroundingService(
+        ontology_service=ontology_service,
+        ontology_architecture_service=ontology_architecture_service,
     )
     runtime_audit_service = RuntimeAuditService(database_manager)
     tool_registry = build_tool_registry(
@@ -111,7 +126,7 @@ def get_app_container() -> AppContainer:
         conversation_service=conversation_service,
         model_config_service=model_config_service,
         adapter_registry=adapter_registry,
-        ontology_service=ontology_service,
+        ontology_grounding_service=ontology_grounding_service,
         tool_registry=tool_registry,
         tool_runtime=tool_runtime,
         workflow_runtime=workflow_runtime,
@@ -135,6 +150,8 @@ def get_app_container() -> AppContainer:
         task_dispatcher=task_dispatcher,
         document_service=document_service,
         ontology_service=ontology_service,
+        ontology_architecture_service=ontology_architecture_service,
+        ontology_grounding_service=ontology_grounding_service,
         runtime_audit_service=runtime_audit_service,
         workflow_registry=workflow_registry,
         workflow_runtime=workflow_runtime,

@@ -30,7 +30,10 @@ from semantic_reasoning_agent.schemas.tools import (
 )
 from semantic_reasoning_agent.services.conversation_service import ConversationService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
-from semantic_reasoning_agent.services.ontology_service import OntologyGraphError, OntologyService
+from semantic_reasoning_agent.services.ontology_grounding_service import (
+    OntologyGroundingService,
+    TaskOntologyGrounding,
+)
 from semantic_reasoning_agent.services.runtime_audit_service import RuntimeAuditService
 from semantic_reasoning_agent.services.runtime_errors import ProviderNotReadyError
 from semantic_reasoning_agent.services.tool_registry import ToolRegistry
@@ -53,7 +56,7 @@ class TaskRuntime:
         conversation_service: ConversationService,
         model_config_service: ModelConfigService,
         adapter_registry: AdapterRegistry,
-        ontology_service: OntologyService,
+        ontology_grounding_service: OntologyGroundingService,
         tool_registry: ToolRegistry,
         tool_runtime: ToolRuntime,
         workflow_runtime: WorkflowRuntime,
@@ -62,7 +65,7 @@ class TaskRuntime:
         self._conversation_service = conversation_service
         self._model_config_service = model_config_service
         self._adapter_registry = adapter_registry
-        self._ontology_service = ontology_service
+        self._ontology_grounding_service = ontology_grounding_service
         self._tool_registry = tool_registry
         self._tool_runtime = tool_runtime
         self._workflow_runtime = workflow_runtime
@@ -70,6 +73,7 @@ class TaskRuntime:
 
     def resolve(self, payload: TaskResolutionRequest) -> TaskResolutionResponse:
         runtime = self._resolve_runtime(payload)
+        grounding = self._ontology_grounding_service.ground_workspace(runtime.workspace_id)
         task_id = self._audit_service.create_task_run(
             workspace_id=runtime.workspace_id,
             entrypoint=payload.entrypoint,
@@ -78,13 +82,19 @@ class TaskRuntime:
             conversation_id=payload.conversation_id,
             provider=runtime.provider,
             model=runtime.model,
-            input_payload=payload.model_dump(mode="json"),
+            input_payload={
+                **payload.model_dump(mode="json"),
+                "ontology_grounding": self._grounding_payload(grounding),
+            },
         )
-        workflow_id = self._select_workflow(payload, runtime)
+        workflow_id = self._select_workflow(payload, runtime, grounding)
         workflow_run_id, workflow_spec = self._workflow_runtime.start_run(
             task_id=task_id,
             workflow_id=workflow_id,
-            input_payload=payload.model_dump(mode="json"),
+            input_payload={
+                **payload.model_dump(mode="json"),
+                "ontology_grounding": self._grounding_payload(grounding),
+            },
         )
         try:
             if payload.conversation_id:
@@ -100,6 +110,7 @@ class TaskRuntime:
                 payload=payload,
                 runtime=runtime,
                 workflow_mode=workflow_spec.mode,
+                grounding=grounding,
             )
             output_payload = response.model_dump(mode="json")
             self._workflow_runtime.complete_run(
@@ -207,9 +218,17 @@ class TaskRuntime:
         )
 
     @staticmethod
-    def _select_workflow(payload: TaskResolutionRequest, runtime: ResolvedRuntime) -> str:
+    def _select_workflow(
+        payload: TaskResolutionRequest,
+        runtime: ResolvedRuntime,
+        grounding: TaskOntologyGrounding,
+    ) -> str:
         if payload.requested_output != "answer":
             return "review_publish"
+        if payload.task_type in {"ontology", "ontology_build"} or payload.requested_output == "ontology_candidates":
+            return "ontology_build"
+        if "ontology_build" in grounding.architecture.workflow_hints and "ontology" in payload.content.lower():
+            return "ontology_build"
         if runtime.provider == "echo" and payload.use_retrieval:
             return "answer_resolution"
         return "answer_resolution"
@@ -223,6 +242,7 @@ class TaskRuntime:
         payload: TaskResolutionRequest,
         runtime: ResolvedRuntime,
         workflow_mode: str,
+        grounding: TaskOntologyGrounding,
     ) -> TaskResolutionResponse:
         if payload.requested_output != "answer":
             return TaskResolutionResponse(
@@ -242,8 +262,8 @@ class TaskRuntime:
             )
         adapter = self._build_runtime_adapter(runtime)
         assert adapter is not None
-        ontology_context = self._build_ontology_context(runtime.workspace_id)
-        tools = self._select_tools(payload)
+        ontology_context = grounding.as_context_ref()
+        tools = self._select_tools(payload, grounding)
         messages = [LLMMessage(role="user", content=payload.content)]
         tool_summaries: list[ToolCallSummary] = []
         collected_evidence: list[Evidence] = []
@@ -433,28 +453,19 @@ class TaskRuntime:
             workflow_run_id=workflow_run_id,
         )
 
-    def _build_ontology_context(self, workspace_id: str) -> OntologyContextRef:
-        try:
-            graph = self._ontology_service.get_graph(workspace_id=workspace_id)
-        except OntologyGraphError:
-            return OntologyContextRef()
-        entity_hints = tuple(sorted({entity.entity_type for entity in graph.entities if entity.entity_type}))
-        relation_hints = tuple(
-            sorted({relation.relation_type for relation in graph.relations if relation.relation_type})
-        )
-        domain = graph.version.version_number if graph.version is not None else None
-        return OntologyContextRef(
-            domain=None if domain is None else f"published_v{domain}",
-            entity_hints=entity_hints[:20],
-            relation_hints=relation_hints[:20],
-        )
-
-    def _select_tools(self, payload: TaskResolutionRequest):
+    def _select_tools(self, payload: TaskResolutionRequest, grounding: TaskOntologyGrounding):
         max_risk = "low"
         specs = self._tool_registry.list(max_risk=max_risk)
-        if payload.use_retrieval:
+        if not payload.use_retrieval:
+            specs = [spec for spec in specs if spec.tool_family == "ontology"]
+        preferred = grounding.architecture.tool_affinity_hints
+        if not preferred:
             return specs
-        return [spec for spec in specs if spec.tool_family == "ontology"]
+        priority = {name: index for index, name in enumerate(preferred)}
+        return sorted(
+            specs,
+            key=lambda spec: (priority.get(spec.tool_name, 999), spec.tool_name),
+        )
 
     def _build_runtime_adapter(self, runtime: ResolvedRuntime):
         if runtime.provider == "anthropic":
@@ -492,6 +503,18 @@ class TaskRuntime:
         if base_system_prompt:
             return f"{base_system_prompt}\n\n{instructions}"
         return instructions
+
+    @staticmethod
+    def _grounding_payload(grounding: TaskOntologyGrounding) -> dict[str, Any]:
+        draft = grounding.architecture.draft
+        return {
+            "domain": grounding.architecture.domain or grounding.published_domain,
+            "entity_hints": list(dict.fromkeys(grounding.architecture.entity_hints + grounding.published_entity_hints)),
+            "relation_hints": list(dict.fromkeys(grounding.architecture.relation_hints + grounding.published_relation_hints)),
+            "workflow_hints": list(grounding.architecture.workflow_hints),
+            "tool_affinity_hints": list(grounding.architecture.tool_affinity_hints),
+            "draft_id": None if draft is None else draft.draft_id,
+        }
 
     @staticmethod
     def _tool_result_json(result) -> str:  # noqa: ANN001

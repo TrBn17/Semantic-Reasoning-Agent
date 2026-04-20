@@ -77,6 +77,18 @@ def build_workflow_registry() -> WorkflowRegistry:
     return WorkflowRegistry(
         [
             WorkflowSpec(
+                workflow_id="ontology_design",
+                version="1.0.0",
+                mode="deterministic",
+                description="Generate and review an internal ontology architecture draft from workspace evidence.",
+            ),
+            WorkflowSpec(
+                workflow_id="ontology_candidate_build",
+                version="1.0.0",
+                mode="deterministic",
+                description="Extract and normalize ontology candidates using the active ontology architecture draft.",
+            ),
+            WorkflowSpec(
                 workflow_id="answer_resolution",
                 version="1.0.0",
                 mode="agentic",

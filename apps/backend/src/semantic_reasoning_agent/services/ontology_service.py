@@ -53,6 +53,9 @@ from semantic_reasoning_agent.services.ontology_mappers import (
     step_to_response,
     version_to_response,
 )
+from semantic_reasoning_agent.services.ontology_architecture_service import (
+    OntologyArchitectureService,
+)
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
 
@@ -64,12 +67,17 @@ class OntologyService:
         task_dispatcher: TaskDispatcher,
         graph_store: GraphStore,
         ontology_extractor: OntologyExtractorPort,
+        ontology_architecture_service: OntologyArchitectureService,
     ) -> None:
         self._settings = settings
         self._database_manager = database_manager
         self._task_dispatcher = task_dispatcher
         self._graph_store = graph_store
         self._ontology_extractor = ontology_extractor
+        self._ontology_architecture_service = ontology_architecture_service
+
+    def get_active_architecture_draft(self, workspace_id: str):
+        return self._ontology_architecture_service.get_active_draft(workspace_id)
 
     def create_build(self, request: OntologyBuildCreateRequest) -> OntologyBuildResponse:
         with self._database_manager.session() as session:
@@ -475,29 +483,60 @@ class OntologyService:
         self._mark_build_running(build_id)
         try:
             extraction_run_id = str(uuid4())
+            architecture_draft = self._ontology_architecture_service.ensure_active_draft(
+                workspace_id=build.workspace_id,
+                source_document_ids=[build.document_id],
+                source_build_id=build.id,
+                chunk_samples=[
+                    (chunk.chunk_id, build.document_id, chunk.text[:1000])
+                    for chunk in chunks[:8]
+                ],
+            )
             self._mark_step_running(build_id, "classify_document_domain")
-            domain = self._ontology_extractor.classify_document_domain(chunks)
+            domain = architecture_draft.domain or self._ontology_extractor.classify_document_domain(chunks)
             self._mark_step_completed(
                 build_id,
                 "classify_document_domain",
-                detail=f"Detected document domain '{domain}'.",
+                detail=(
+                    f"Resolved document domain '{domain}' using ontology architecture "
+                    f"draft '{architecture_draft.draft_id}'."
+                ),
             )
-            self._update_build_state(build_id, status=OntologyBuildStatus.running.value, domain=domain)
+            self._update_build_state(
+                build_id,
+                status=OntologyBuildStatus.running.value,
+                domain=domain,
+                architecture_draft_id=architecture_draft.draft_id,
+            )
 
             self._mark_step_running(build_id, "extract_entities")
             extraction = self._ontology_extractor.extract_ontology_candidates(
                 chunks,
                 workspace_id=build.workspace_id,
+                architecture_draft=architecture_draft,
             )
+            resolved_domain = extraction.domain if extraction.domain and extraction.domain != "pending" else domain
+            if resolved_domain != domain:
+                self._update_build_state(
+                    build_id,
+                    status=OntologyBuildStatus.running.value,
+                    domain=resolved_domain,
+                    architecture_draft_id=architecture_draft.draft_id,
+                )
+                domain = resolved_domain
             entity_id_map = self._replace_candidate_entities(
                 build,
                 extraction.entities,
                 extraction_run_id=extraction_run_id,
+                architecture_draft_id=architecture_draft.draft_id,
             )
             self._mark_step_completed(
                 build_id,
                 "extract_entities",
-                detail=f"Extracted {len(extraction.entities)} candidate entities.",
+                detail=(
+                    f"Extracted {len(extraction.entities)} candidate entities "
+                    f"using architecture draft '{architecture_draft.draft_id}'."
+                ),
             )
 
             self._mark_step_running(build_id, "extract_relations")
@@ -506,11 +545,15 @@ class OntologyService:
                 extraction.relations,
                 entity_id_map,
                 extraction_run_id=extraction_run_id,
+                architecture_draft_id=architecture_draft.draft_id,
             )
             self._mark_step_completed(
                 build_id,
                 "extract_relations",
-                detail=f"Extracted {len(extraction.relations)} candidate relations.",
+                detail=(
+                    f"Extracted {len(extraction.relations)} candidate relations "
+                    f"using architecture draft '{architecture_draft.draft_id}'."
+                ),
             )
 
             self._mark_step_running(build_id, "resolve_entities")
@@ -609,6 +652,7 @@ class OntologyService:
             build.status = OntologyBuildStatus.pending.value
             build.error_message = None
             build.domain = None
+            build.architecture_draft_id = None
             build.started_at = None
             build.finished_at = None
             build.updated_at = utc_now()
@@ -648,6 +692,7 @@ class OntologyService:
         *,
         status: str,
         domain: str | None = None,
+        architecture_draft_id: str | None = None,
         finished_at: datetime | None = None,
         error_message: str | None = None,
     ) -> None:
@@ -660,6 +705,8 @@ class OntologyService:
             build.error_message = error_message
             if domain is not None:
                 build.domain = domain
+            if architecture_draft_id is not None:
+                build.architecture_draft_id = architecture_draft_id
             if finished_at is not None:
                 build.finished_at = finished_at
 
@@ -744,6 +791,7 @@ class OntologyService:
         entities: list[ExtractedEntity],
         *,
         extraction_run_id: str,
+        architecture_draft_id: str | None,
     ) -> dict[str, str]:
         entity_id_map: dict[str, str] = {}
         with self._database_manager.session() as session:
@@ -775,8 +823,10 @@ class OntologyService:
                             "run_id": extraction_run_id,
                             "build_id": build.id,
                             "prompt_version": self._settings.ontology_prompt_version,
+                            "architecture_draft_id": architecture_draft_id,
                         },
                         aliases=sorted(entity.aliases),
+                        architecture_draft_id=architecture_draft_id,
                         merged_into_entity_id=None,
                         created_at=timestamp,
                         updated_at=timestamp,
@@ -791,6 +841,7 @@ class OntologyService:
         entity_id_map: dict[str, str],
         *,
         extraction_run_id: str,
+        architecture_draft_id: str | None,
     ) -> None:
         with self._database_manager.session() as session:
             session.execute(
@@ -820,7 +871,9 @@ class OntologyService:
                             "run_id": extraction_run_id,
                             "build_id": build.id,
                             "prompt_version": self._settings.ontology_prompt_version,
+                            "architecture_draft_id": architecture_draft_id,
                         },
+                        architecture_draft_id=architecture_draft_id,
                         created_at=timestamp,
                         updated_at=timestamp,
                     )

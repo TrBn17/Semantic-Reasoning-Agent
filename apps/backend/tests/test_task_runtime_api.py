@@ -14,7 +14,14 @@ def test_workflows_endpoint_lists_registered_runtime_workflows() -> None:
     assert response.status_code == 200
     body = response.json()
     workflow_ids = {item["workflow_id"] for item in body}
-    assert {"answer_resolution", "document_ingestion", "ontology_build", "review_publish"} <= workflow_ids
+    assert {
+        "answer_resolution",
+        "document_ingestion",
+        "ontology_build",
+        "ontology_design",
+        "ontology_candidate_build",
+        "review_publish",
+    } <= workflow_ids
 
 
 def test_tasks_resolve_persists_task_and_tool_calls_for_grounded_answer() -> None:

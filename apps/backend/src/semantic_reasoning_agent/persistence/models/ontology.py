@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -25,6 +25,7 @@ class OntologyBuildORM(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     published_version_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    architecture_draft_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     steps: Mapped[list["OntologyBuildStepORM"]] = relationship(
         back_populates="build",
@@ -82,6 +83,7 @@ class OntologyCandidateEntityORM(Base):
     evidence_text: Mapped[str] = mapped_column(Text)
     provenance: Mapped[dict] = mapped_column(JSON, default=dict)
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    architecture_draft_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     merged_into_entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -110,6 +112,7 @@ class OntologyCandidateRelationORM(Base):
     source_chunk_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     evidence_text: Mapped[str] = mapped_column(Text)
     provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    architecture_draft_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -179,3 +182,52 @@ class OntologyRelationORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     version: Mapped[OntologyVersionORM] = relationship(back_populates="relations")
+
+
+class OntologyArchitectureDraftORM(Base):
+    __tablename__ = "ontology_architecture_drafts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    source_document_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    source_build_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    domain: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    entity_types: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    relation_types: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    normalization_hints: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    workflow_hints: Mapped[list[str]] = mapped_column(JSON, default=list)
+    tool_affinity_hints: Mapped[list[str]] = mapped_column(JSON, default=list)
+    review_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_findings: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    evidence_links: Mapped[list["OntologyArchitectureEvidenceLinkORM"]] = relationship(
+        back_populates="draft",
+        cascade="all, delete-orphan",
+        order_by="OntologyArchitectureEvidenceLinkORM.created_at",
+    )
+
+
+class OntologyArchitectureEvidenceLinkORM(Base):
+    __tablename__ = "ontology_architecture_evidence_links"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    draft_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("ontology_architecture_drafts.id", ondelete="CASCADE"),
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    source_document_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_chunk_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    link_kind: Mapped[str] = mapped_column(String(32), index=True)
+    target_name: Mapped[str] = mapped_column(String(128), index=True)
+    evidence_text: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    draft: Mapped[OntologyArchitectureDraftORM] = relationship(back_populates="evidence_links")
