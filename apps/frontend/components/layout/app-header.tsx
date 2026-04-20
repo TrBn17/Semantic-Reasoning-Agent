@@ -9,21 +9,26 @@ export function AppHeader({ title }: { title?: string }) {
   const { t } = useI18n();
 
   return (
-    <header className="flex h-14 items-center justify-between gap-4 border-b bg-background px-6">
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-border/70 bg-background/80 px-6 backdrop-blur">
       <div className="flex items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg border bg-slate-100 shadow-sm dark:bg-slate-800/80">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl border bg-gradient-to-br from-primary/15 to-primary/5 shadow-sm ring-1 ring-white/50 dark:ring-white/5">
           <Image
             src="/logo.svg"
-            alt="Semantic Agent logo"
-            width={18}
-            height={18}
+            alt={t.layout.logoAlt}
+            width={20}
+            height={20}
             className="object-contain"
             priority
           />
         </div>
-        <h1 className="text-sm font-medium text-muted-foreground">
-          {title ?? t.appName}
-        </h1>
+        <div className="leading-tight">
+          <p className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
+            {t.layout.brandTagline}
+          </p>
+          <h1 className="text-sm font-semibold text-foreground">
+            {title ?? t.appName}
+          </h1>
+        </div>
       </div>
       <div className="flex items-center gap-3">
         <LanguageSwitcher />

@@ -9,11 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import (
-    AgentProfileTaskModelORM,
-    ProviderConfigORM,
-    TaskModelConfigORM,
-)
+from semantic_reasoning_agent.persistence.models.agent_profiles import AgentProfileTaskModelORM
+from semantic_reasoning_agent.persistence.models.providers import ProviderConfigORM, TaskModelConfigORM
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.schemas.agents import (
     AgentSettingsResponse,
@@ -25,6 +22,12 @@ from semantic_reasoning_agent.schemas.agents import (
     TaskAssignmentResponse,
     TaskDefinition,
     TaskType,
+)
+from semantic_reasoning_agent.services.anthropic_provider_service import (
+    ANTHROPIC_PROVIDER_OPTIONS,
+    provider_from_base_url,
+    resolve_anthropic_base_url,
+    settings_anthropic_provider,
 )
 from semantic_reasoning_agent.services.secret_service import SecretService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService, ProviderModel
@@ -42,6 +45,8 @@ class ProviderFieldSpec:
     help_text: str
     required: bool = True
     secret: bool = False
+    input_type: str = "text"
+    options: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -126,12 +131,14 @@ PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
                 secret=True,
             ),
             ProviderFieldSpec(
-                key="ANTHROPIC_BASE_URL",
-                label="Anthropic Base URL",
-                placeholder="https://api.anthropic.com",
-                help_text="Endpoint tùy chỉnh cho Anthropic-compatible gateway (optional).",
+                key="ANTHROPIC_PROVIDER_TARGET",
+                label="Anthropic Provider",
+                placeholder="anthropic",
+                help_text="Chọn provider Anthropic mặc định hoặc gateway Anthropic-compatible.",
                 required=False,
                 secret=False,
+                input_type="select",
+                options=ANTHROPIC_PROVIDER_OPTIONS,
             ),
         ),
     ),
@@ -208,13 +215,7 @@ class ModelConfigService:
                     provider_configs,
                     secret=True,
                 ),
-                "base_url": self._resolve_provider_field_value(
-                    workspace_id,
-                    "anthropic",
-                    "ANTHROPIC_BASE_URL",
-                    provider_configs,
-                    secret=False,
-                ),
+                "base_url": self._resolve_anthropic_base_url(workspace_id, provider_configs),
             },
             "gemini": {
                 "api_key": self._resolve_provider_field_value(
@@ -281,6 +282,42 @@ class ModelConfigService:
 
     def list_tasks(self) -> list[TaskDefinition]:
         return list(TASK_DEFINITIONS)
+
+    def provider_supports_runtime(self, provider: str) -> bool:
+        return self._adapter_registry.supports(provider)
+
+    def get_provider_runtime_config(
+        self,
+        provider: str,
+        workspace_id: str | None = None,
+    ) -> dict[str, str | None]:
+        resolved_workspace_id = workspace_id or self._settings.default_workspace_id
+        provider_configs = self._load_provider_configs(resolved_workspace_id)
+        if provider == "anthropic":
+            return {
+                "api_key": self._resolve_provider_field_value(
+                    resolved_workspace_id,
+                    "anthropic",
+                    "ANTHROPIC_API_KEY",
+                    provider_configs,
+                    secret=True,
+                ),
+                "base_url": self._resolve_anthropic_base_url(
+                    resolved_workspace_id,
+                    provider_configs,
+                ),
+            }
+        if provider == "openai":
+            return {
+                "api_key": self._resolve_provider_field_value(
+                    resolved_workspace_id,
+                    "openai",
+                    "OPENAI_API_KEY",
+                    provider_configs,
+                    secret=True,
+                ),
+            }
+        return {}
 
     async def get_catalog(self, workspace_id: str | None = None) -> list[ModelOption]:
         return await self.list_models(workspace_id)
@@ -395,7 +432,7 @@ class ModelConfigService:
         if missing_env_fields:
             return False
             
-        supports_runtime = self._adapter_registry.get(provider) is not None
+        supports_runtime = self.provider_supports_runtime(provider)
         return supports_runtime
 
     def resolve_task_model(
@@ -477,7 +514,7 @@ class ModelConfigService:
         provider_config = provider_configs.get(provider)
         enabled = provider_config.enabled if provider_config is not None else True
         missing_env_fields = self._missing_env_fields(provider_spec, provider_config, workspace_id)
-        supports_runtime = self._adapter_registry.get(provider) is not None
+        supports_runtime = self.provider_supports_runtime(provider)
         
         if not enabled:
             ready = False
@@ -519,7 +556,7 @@ class ModelConfigService:
         provider_config = provider_configs.get(spec.provider)
         enabled = provider_config.enabled if provider_config is not None else True
         missing_env_fields = self._missing_env_fields(provider_spec, provider_config, workspace_id)
-        supports_runtime = self._adapter_registry.get(spec.provider) is not None
+        supports_runtime = self.provider_supports_runtime(spec.provider)
         if not enabled:
             ready = False
             reason = "Provider đang bị tắt trong agent settings."
@@ -557,7 +594,7 @@ class ModelConfigService:
     ) -> ProviderConfigResponse:
         provider_config = provider_configs.get(spec.provider)
         enabled = provider_config.enabled if provider_config is not None else True
-        supports_runtime = self._adapter_registry.get(spec.provider) is not None
+        supports_runtime = self.provider_supports_runtime(spec.provider)
         missing_env_fields = self._missing_env_fields(spec, provider_config, workspace_id)
         if not enabled:
             ready = False
@@ -575,6 +612,14 @@ class ModelConfigService:
         values = []
         for field in spec.fields:
             configured_value = provider_config.env_values.get(field.key, "") if provider_config else ""
+            if (
+                not configured_value
+                and spec.provider == "anthropic"
+                and field.key == "ANTHROPIC_PROVIDER_TARGET"
+            ):
+                legacy_base_url = provider_config.env_values.get("ANTHROPIC_BASE_URL", "") if provider_config else ""
+                if legacy_base_url:
+                    configured_value = provider_from_base_url(legacy_base_url)
             runtime_value = self._runtime_env_value(field.key)
             secret_descriptor = (
                 self._secret_service.describe_provider_secret(workspace_id, spec.provider, field.key)
@@ -621,6 +666,8 @@ class ModelConfigService:
                     required=field.required,
                     secret=field.secret,
                     help_text=field.help_text,
+                    input_type=field.input_type,
+                    options=list(field.options),
                 )
                 for field in spec.fields
             ],
@@ -663,11 +710,36 @@ class ModelConfigService:
         attr_by_env = {
             "OPENAI_API_KEY": self._settings.openai_api_key,
             "ANTHROPIC_API_KEY": self._settings.anthropic_api_key,
+            "ANTHROPIC_PROVIDER_TARGET": settings_anthropic_provider(self._settings),
             "ANTHROPIC_BASE_URL": self._settings.anthropic_base_url,
             "GOOGLE_API_KEY": self._settings.google_api_key,
             "OLLAMA_BASE_URL": self._settings.ollama_base_url,
         }
         return attr_by_env.get(field_key)
+
+    def _resolve_anthropic_base_url(
+        self,
+        workspace_id: str,
+        provider_configs: dict[str, ProviderConfigORM],
+    ) -> str | None:
+        provider_target = self._resolve_provider_field_value(
+            workspace_id,
+            "anthropic",
+            "ANTHROPIC_PROVIDER_TARGET",
+            provider_configs,
+            secret=False,
+        )
+        legacy_base_url = self._resolve_provider_field_value(
+            workspace_id,
+            "anthropic",
+            "ANTHROPIC_BASE_URL",
+            provider_configs,
+            secret=False,
+        )
+        return resolve_anthropic_base_url(
+            provider_target=provider_target,
+            explicit_base_url=legacy_base_url,
+        )
 
     def _missing_env_fields(
         self,

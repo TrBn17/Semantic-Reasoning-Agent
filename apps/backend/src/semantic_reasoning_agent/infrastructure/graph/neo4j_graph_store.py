@@ -123,6 +123,15 @@ class Neo4jGraphStore(GraphStore):
             ],
         )
 
+    def delete_workspace(self, workspace_id: str) -> None:
+        try:
+            with self._driver.session(database=self._database) as session:
+                session.execute_write(_delete_workspace_projection, workspace_id)
+        except Exception as exc:
+            raise GraphStoreError(
+                f"Failed to delete Neo4j ontology projection for '{workspace_id}'."
+            ) from exc
+
     @staticmethod
     def _label_exists(session, label: str) -> bool:
         record = session.run(
@@ -134,6 +143,24 @@ class Neo4jGraphStore(GraphStore):
             label=label,
         ).single()
         return bool(record and record["exists"])
+
+
+def _delete_workspace_projection(tx, workspace_id: str) -> None:
+    tx.run(
+        """
+        MATCH (workspace:Workspace {id: $workspace_id})-[:HAS_ONTOLOGY_VERSION]->(version:OntologyVersion)
+        OPTIONAL MATCH (version)-[:HAS_ENTITY]->(entity:OntologyEntity)
+        DETACH DELETE entity
+        """,
+        workspace_id=workspace_id,
+    )
+    tx.run(
+        """
+        MATCH (workspace:Workspace {id: $workspace_id})-[:HAS_ONTOLOGY_VERSION]->(version:OntologyVersion)
+        DETACH DELETE version
+        """,
+        workspace_id=workspace_id,
+    )
 
 
 def _replace_version_snapshot(tx, parameters: dict) -> None:

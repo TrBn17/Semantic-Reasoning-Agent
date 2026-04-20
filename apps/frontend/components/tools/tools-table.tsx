@@ -17,8 +17,10 @@ import type { RiskLevel, ToolSpec } from "@/lib/api/types";
 import { queryKeys } from "@/lib/query/keys";
 
 import { ToolInvokeDialog } from "@/components/tools/tool-invoke-dialog";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function ToolsTable() {
+  const { t } = useI18n();
   const { data, isLoading, isError, error } = useQuery({
     queryKey: queryKeys.tools.list(),
     queryFn: () => listTools(),
@@ -28,27 +30,27 @@ export function ToolsTable() {
   if (isError)
     return (
       <p className="text-sm text-destructive">
-        Failed to load tools: {(error as Error)?.message ?? "unknown error"}.
+        {t.tools.loadFailedPrefix} {(error as Error)?.message ?? t.common.unknown}.
       </p>
     );
   if (!data || data.length === 0)
     return (
-      <p className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-        No tools registered yet.
+      <p className="surface-panel border-dashed p-6 text-center text-sm text-muted-foreground">
+        {t.tools.empty}
       </p>
     );
 
   return (
-    <div className="rounded-md border">
+    <div className="surface-panel overflow-hidden">
       <Table>
-        <TableHeader>
+        <TableHeader className="bg-muted/30">
           <TableRow>
-            <TableHead>Tool</TableHead>
-            <TableHead>Family</TableHead>
-            <TableHead>Risk</TableHead>
-            <TableHead>Capabilities</TableHead>
-            <TableHead className="text-right">Timeout</TableHead>
-            <TableHead className="text-right">Action</TableHead>
+            <TableHead className="pl-4">{t.tools.table.tool}</TableHead>
+            <TableHead>{t.tools.table.family}</TableHead>
+            <TableHead>{t.tools.table.risk}</TableHead>
+            <TableHead>{t.tools.table.capabilities}</TableHead>
+            <TableHead className="text-right">{t.tools.table.timeout}</TableHead>
+            <TableHead className="pr-4 text-right">{t.tools.table.action}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -62,12 +64,14 @@ export function ToolsTable() {
 }
 
 function ToolRow({ tool }: { tool: ToolSpec }) {
+  const { t } = useI18n();
+
   return (
-    <TableRow>
-      <TableCell>
-        <div className="font-medium font-mono text-sm">{tool.tool_name}</div>
-        <div className="text-xs text-muted-foreground">{tool.description}</div>
-        <div className="mt-1 flex gap-1 text-[10px] text-muted-foreground">
+    <TableRow className="transition-colors hover:bg-accent/40">
+      <TableCell className="pl-4 align-top">
+        <div className="font-mono text-sm font-semibold text-foreground">{tool.tool_name}</div>
+        <div className="max-w-xl text-xs leading-5 text-muted-foreground">{tool.description}</div>
+        <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
           <span className="uppercase">{tool.tool_type.replace("_", " ")}</span>
           <span>·</span>
           <span>v{tool.version}</span>
@@ -75,23 +79,23 @@ function ToolRow({ tool }: { tool: ToolSpec }) {
           <span>{tool.side_effect_level.replace("_", " ")}</span>
         </div>
       </TableCell>
-      <TableCell>
-        <Badge variant="outline" className="font-mono text-xs">
+      <TableCell className="align-top">
+        <Badge variant="outline" className="rounded-full font-mono text-xs">
           {tool.tool_family}
         </Badge>
       </TableCell>
-      <TableCell>
+      <TableCell className="align-top">
         <RiskBadge level={tool.risk_level} />
       </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
+      <TableCell className="align-top text-xs text-muted-foreground">
         {tool.capabilities.length === 0 ? (
-          <span className="italic">none</span>
+          <span className="italic">{t.common.none}</span>
         ) : (
           <div className="flex flex-wrap gap-1">
             {tool.capabilities.map((cap) => (
               <span
                 key={cap}
-                className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]"
+                className="rounded-full bg-muted px-2 py-0.5 font-mono text-[10px]"
               >
                 {cap}
               </span>
@@ -99,10 +103,10 @@ function ToolRow({ tool }: { tool: ToolSpec }) {
           </div>
         )}
       </TableCell>
-      <TableCell className="text-right font-mono text-xs">
+      <TableCell className="align-top text-right font-mono text-xs text-muted-foreground">
         {(tool.timeout_ms / 1000).toFixed(1)}s
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="align-top pr-4 text-right">
         <ToolInvokeDialog tool={tool} />
       </TableCell>
     </TableRow>
@@ -110,10 +114,12 @@ function ToolRow({ tool }: { tool: ToolSpec }) {
 }
 
 function RiskBadge({ level }: { level: RiskLevel }) {
+  const { t } = useI18n();
   const variant = level === "high" ? "destructive" : level === "medium" ? "warning" : "success";
+  const label = level === "high" ? t.tools.risk.high : level === "medium" ? t.tools.risk.medium : t.tools.risk.low;
   return (
     <Badge variant={variant} className="capitalize">
-      {level}
+      {label}
     </Badge>
   );
 }

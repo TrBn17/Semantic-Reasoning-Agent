@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
+import { useRouteTransition } from "@/components/layout/route-transition-provider";
+import { LoadingLink as Link } from "@/components/navigation/loading-link";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,11 +17,14 @@ import {
 import { listAgentProfiles } from "@/lib/api/agent-profiles";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function ConversationList() {
+  const { t } = useI18n();
   const params = useParams<{ conversationId?: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { beginNavigation } = useRouteTransition();
   const { workspaceId, preferredAgentProfileId } = useWorkspaceStore();
 
   const {
@@ -45,23 +49,26 @@ export function ConversationList() {
       }),
     onSuccess: (conversation) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations.all });
-      router.push(`/ask/${conversation.id}`);
-      toast.success("Conversation created");
+      const href = `/ask/${conversation.id}`;
+      beginNavigation(href);
+      router.push(href);
+      toast.success(t.chat.conversationCreated);
     },
-    onError: (err) => toast.error(`Failed to create: ${(err as Error).message}`),
+    onError: (err) =>
+      toast.error(`${t.chat.conversationCreateFailedPrefix} ${(err as Error).message}`),
   });
 
   return (
     <div className="flex h-full w-72 shrink-0 flex-col border-r bg-muted/20">
       <div className="flex items-center justify-between border-b p-3">
-        <span className="text-sm font-semibold">Conversations</span>
+        <span className="text-sm font-semibold">{t.chat.conversations}</span>
         <Button
           size="sm"
           onClick={() => createMutation.mutate()}
           disabled={createMutation.isPending}
         >
           <Plus className="h-4 w-4" />
-          New
+          {t.chat.newChat}
         </Button>
       </div>
       <ScrollArea className="flex-1">
@@ -71,14 +78,10 @@ export function ConversationList() {
               <Skeleton key={i} className="h-12 w-full" />
             ))}
           {isError && (
-            <p className="p-3 text-sm text-destructive">
-              Failed to load conversations.
-            </p>
+            <p className="p-3 text-sm text-destructive">{t.chat.loadConversationsFailed}</p>
           )}
           {conversations?.length === 0 && (
-            <p className="p-3 text-sm text-muted-foreground">
-              No conversations yet. Click New to start.
-            </p>
+            <p className="p-3 text-sm text-muted-foreground">{t.chat.noConversationsYet}</p>
           )}
           {conversations?.map((c) => {
             const active = params?.conversationId === c.id;

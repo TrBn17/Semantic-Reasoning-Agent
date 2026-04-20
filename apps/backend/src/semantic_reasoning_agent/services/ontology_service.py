@@ -1,15 +1,14 @@
-from datetime import datetime, timezone
 from collections import defaultdict
+from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, desc, func, select, update
 from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import (
-    DocumentChunkORM,
-    DocumentORM,
+from semantic_reasoning_agent.persistence.models.documents import DocumentChunkORM, DocumentORM
+from semantic_reasoning_agent.persistence.models.ontology import (
     OntologyBuildORM,
     OntologyBuildStepORM,
     OntologyCandidateEntityORM,
@@ -25,45 +24,36 @@ from semantic_reasoning_agent.ports.ontology_extractor import OntologyExtractorP
 from semantic_reasoning_agent.ports.graph_store import GraphStore, GraphStoreError, PublishedOntologySnapshot
 from semantic_reasoning_agent.schemas.documents import DocumentStatus
 from semantic_reasoning_agent.schemas.ontology import (
+    KnowledgeGraphIngestResponse,
+    KnowledgeGraphRelationPatch,
     OntologyBuildCreateRequest,
     OntologyBuildResponse,
     OntologyBuildStatus,
-    OntologyBuildStepResponse,
-    OntologyCandidateEntityResponse,
-    OntologyCandidateRelationResponse,
     OntologyEntityResponse,
     OntologyGraphResponse,
     OntologyPublishResponse,
     OntologyRelationResponse,
-    OntologyReviewAction,
     OntologyReviewStatus,
     OntologyStepStatus,
     OntologyVersionResponse,
 )
+from semantic_reasoning_agent.services.ontology_errors import (
+    OntologyBuildError,
+    OntologyBuildNotFoundError,
+    OntologyGraphError,
+    OntologyPublishError,
+    OntologyRelationNotFoundError,
+    utc_now,
+)
+from semantic_reasoning_agent.services.ontology_mappers import (
+    build_step_records,
+    entity_to_response,
+    relation_to_response,
+    step_sort_key,
+    step_to_response,
+    version_to_response,
+)
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-class OntologyBuildNotFoundError(ValueError):
-    """Raised when an ontology build id does not exist."""
-
-
-class OntologyCandidateNotFoundError(ValueError):
-    """Raised when an ontology candidate id does not exist."""
-
-
-class OntologyBuildError(ValueError):
-    """Raised when an ontology build cannot be created or processed."""
-
-
-class OntologyPublishError(ValueError):
-    """Raised when an ontology build cannot be published."""
-
-
-class OntologyGraphError(ValueError):
-    """Raised when the published graph cannot be read."""
 
 
 class OntologyService:
@@ -108,20 +98,11 @@ class OntologyService:
                     published_version_id=None,
                 )
             )
-            session.add_all(self._build_step_records(build_id))
+            session.add_all(build_step_records(build_id))
 
-        self._queue_build(build_id)
+        if request.enqueue_processing:
+            self._queue_build(build_id)
         return self.get_build(build_id)
-
-    def list_builds(self, workspace_id: str | None = None) -> list[OntologyBuildResponse]:
-        resolved_workspace_id = workspace_id or self._settings.default_workspace_id
-        with self._database_manager.session() as session:
-            builds = session.scalars(
-                select(OntologyBuildORM)
-                .where(OntologyBuildORM.workspace_id == resolved_workspace_id)
-                .order_by(desc(OntologyBuildORM.created_at))
-            ).all()
-            return self._to_build_schemas(session, builds)
 
     def get_build(self, build_id: str) -> OntologyBuildResponse:
         with self._database_manager.session() as session:
@@ -131,94 +112,6 @@ class OntologyService:
             if build is None:
                 raise OntologyBuildNotFoundError(f"Ontology build '{build_id}' was not found.")
             return self._to_build_schemas(session, [build])[0]
-
-    def list_build_entities(
-        self,
-        build_id: str,
-        status: OntologyReviewStatus | None = None,
-    ) -> list[OntologyCandidateEntityResponse]:
-        self._ensure_build_exists(build_id)
-        with self._database_manager.session() as session:
-            statement = select(OntologyCandidateEntityORM).where(
-                OntologyCandidateEntityORM.build_id == build_id
-            )
-            if status is not None:
-                statement = statement.where(OntologyCandidateEntityORM.status == status.value)
-            entities = session.scalars(statement).all()
-            entities.sort(key=lambda entity: entity.canonical_name.lower())
-            return [self._to_candidate_entity_schema(entity) for entity in entities]
-
-    def list_build_relations(
-        self,
-        build_id: str,
-        status: OntologyReviewStatus | None = None,
-    ) -> list[OntologyCandidateRelationResponse]:
-        self._ensure_build_exists(build_id)
-        with self._database_manager.session() as session:
-            statement = select(OntologyCandidateRelationORM).where(
-                OntologyCandidateRelationORM.build_id == build_id
-            )
-            if status is not None:
-                statement = statement.where(OntologyCandidateRelationORM.status == status.value)
-            relations = session.scalars(statement).all()
-            relations.sort(
-                key=lambda relation: (
-                    relation.relation_type,
-                    relation.source_name.lower(),
-                    relation.target_name.lower(),
-                )
-            )
-            return [self._to_candidate_relation_schema(relation) for relation in relations]
-
-    def review_entity(
-        self,
-        entity_id: str,
-        action: OntologyReviewAction,
-    ) -> OntologyCandidateEntityResponse:
-        with self._database_manager.session() as session:
-            entity = session.get(OntologyCandidateEntityORM, entity_id)
-            if entity is None:
-                raise OntologyCandidateNotFoundError(f"Ontology entity candidate '{entity_id}' was not found.")
-            entity.status = self._status_from_action(action)
-            entity.updated_at = utc_now()
-            build = session.get(OntologyBuildORM, entity.build_id)
-            if build is not None:
-                build.updated_at = utc_now()
-        return self.get_entity(entity_id)
-
-    def review_relation(
-        self,
-        relation_id: str,
-        action: OntologyReviewAction,
-    ) -> OntologyCandidateRelationResponse:
-        with self._database_manager.session() as session:
-            relation = session.get(OntologyCandidateRelationORM, relation_id)
-            if relation is None:
-                raise OntologyCandidateNotFoundError(
-                    f"Ontology relation candidate '{relation_id}' was not found."
-                )
-            relation.status = self._status_from_action(action)
-            relation.updated_at = utc_now()
-            build = session.get(OntologyBuildORM, relation.build_id)
-            if build is not None:
-                build.updated_at = utc_now()
-        return self.get_relation(relation_id)
-
-    def get_entity(self, entity_id: str) -> OntologyCandidateEntityResponse:
-        with self._database_manager.session() as session:
-            entity = session.get(OntologyCandidateEntityORM, entity_id)
-            if entity is None:
-                raise OntologyCandidateNotFoundError(f"Ontology entity candidate '{entity_id}' was not found.")
-            return self._to_candidate_entity_schema(entity)
-
-    def get_relation(self, relation_id: str) -> OntologyCandidateRelationResponse:
-        with self._database_manager.session() as session:
-            relation = session.get(OntologyCandidateRelationORM, relation_id)
-            if relation is None:
-                raise OntologyCandidateNotFoundError(
-                    f"Ontology relation candidate '{relation_id}' was not found."
-                )
-            return self._to_candidate_relation_schema(relation)
 
     def publish_build(self, build_id: str) -> OntologyPublishResponse:
         build_response = self.get_build(build_id)
@@ -259,6 +152,316 @@ class OntologyService:
             except GraphStoreError as exc:
                 raise OntologyGraphError(str(exc)) from exc
         return self._get_relational_graph(resolved_workspace_id)
+
+    def approve_all_candidates(self, build_id: str) -> None:
+        self._ensure_build_exists(build_id)
+        timestamp = utc_now()
+        with self._database_manager.session() as session:
+            entities = session.scalars(
+                select(OntologyCandidateEntityORM).where(
+                    OntologyCandidateEntityORM.build_id == build_id
+                )
+            ).all()
+            for entity in entities:
+                entity.status = OntologyReviewStatus.approved.value
+                entity.updated_at = timestamp
+            relations = session.scalars(
+                select(OntologyCandidateRelationORM).where(
+                    OntologyCandidateRelationORM.build_id == build_id
+                )
+            ).all()
+            for relation in relations:
+                relation.status = OntologyReviewStatus.approved.value
+                relation.updated_at = timestamp
+            build = session.get(OntologyBuildORM, build_id)
+            if build is not None:
+                build.updated_at = timestamp
+
+    def extract_sync_and_publish(
+        self,
+        document_id: str,
+        workspace_id: str | None = None,
+    ) -> OntologyPublishResponse:
+        request = OntologyBuildCreateRequest(
+            document_id=document_id,
+            workspace_id=workspace_id,
+            enqueue_processing=False,
+        )
+        build = self.create_build(request)
+        self.process_build(build.id)
+        self.approve_all_candidates(build.id)
+        return self.publish_build(build.id)
+
+    def ingest_documents_sync_publish(
+        self,
+        document_ids: list[str],
+        workspace_id: str | None = None,
+    ) -> KnowledgeGraphIngestResponse:
+        if not document_ids:
+            raise OntologyBuildError("At least one document_id is required.")
+        resolved_workspace = workspace_id or self._settings.default_workspace_id
+        build_ids: list[str] = []
+        for doc_id in document_ids:
+            request = OntologyBuildCreateRequest(
+                document_id=doc_id,
+                workspace_id=resolved_workspace,
+                enqueue_processing=False,
+            )
+            build = self.create_build(request)
+            self.process_build(build.id)
+            self.approve_all_candidates(build.id)
+            build_ids.append(build.id)
+        publish = self.publish_merged_builds(resolved_workspace, build_ids)
+        return KnowledgeGraphIngestResponse(
+            workspace_id=resolved_workspace,
+            document_ids=document_ids,
+            build_ids=build_ids,
+            publish=publish,
+        )
+
+    def publish_merged_builds(
+        self,
+        workspace_id: str,
+        build_ids: list[str],
+    ) -> OntologyPublishResponse:
+        build_ids = list(dict.fromkeys(build_ids))
+        if not build_ids:
+            raise OntologyPublishError("No ontology builds to publish.")
+        if len(build_ids) == 1:
+            return self.publish_build(build_ids[0])
+        snapshot = self._prepare_merged_snapshot(workspace_id, build_ids)
+        try:
+            if self._graph_store.is_enabled():
+                self._graph_store.verify_connection()
+                self._graph_store.sync_published_graph(snapshot)
+        except GraphStoreError as exc:
+            raise OntologyPublishError(str(exc)) from exc
+        with self._database_manager.session() as session:
+            for bid in build_ids:
+                build = session.get(OntologyBuildORM, bid)
+                if build is None:
+                    continue
+                build.status = OntologyBuildStatus.published.value
+                build.published_version_id = snapshot.version.id
+                build.updated_at = utc_now()
+        return OntologyPublishResponse(
+            build=self.get_build(build_ids[0]),
+            version=snapshot.version,
+        )
+
+    def _prepare_merged_snapshot(
+        self,
+        workspace_id: str,
+        build_ids: list[str],
+    ) -> PublishedOntologySnapshot:
+        version_timestamp = utc_now()
+        with self._database_manager.session() as session:
+            builds = session.scalars(
+                select(OntologyBuildORM)
+                .options(
+                    selectinload(OntologyBuildORM.entities),
+                    selectinload(OntologyBuildORM.relations),
+                )
+                .where(OntologyBuildORM.id.in_(build_ids))
+            ).all()
+            if len(builds) != len(build_ids):
+                raise OntologyBuildNotFoundError("One or more ontology builds were not found.")
+            build_by_id = {b.id: b for b in builds}
+            ordered = [build_by_id[bid] for bid in build_ids]
+            for build in ordered:
+                if build.workspace_id != workspace_id:
+                    raise OntologyPublishError(
+                        f"Build '{build.id}' belongs to a different workspace than '{workspace_id}'."
+                    )
+                if build.status != OntologyBuildStatus.completed.value:
+                    raise OntologyPublishError(
+                        f"Ontology build '{build.id}' must complete before it can be merged."
+                    )
+
+            merged_by_key: dict[str, OntologyCandidateEntityORM] = {}
+            for build in ordered:
+                for entity in build.entities:
+                    if entity.status != OntologyReviewStatus.approved.value:
+                        continue
+                    if entity.merged_into_entity_id is not None:
+                        continue
+                    if entity.resolution_key not in merged_by_key:
+                        merged_by_key[entity.resolution_key] = entity
+
+            if not merged_by_key:
+                raise OntologyPublishError("Merged publish has no approved entities.")
+
+            published_entity_by_key: dict[str, str] = {
+                key: str(uuid4()) for key in merged_by_key
+            }
+
+            latest = session.scalar(
+                select(OntologyVersionORM)
+                .where(OntologyVersionORM.workspace_id == workspace_id)
+                .order_by(desc(OntologyVersionORM.version_number))
+            )
+            next_version_number = 1 if latest is None else latest.version_number + 1
+
+            session.execute(
+                update(OntologyBuildORM)
+                .where(OntologyBuildORM.workspace_id == workspace_id)
+                .values(published_version_id=None)
+            )
+            for row in session.scalars(
+                select(OntologyVersionORM).where(OntologyVersionORM.workspace_id == workspace_id)
+            ).all():
+                session.delete(row)
+
+            version_id = str(uuid4())
+            version = OntologyVersionORM(
+                id=version_id,
+                workspace_id=workspace_id,
+                version_number=next_version_number,
+                source_build_id=build_ids[0],
+                created_at=version_timestamp,
+            )
+            session.add(version)
+
+            version_entities: list[OntologyEntityResponse] = []
+            for key, cand in merged_by_key.items():
+                peid = published_entity_by_key[key]
+                row = OntologyEntityORM(
+                    id=peid,
+                    version_id=version_id,
+                    workspace_id=workspace_id,
+                    resolution_key=cand.resolution_key,
+                    name=cand.canonical_name,
+                    entity_type=cand.entity_type,
+                    aliases=sorted(set(cand.aliases or [])),
+                    source_build_id=cand.build_id,
+                    source_document_id=cand.document_id,
+                    created_at=version_timestamp,
+                )
+                session.add(row)
+                version_entities.append(entity_to_response(row))
+
+            seen_rel: set[tuple[str, str, str]] = set()
+            version_relations: list[OntologyRelationResponse] = []
+            for build in ordered:
+                for relation in build.relations:
+                    if relation.status != OntologyReviewStatus.approved.value:
+                        continue
+                    src = session.get(OntologyCandidateEntityORM, relation.source_entity_id)
+                    tgt = session.get(OntologyCandidateEntityORM, relation.target_entity_id)
+                    if src is None or tgt is None:
+                        continue
+                    sk, tk = src.resolution_key, tgt.resolution_key
+                    if sk not in published_entity_by_key or tk not in published_entity_by_key:
+                        continue
+                    dedupe = (sk, tk, relation.relation_type)
+                    if dedupe in seen_rel:
+                        continue
+                    seen_rel.add(dedupe)
+                    pr = OntologyRelationORM(
+                        id=str(uuid4()),
+                        version_id=version_id,
+                        workspace_id=workspace_id,
+                        source_entity_id=published_entity_by_key[sk],
+                        target_entity_id=published_entity_by_key[tk],
+                        relation_type=relation.relation_type,
+                        confidence=relation.confidence,
+                        source_build_id=relation.build_id,
+                        source_document_id=relation.document_id,
+                        evidence_text=relation.evidence_text,
+                        provenance=relation.provenance or {},
+                        created_at=version_timestamp,
+                    )
+                    session.add(pr)
+                    version_relations.append(relation_to_response(pr))
+
+            version_schema = OntologyVersionResponse(
+                id=version_id,
+                workspace_id=workspace_id,
+                version_number=next_version_number,
+                source_build_id=build_ids[0],
+                created_at=version_timestamp,
+                entity_count=len(version_entities),
+                relation_count=len(version_relations),
+            )
+            return PublishedOntologySnapshot(
+                workspace_id=workspace_id,
+                version=version_schema,
+                entities=version_entities,
+                relations=version_relations,
+            )
+
+    def _build_published_snapshot(self, version_id: str) -> PublishedOntologySnapshot:
+        with self._database_manager.session() as session:
+            version = session.scalar(
+                select(OntologyVersionORM)
+                .options(
+                    selectinload(OntologyVersionORM.entities),
+                    selectinload(OntologyVersionORM.relations),
+                )
+                .where(OntologyVersionORM.id == version_id)
+            )
+            if version is None:
+                raise OntologyGraphError(f"Ontology version '{version_id}' was not found.")
+            return PublishedOntologySnapshot(
+                workspace_id=version.workspace_id,
+                version=version_to_response(version),
+                entities=[entity_to_response(e) for e in version.entities],
+                relations=[relation_to_response(r) for r in version.relations],
+            )
+
+    def patch_published_relation(
+        self,
+        relation_id: str,
+        patch: KnowledgeGraphRelationPatch,
+    ) -> OntologyRelationResponse:
+        with self._database_manager.session() as session:
+            relation = session.get(OntologyRelationORM, relation_id)
+            if relation is None:
+                raise OntologyRelationNotFoundError(
+                    f"Published ontology relation '{relation_id}' was not found."
+                )
+            if patch.relation_type is not None:
+                relation.relation_type = patch.relation_type
+            if patch.confidence is not None:
+                relation.confidence = patch.confidence
+            if patch.evidence_text is not None:
+                relation.evidence_text = patch.evidence_text
+            version_id = relation.version_id
+
+        snapshot = self._build_published_snapshot(version_id)
+        if self._graph_store.is_enabled():
+            try:
+                self._graph_store.verify_connection()
+                self._graph_store.sync_published_graph(snapshot)
+            except GraphStoreError as exc:
+                raise OntologyGraphError(str(exc)) from exc
+
+        with self._database_manager.session() as session:
+            updated = session.get(OntologyRelationORM, relation_id)
+            if updated is None:
+                raise OntologyRelationNotFoundError(
+                    f"Published ontology relation '{relation_id}' was not found."
+                )
+            return relation_to_response(updated)
+
+    def delete_workspace_graph(self, workspace_id: str | None = None) -> None:
+        resolved = workspace_id or self._settings.default_workspace_id
+        with self._database_manager.session() as session:
+            for row in session.scalars(
+                select(OntologyVersionORM).where(OntologyVersionORM.workspace_id == resolved)
+            ).all():
+                session.delete(row)
+            session.execute(
+                update(OntologyBuildORM)
+                .where(OntologyBuildORM.workspace_id == resolved)
+                .values(published_version_id=None)
+            )
+        if self._graph_store.is_enabled():
+            try:
+                self._graph_store.verify_connection()
+                self._graph_store.delete_workspace(resolved)
+            except GraphStoreError as exc:
+                raise OntologyGraphError(str(exc)) from exc
 
     def process_build(self, build_id: str) -> None:
         build = self._get_build_record(build_id)
@@ -661,9 +864,9 @@ class OntologyService:
             if existing_version is not None:
                 return PublishedOntologySnapshot(
                     workspace_id=build.workspace_id,
-                    version=self._to_version_schema(existing_version),
-                    entities=[self._to_entity_schema(entity) for entity in existing_version.entities],
-                    relations=[self._to_relation_schema(relation) for relation in existing_version.relations],
+                    version=version_to_response(existing_version),
+                    entities=[entity_to_response(entity) for entity in existing_version.entities],
+                    relations=[relation_to_response(relation) for relation in existing_version.relations],
                 )
 
             stale_versions = session.scalars(
@@ -711,7 +914,7 @@ class OntologyService:
                     created_at=version_timestamp,
                 )
                 session.add(published_entity)
-                version_entities.append(self._to_entity_schema(published_entity))
+                version_entities.append(entity_to_response(published_entity))
 
             version_relations: list[OntologyRelationResponse] = []
             for relation in build.relations:
@@ -736,7 +939,7 @@ class OntologyService:
                     created_at=version_timestamp,
                 )
                 session.add(published_relation)
-                version_relations.append(self._to_relation_schema(published_relation))
+                version_relations.append(relation_to_response(published_relation))
 
             version_schema = OntologyVersionResponse(
                 id=version_id,
@@ -769,31 +972,10 @@ class OntologyService:
                 return OntologyGraphResponse(workspace_id=workspace_id)
             return OntologyGraphResponse(
                 workspace_id=workspace_id,
-                version=self._to_version_schema(version),
-                entities=[self._to_entity_schema(entity) for entity in version.entities],
-                relations=[self._to_relation_schema(relation) for relation in version.relations],
+                version=version_to_response(version),
+                entities=[entity_to_response(entity) for entity in version.entities],
+                relations=[relation_to_response(relation) for relation in version.relations],
             )
-
-    @staticmethod
-    def _build_step_records(build_id: str) -> list[OntologyBuildStepORM]:
-        return [
-            OntologyBuildStepORM(
-                id=f"{build_id}:{name}",
-                build_id=build_id,
-                name=name,
-                status=OntologyStepStatus.pending.value,
-                detail=None,
-                started_at=None,
-                finished_at=None,
-            )
-            for name in ONTOLOGY_BUILD_STEP_NAMES
-        ]
-
-    @staticmethod
-    def _status_from_action(action: OntologyReviewAction) -> str:
-        if action == OntologyReviewAction.approve:
-            return OntologyReviewStatus.approved.value
-        return OntologyReviewStatus.rejected.value
 
     @staticmethod
     def _get_step(session, build_id: str, name: str) -> OntologyBuildStepORM:
@@ -908,7 +1090,7 @@ class OntologyService:
         for step in steps:
             steps_by_build[step.build_id].append(step)
         for build_steps in steps_by_build.values():
-            build_steps.sort(key=self._step_sort_key)
+            build_steps.sort(key=step_sort_key)
         return steps_by_build
 
     def _to_build_schema(
@@ -937,112 +1119,5 @@ class OntologyService:
             relation_count=relation_count,
             pending_entity_count=pending_entity_count,
             pending_relation_count=pending_relation_count,
-            steps=[self._to_step_schema(step) for step in steps],
+            steps=[step_to_response(step) for step in steps],
         )
-
-    @staticmethod
-    def _to_step_schema(step: OntologyBuildStepORM) -> OntologyBuildStepResponse:
-        return OntologyBuildStepResponse(
-            id=step.id,
-            name=step.name,
-            status=step.status,
-            detail=step.detail,
-            started_at=step.started_at,
-            finished_at=step.finished_at,
-        )
-
-    @staticmethod
-    def _to_candidate_entity_schema(
-        entity: OntologyCandidateEntityORM,
-    ) -> OntologyCandidateEntityResponse:
-        return OntologyCandidateEntityResponse(
-            id=entity.id,
-            build_id=entity.build_id,
-            document_id=entity.document_id,
-            workspace_id=entity.workspace_id,
-            name=entity.name,
-            canonical_name=entity.canonical_name,
-            resolution_key=entity.resolution_key,
-            entity_type=entity.entity_type,
-            confidence=entity.confidence,
-            status=entity.status,
-            source_chunk_id=entity.source_chunk_id,
-            evidence_text=entity.evidence_text,
-            provenance=entity.provenance or {},
-            aliases=entity.aliases or [],
-            merged_into_entity_id=entity.merged_into_entity_id,
-            created_at=entity.created_at,
-            updated_at=entity.updated_at,
-        )
-
-    @staticmethod
-    def _to_candidate_relation_schema(
-        relation: OntologyCandidateRelationORM,
-    ) -> OntologyCandidateRelationResponse:
-        return OntologyCandidateRelationResponse(
-            id=relation.id,
-            build_id=relation.build_id,
-            document_id=relation.document_id,
-            workspace_id=relation.workspace_id,
-            source_entity_id=relation.source_entity_id,
-            target_entity_id=relation.target_entity_id,
-            source_name=relation.source_name,
-            target_name=relation.target_name,
-            relation_type=relation.relation_type,
-            confidence=relation.confidence,
-            status=relation.status,
-            source_chunk_id=relation.source_chunk_id,
-            evidence_text=relation.evidence_text,
-            provenance=relation.provenance or {},
-            created_at=relation.created_at,
-            updated_at=relation.updated_at,
-        )
-
-    def _to_version_schema(self, version: OntologyVersionORM) -> OntologyVersionResponse:
-        return OntologyVersionResponse(
-            id=version.id,
-            workspace_id=version.workspace_id,
-            version_number=version.version_number,
-            source_build_id=version.source_build_id,
-            created_at=version.created_at,
-            entity_count=len(version.entities),
-            relation_count=len(version.relations),
-        )
-
-    @staticmethod
-    def _to_entity_schema(entity: OntologyEntityORM) -> OntologyEntityResponse:
-        return OntologyEntityResponse(
-            id=entity.id,
-            version_id=entity.version_id,
-            workspace_id=entity.workspace_id,
-            resolution_key=entity.resolution_key,
-            name=entity.name,
-            entity_type=entity.entity_type,
-            aliases=entity.aliases or [],
-            source_build_id=entity.source_build_id,
-            source_document_id=entity.source_document_id,
-            created_at=entity.created_at,
-        )
-
-    @staticmethod
-    def _to_relation_schema(relation: OntologyRelationORM) -> OntologyRelationResponse:
-        return OntologyRelationResponse(
-            id=relation.id,
-            version_id=relation.version_id,
-            workspace_id=relation.workspace_id,
-            source_entity_id=relation.source_entity_id,
-            target_entity_id=relation.target_entity_id,
-            relation_type=relation.relation_type,
-            confidence=relation.confidence,
-            source_build_id=relation.source_build_id,
-            source_document_id=relation.source_document_id,
-            evidence_text=relation.evidence_text,
-            provenance=relation.provenance or {},
-            created_at=relation.created_at,
-        )
-
-    @staticmethod
-    def _step_sort_key(step: OntologyBuildStepORM) -> int:
-        if step.name in ONTOLOGY_BUILD_STEP_NAMES:
-            return ONTOLOGY_BUILD_STEP_NAMES.index(step.name)
-        return len(ONTOLOGY_BUILD_STEP_NAMES)

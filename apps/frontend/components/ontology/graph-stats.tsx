@@ -19,8 +19,11 @@ import {
 import { getGraph } from "@/lib/api/ontology";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function GraphStats() {
+  const { t } = useI18n();
+  const gs = t.knowledgeGraph.graphStats;
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.ontology.graph(workspaceId ?? undefined),
@@ -28,10 +31,7 @@ export function GraphStats() {
   });
 
   if (isLoading) return <Skeleton className="h-40 w-full" />;
-  if (isError || !data)
-    return (
-      <p className="text-sm text-destructive">Failed to load graph.</p>
-    );
+  if (isError || !data) return <p className="text-sm text-destructive">{gs.loadFailed}</p>;
 
   const entities = data.entities ?? [];
   const relations = data.relations ?? [];
@@ -43,7 +43,7 @@ export function GraphStats() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase text-muted-foreground">
-              Published entities
+              {gs.publishedEntities}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -53,7 +53,7 @@ export function GraphStats() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase text-muted-foreground">
-              Published relations
+              {gs.publishedRelations}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -63,7 +63,7 @@ export function GraphStats() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-xs uppercase text-muted-foreground">
-              Latest version
+              {gs.latestVersion}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -72,7 +72,7 @@ export function GraphStats() {
             </p>
             {version && (
               <p className="text-xs text-muted-foreground">
-                build {version.source_build_id.slice(0, 8)}…
+                {gs.buildPrefix} {version.source_build_id.slice(0, 8)}…
               </p>
             )}
           </CardContent>
@@ -81,16 +81,16 @@ export function GraphStats() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Entities</CardTitle>
+          <CardTitle className="text-sm">{gs.entitiesSection}</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Aliases</TableHead>
-                <TableHead>Source doc</TableHead>
+                <TableHead>{gs.colName}</TableHead>
+                <TableHead>{gs.colType}</TableHead>
+                <TableHead>{gs.colAliases}</TableHead>
+                <TableHead>{gs.colSourceDoc}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -114,8 +114,7 @@ export function GraphStats() {
                     colSpan={4}
                     className="text-center text-sm text-muted-foreground"
                   >
-                    No published entities yet. Build and publish an ontology from
-                    the Builds tab.
+                    {gs.emptyEntitiesRow}
                   </TableCell>
                 </TableRow>
               )}

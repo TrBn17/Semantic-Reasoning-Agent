@@ -18,9 +18,16 @@ from semantic_reasoning_agent.services.model_config_service import ModelConfigSe
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
+from semantic_reasoning_agent.services.runtime_audit_service import RuntimeAuditService
 from semantic_reasoning_agent.services.secret_service import DatabaseSecretRepository, SecretService
+from semantic_reasoning_agent.services.task_runtime import TaskRuntime
 from semantic_reasoning_agent.services.tool_registry import ToolRegistry, build_tool_registry
 from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
+from semantic_reasoning_agent.services.workflow_runtime import (
+    WorkflowRegistry,
+    WorkflowRuntime,
+    build_workflow_registry,
+)
 from semantic_reasoning_agent.tools.ontology.schema_registry import OntologySchemaRegistry
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
@@ -40,6 +47,10 @@ class AppContainer:
     task_dispatcher: TaskDispatcher
     document_service: DocumentService
     ontology_service: OntologyService
+    runtime_audit_service: RuntimeAuditService
+    workflow_registry: WorkflowRegistry
+    workflow_runtime: WorkflowRuntime
+    task_runtime: TaskRuntime
     chat_stream_service: ChatStreamService
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
@@ -88,17 +99,28 @@ def get_app_container() -> AppContainer:
             schema_registry=schema_registry,
         ),
     )
-    chat_stream_service = ChatStreamService(
-        conversation_service=conversation_service,
-        model_config_service=model_config_service,
-        adapter_registry=adapter_registry,
-        retrieval_service=retrieval_service,
-    )
+    runtime_audit_service = RuntimeAuditService(database_manager)
     tool_registry = build_tool_registry(
         retrieval_service=retrieval_service,
         ontology_service=ontology_service,
     )
-    tool_runtime = ToolRuntime(tool_registry)
+    workflow_registry = build_workflow_registry()
+    workflow_runtime = WorkflowRuntime(workflow_registry, runtime_audit_service)
+    tool_runtime = ToolRuntime(tool_registry, runtime_audit_service)
+    task_runtime = TaskRuntime(
+        conversation_service=conversation_service,
+        model_config_service=model_config_service,
+        adapter_registry=adapter_registry,
+        ontology_service=ontology_service,
+        tool_registry=tool_registry,
+        tool_runtime=tool_runtime,
+        workflow_runtime=workflow_runtime,
+        audit_service=runtime_audit_service,
+    )
+    chat_stream_service = ChatStreamService(
+        conversation_service=conversation_service,
+        task_runtime=task_runtime,
+    )
     return AppContainer(
         settings=settings,
         database_manager=database_manager,
@@ -113,6 +135,10 @@ def get_app_container() -> AppContainer:
         task_dispatcher=task_dispatcher,
         document_service=document_service,
         ontology_service=ontology_service,
+        runtime_audit_service=runtime_audit_service,
+        workflow_registry=workflow_registry,
+        workflow_runtime=workflow_runtime,
+        task_runtime=task_runtime,
         chat_stream_service=chat_stream_service,
         tool_registry=tool_registry,
         tool_runtime=tool_runtime,

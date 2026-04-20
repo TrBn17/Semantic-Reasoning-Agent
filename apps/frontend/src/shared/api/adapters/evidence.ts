@@ -2,6 +2,8 @@ import type {
   Citation,
   OntologyCandidateEntityResponse,
   OntologyCandidateRelationResponse,
+  OntologyEntityResponse,
+  OntologyRelationResponse,
   RetrievalResult,
 } from "@/lib/api/types";
 import type {
@@ -96,4 +98,34 @@ function summarizeProvenance(p: Record<string, unknown>): string | undefined {
   if (!p || Object.keys(p).length === 0) return undefined;
   const keys = Object.keys(p).slice(0, 3).join(", ");
   return keys;
+}
+
+/** Published graph entities (GET /knowledge-graph). */
+export function publishedEntityToEvidence(e: OntologyEntityResponse): EvidenceItemViewModel {
+  return {
+    id: `graph-entity:${e.id}`,
+    sourceType: "ontology_graph_entity" satisfies EvidenceSourceType,
+    title: e.name,
+    summary: e.entity_type,
+    contentSnippet: e.aliases.join(", ") || undefined,
+    documentId: e.source_document_id,
+    entityId: e.id,
+    provenanceSummary: `v:${e.version_id.slice(0, 8)}…`,
+  };
+}
+
+/** Published graph relations (GET /knowledge-graph). */
+export function publishedRelationToEvidence(r: OntologyRelationResponse): EvidenceItemViewModel {
+  return {
+    id: `graph-relation:${r.id}`,
+    sourceType: "ontology_graph_relation" satisfies EvidenceSourceType,
+    title: `${r.relation_type}`,
+    summary: `${r.source_entity_id} → ${r.target_entity_id}`,
+    contentSnippet: r.evidence_text,
+    score: r.confidence,
+    trustScore: r.confidence,
+    documentId: r.source_document_id,
+    relationId: r.id,
+    provenanceSummary: summarizeProvenance(r.provenance),
+  };
 }

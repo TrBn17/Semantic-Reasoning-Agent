@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useState } from "react";
+import { Bot } from "lucide-react";
 import { toast } from "sonner";
 import { ChatRuntimeControls } from "@/components/chat/chat-runtime-controls";
 import {
@@ -10,13 +11,14 @@ import {
   type ComposerSubmitPayload,
 } from "@/components/chat/message-composer";
 import { MessageThread } from "@/components/chat/message-thread";
+import { LoadingLink as Link } from "@/components/navigation/loading-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { sendMessage } from "@/lib/api/chat";
 import { getConversation } from "@/lib/api/conversations";
 import { listModels } from "@/lib/api/models";
+import type { Citation } from "@/lib/api/types";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
-import type { Citation } from "@/lib/api/types";
 
 const CitationsDrawer = dynamic(
   () =>
@@ -71,6 +73,15 @@ export function ChatView({ conversationId }: { conversationId: string }) {
             <p className="text-xs text-muted-foreground">
               {conversation ? `${conversation.provider} · ${conversation.model}` : ""}
             </p>
+            {conversation?.agent_profile_id && (
+              <Link
+                href="/agents"
+                className="mt-2 inline-flex items-center gap-2 text-xs font-medium text-primary hover:underline"
+              >
+                <Bot className="h-3.5 w-3.5" />
+                Open agent builder
+              </Link>
+            )}
           </div>
           {conversation && (
             <ChatRuntimeControls

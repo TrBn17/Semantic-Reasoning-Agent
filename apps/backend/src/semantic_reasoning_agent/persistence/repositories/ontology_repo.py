@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import (
+from semantic_reasoning_agent.persistence.models.ontology import (
     OntologyBuildORM,
     OntologyCandidateEntityORM,
     OntologyCandidateRelationORM,

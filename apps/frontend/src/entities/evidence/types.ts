@@ -2,6 +2,8 @@ export type EvidenceSourceType =
   | "document_chunk"
   | "ontology_candidate_entity"
   | "ontology_candidate_relation"
+  | "ontology_graph_entity"
+  | "ontology_graph_relation"
   | "retrieval_citation";
 
 export type EvidenceItemViewModel = {

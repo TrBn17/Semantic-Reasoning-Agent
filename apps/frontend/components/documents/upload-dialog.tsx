@@ -20,8 +20,10 @@ import { Label } from "@/components/ui/label";
 import { uploadDocuments } from "@/lib/api/documents";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function UploadDialog() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const [open, setOpen] = useState(false);
@@ -30,7 +32,7 @@ export function UploadDialog() {
 
   const mutation = useMutation({
     mutationFn: () => {
-      if (files.length === 0) throw new Error("Select at least one file to upload");
+      if (files.length === 0) throw new Error(t.common.selectAtLeastOneFile);
       return uploadDocuments({
         files,
         workspaceId: workspaceId ?? undefined,
@@ -46,25 +48,25 @@ export function UploadDialog() {
       }
 
       if (uploaded.length > 0 && failed.length === 0) {
-        toast.success(`Uploaded ${uploaded.length} file(s)`);
+        toast.success(`${t.common.uploaded} ${uploaded.length} ${t.common.files}`);
         setOpen(false);
       } else if (uploaded.length > 0) {
         toast.warning(
-          `Uploaded ${uploaded.length} file(s), failed ${failed.length}: ${failed
+          `${t.common.uploaded} ${uploaded.length} ${t.common.files}, ${t.common.failedToLoadDocuments} ${failed.length}: ${failed
             .slice(0, 2)
             .map((f) => f.filename)
             .join(", ")}`,
         );
       } else {
         toast.error(
-          `Upload failed: ${failed.slice(0, 2).map((f) => f.reason).join(" | ")}`,
+          `${t.common.failedToLoadDocuments} ${failed.slice(0, 2).map((f) => f.reason).join(" | ")}`,
         );
       }
 
       setFiles([]);
       setTags("");
     },
-    onError: (err) => toast.error(`Upload failed: ${(err as Error).message}`),
+    onError: (err) => toast.error(`${t.common.uploadFailedPrefix} ${(err as Error).message}`),
   });
 
   return (
@@ -72,19 +74,19 @@ export function UploadDialog() {
       <DialogTrigger asChild>
         <Button>
           <Upload className="h-4 w-4" />
-          Upload
+          {t.common.upload}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Upload a document</DialogTitle>
+          <DialogTitle>{t.common.upload}</DialogTitle>
           <DialogDescription>
-            PDF, DOCX, or XLSX. Parsed and indexed by the ingestion worker.
+            {t.common.uploadDescription}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1">
-            <Label htmlFor="file">File</Label>
+            <Label htmlFor="file">{t.common.files}</Label>
             <Input
               id="file"
               type="file"
@@ -94,32 +96,32 @@ export function UploadDialog() {
             />
             {files.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                Selected {files.length} file(s): {files.slice(0, 3).map((f) => f.name).join(", ")}
+                {t.common.selected} {files.length} {t.common.files}: {files.slice(0, 3).map((f) => f.name).join(", ")}
                 {files.length > 3 ? "..." : ""}
               </p>
             )}
           </div>
           <div className="space-y-1">
-            <Label htmlFor="tags">Tags (comma separated)</Label>
+            <Label htmlFor="tags">{t.common.tags} ({t.common.commaSeparated})</Label>
             <Input
               id="tags"
               value={tags}
               onChange={(e) => setTags(e.target.value)}
-              placeholder="e.g. policy,2025"
+              placeholder={t.common.tagsPlaceholder}
             />
           </div>
         </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" type="button">
-              Cancel
+              {t.common.cancel}
             </Button>
           </DialogClose>
           <Button
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending || files.length === 0}
           >
-            {mutation.isPending ? "Uploading..." : "Upload selected"}
+            {mutation.isPending ? t.common.uploading : t.common.uploadSelected}
           </Button>
         </DialogFooter>
       </DialogContent>

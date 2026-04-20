@@ -16,3 +16,6 @@ class NullGraphStore(GraphStore):
 
     def get_graph(self, workspace_id: str) -> OntologyGraphResponse:
         return OntologyGraphResponse(workspace_id=workspace_id)
+
+    def delete_workspace(self, workspace_id: str) -> None:
+        return None

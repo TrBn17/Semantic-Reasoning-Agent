@@ -19,3 +19,10 @@ class TaskModelResolverPort(Protocol):
         workspace_id: str | None = None,
     ) -> bool:
         ...
+
+    def get_provider_runtime_config(
+        self,
+        provider: str,
+        workspace_id: str | None = None,
+    ) -> dict[str, str | None]:
+        ...

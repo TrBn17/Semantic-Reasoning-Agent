@@ -30,11 +30,13 @@ import type {
   ToolStatus,
 } from "@/lib/api/types";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
+  const { t } = useI18n();
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const [open, setOpen] = useState(false);
-  const [taskType, setTaskType] = useState("chat.retrieve");
+  const [taskType, setTaskType] = useState(t.tools.invokeDialog.defaults.taskType);
   const [workspaceInput, setWorkspaceInput] = useState("");
   const [argumentsText, setArgumentsText] = useState(() =>
     defaultArgumentsFor(tool),
@@ -44,13 +46,17 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const args = parseJson(argumentsText);
+      const args = parseJson(argumentsText, t);
+      const resolvedWorkspaceId = (workspaceInput || workspaceId || "").trim();
+      if (!resolvedWorkspaceId) {
+        throw new Error(t.common.workspaceRequired);
+      }
       const payload: StandardToolInput = {
         call_id: crypto.randomUUID(),
         tool_name: tool.tool_name,
-        workspace_id: (workspaceInput || workspaceId || "workspace-demo").trim(),
+        workspace_id: resolvedWorkspaceId,
         task_id: crypto.randomUUID(),
-        task_type: taskType.trim() || "chat.retrieve",
+        task_type: taskType.trim() || t.tools.invokeDialog.defaults.taskType,
         arguments: args,
       };
       return invokeTool(tool.tool_name, payload);
@@ -59,28 +65,28 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
       setResult(output);
       if (output.status === "success") {
         toast.success(
-          `${tool.tool_name} succeeded — ${output.evidence.length} evidence, ${output.latency_ms}ms`,
+          `${tool.tool_name} ${t.tools.invokeDialog.status.success.toLowerCase()} — ${output.evidence.length} ${t.common.evidence}, ${output.latency_ms}ms`,
         );
       } else if (output.status === "partial") {
         toast.warning(
-          `${tool.tool_name} partial — hints: ${output.next_action_hints.join(", ") || "none"}`,
+          `${tool.tool_name} ${t.tools.invokeDialog.status.partial.toLowerCase()} — ${t.tools.invokeDialog.results.hints}: ${output.next_action_hints.join(", ") || t.common.none}`,
         );
       } else {
         toast.error(
-          `${tool.tool_name} failed — ${output.error_code ?? "unknown"}: ${output.error_message ?? ""}`,
+          `${tool.tool_name} ${t.tools.invokeDialog.status.failed.toLowerCase()} — ${output.error_code ?? t.common.unknown}: ${output.error_message ?? ""}`,
         );
       }
     },
     onError: (err) => {
       setResult(null);
-      toast.error(`Invoke failed: ${(err as Error).message}`);
+      toast.error(`${t.common.invokeFailed} ${(err as Error).message}`);
     },
   });
 
   const handleSubmit = () => {
     setParseError(null);
     try {
-      parseJson(argumentsText);
+      parseJson(argumentsText, t);
     } catch (err) {
       setParseError((err as Error).message);
       return;
@@ -100,31 +106,33 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline" className="gap-1.5">
+        <Button size="sm" variant="outline" className="gap-1.5 rounded-full">
           <Play className="h-3.5 w-3.5" />
-          Invoke
+          {t.common.invoke}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-3xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-mono text-base">
             {tool.tool_name}
           </DialogTitle>
-          <DialogDescription>{tool.description}</DialogDescription>
+          <DialogDescription className="max-w-2xl">
+            {tool.description}
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 rounded-2xl border bg-muted/20 p-4 md:grid-cols-2">
           <div className="space-y-1.5">
-            <Label htmlFor="workspace">Workspace ID</Label>
+            <Label htmlFor="workspace">{t.common.workspaceId}</Label>
             <Input
               id="workspace"
               value={workspaceInput}
-              placeholder={workspaceId ?? "workspace-demo"}
+              placeholder={workspaceId ?? t.tools.invokeDialog.defaults.workspacePlaceholder}
               onChange={(e) => setWorkspaceInput(e.target.value)}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="task-type">Task type</Label>
+            <Label htmlFor="task-type">{t.common.taskType}</Label>
             <Input
               id="task-type"
               value={taskType}
@@ -133,9 +141,9 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
           </div>
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 rounded-2xl border bg-muted/10 p-4">
           <div className="flex items-baseline justify-between">
-            <Label htmlFor="arguments">Arguments (JSON)</Label>
+            <Label htmlFor="arguments">{t.tools.invokeDialog.arguments}</Label>
             <SchemaHint tool={tool} />
           </div>
           <Textarea
@@ -146,7 +154,7 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
             className="font-mono text-xs"
           />
           {parseError && (
-            <p className="text-xs text-destructive">JSON parse error: {parseError}</p>
+            <p className="text-xs text-destructive">{t.tools.invokeDialog.parseErrorPrefix} {parseError}</p>
           )}
         </div>
 
@@ -155,11 +163,11 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" type="button">
-              Close
+              {t.tools.invokeDialog.close}
             </Button>
           </DialogClose>
-          <Button onClick={handleSubmit} disabled={mutation.isPending}>
-            {mutation.isPending ? "Invoking..." : "Invoke tool"}
+          <Button onClick={handleSubmit} disabled={mutation.isPending} className="rounded-full">
+            {mutation.isPending ? t.tools.invokeDialog.invoking : t.tools.invokeDialog.invoke}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -168,6 +176,7 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
 }
 
 function SchemaHint({ tool }: { tool: ToolSpec }) {
+  const { t } = useI18n();
   const required = useMemo(() => {
     const req = tool.input_schema?.required;
     return Array.isArray(req) ? (req as string[]) : [];
@@ -175,22 +184,24 @@ function SchemaHint({ tool }: { tool: ToolSpec }) {
 
   if (required.length === 0) {
     return (
-      <span className="text-[10px] text-muted-foreground">
-        schema: {tool.input_schema_ref || tool.output_schema_ref}
+      <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {t.tools.invokeDialog.schemaPrefix} {tool.input_schema_ref || tool.output_schema_ref}
       </span>
     );
   }
   return (
-    <span className="text-[10px] text-muted-foreground">
-      required: {required.join(", ")}
+    <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+      {t.tools.invokeDialog.requiredPrefix} {required.join(", ")}
     </span>
   );
 }
 
 function InvokeResult({ result }: { result: StandardToolOutput }) {
+  const { t } = useI18n();
+
   return (
-    <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-      <div className="flex items-center justify-between">
+    <div className="space-y-3 rounded-2xl border bg-card p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <StatusBadge status={result.status} />
           <span className="font-mono text-xs text-muted-foreground">
@@ -198,12 +209,12 @@ function InvokeResult({ result }: { result: StandardToolOutput }) {
           </span>
           {result.meta.trace_id && (
             <span className="font-mono text-[10px] text-muted-foreground">
-              trace {result.meta.trace_id.slice(0, 8)}
+              {t.tools.invokeDialog.results.trace} {result.meta.trace_id.slice(0, 8)}
             </span>
           )}
         </div>
         <span className="font-mono text-xs">
-          {result.evidence.length} evidence · {result.artifacts.length} artifacts
+          {result.evidence.length} {t.common.evidence} · {result.artifacts.length} {t.common.artifacts}
         </span>
       </div>
 
@@ -220,9 +231,9 @@ function InvokeResult({ result }: { result: StandardToolOutput }) {
 
       {result.next_action_hints.length > 0 && (
         <div className="flex flex-wrap items-center gap-1 text-xs">
-          <span className="text-muted-foreground">hints:</span>
+          <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{t.tools.invokeDialog.results.hints}</span>
           {result.next_action_hints.map((hint) => (
-            <Badge key={hint} variant="info" className="font-mono text-[10px]">
+            <Badge key={hint} variant="info" className="rounded-full font-mono text-[10px]">
               {hint}
             </Badge>
           ))}
@@ -230,7 +241,7 @@ function InvokeResult({ result }: { result: StandardToolOutput }) {
       )}
 
       {result.evidence.length > 0 && (
-        <ScrollArea className="max-h-56 rounded border bg-background">
+        <ScrollArea className="max-h-56 rounded-2xl border bg-background">
           <div className="divide-y">
             {result.evidence.map((ev) => (
               <EvidenceRow key={ev.evidence_id} evidence={ev} />
@@ -244,30 +255,37 @@ function InvokeResult({ result }: { result: StandardToolOutput }) {
 
 function EvidenceRow({ evidence }: { evidence: Evidence }) {
   return (
-    <div className="space-y-1 p-2 text-xs">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Badge variant="outline" className="font-mono text-[10px]">
+    <div className="space-y-1.5 p-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="rounded-full font-mono text-[10px]">
             {evidence.source_type}
           </Badge>
-          <span className="font-medium">{evidence.title}</span>
+          <span className="font-medium text-foreground">{evidence.title}</span>
         </div>
         <span className="text-muted-foreground">
           {evidence.citation_anchor.anchor_type} · {evidence.citation_anchor.label}
           {evidence.score > 0 ? ` · ${evidence.score.toFixed(3)}` : ""}
         </span>
       </div>
-      <p className="line-clamp-2 text-muted-foreground">{evidence.content}</p>
+      <p className="line-clamp-2 leading-5 text-muted-foreground">{evidence.content}</p>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: ToolStatus }) {
+  const { t } = useI18n();
   const variant =
     status === "success" ? "success" : status === "partial" ? "warning" : "destructive";
+  const label =
+    status === "success"
+      ? t.tools.invokeDialog.status.success
+      : status === "partial"
+        ? t.tools.invokeDialog.status.partial
+        : t.tools.invokeDialog.status.failed;
   return (
     <Badge variant={variant} className="capitalize">
-      {status}
+      {label}
     </Badge>
   );
 }
@@ -282,11 +300,11 @@ function defaultArgumentsFor(tool: ToolSpec): string {
   return "{}";
 }
 
-function parseJson(text: string): Record<string, unknown> {
+function parseJson(text: string, t: ReturnType<typeof useI18n>["t"]): Record<string, unknown> {
   if (!text.trim()) return {};
   const parsed = JSON.parse(text);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("arguments must be a JSON object");
+    throw new Error(t.tools.invokeDialog.argumentsObjectError);
   }
   return parsed as Record<string, unknown>;
 }

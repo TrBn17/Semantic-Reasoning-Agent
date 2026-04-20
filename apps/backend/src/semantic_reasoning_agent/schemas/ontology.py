@@ -38,6 +38,21 @@ class OntologyReviewAction(str, Enum):
 class OntologyBuildCreateRequest(BaseModel):
     document_id: str
     workspace_id: str | None = None
+    # When False, caller must run ``process_build`` (e.g. sync knowledge-graph extract).
+    enqueue_processing: bool = True
+
+
+class KnowledgeGraphExtractRequest(BaseModel):
+    """One-shot: indexed document → LLM extract → approve all → publish to graph."""
+
+    document_id: str
+    workspace_id: str | None = None
+
+
+class KnowledgeGraphRelationPatch(BaseModel):
+    relation_type: str | None = None
+    confidence: float | None = None
+    evidence_text: str | None = None
 
 
 class OntologyBuildStepResponse(BaseModel):
@@ -152,6 +167,13 @@ class OntologyRelationResponse(BaseModel):
 class OntologyPublishResponse(BaseModel):
     build: OntologyBuildResponse
     version: OntologyVersionResponse
+
+
+class KnowledgeGraphIngestResponse(BaseModel):
+    workspace_id: str
+    document_ids: list[str]
+    build_ids: list[str]
+    publish: OntologyPublishResponse
 
 
 class OntologyGraphResponse(BaseModel):

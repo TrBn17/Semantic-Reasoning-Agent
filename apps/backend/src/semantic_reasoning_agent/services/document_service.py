@@ -7,16 +7,18 @@ from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import DocumentChunkORM, DocumentJobORM, DocumentORM
+from semantic_reasoning_agent.persistence.models.documents import DocumentChunkORM, DocumentJobORM, DocumentORM
 from semantic_reasoning_agent.infrastructure.storage import DatabaseBlobStore
 from semantic_reasoning_agent.ports.object_store import ObjectStorePort
 from semantic_reasoning_agent.infrastructure.parsers.local_parser import PARSER_VERSION, UnsupportedDocumentTypeError, parse_document
 from semantic_reasoning_agent.schemas.documents import (
+    DocumentBatchUploadResponse,
     DocumentJobResponse,
     DocumentReprocessResponse,
     DocumentResponse,
     DocumentStatus,
     JobStatus,
+    DocumentUploadFailure,
 )
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
@@ -92,6 +94,8 @@ class DocumentService:
         title: str | None = None,
         workspace_id: str | None = None,
         tags: list[str] | None = None,
+        *,
+        enqueue_pipeline: bool = True,
     ) -> DocumentResponse:
         if not content:
             raise DocumentProcessingError("Uploaded file is empty.")
@@ -125,8 +129,39 @@ class DocumentService:
             session.add(document)
             session.add_all(self._build_job_records(document_id))
 
-        self._queue_document(document_id)
+        if enqueue_pipeline:
+            self._queue_document(document_id)
+        else:
+            self.process_document(document_id)
         return self.get_document(document_id)
+
+    def upload_documents(
+        self,
+        files: list[tuple[str, bytes]],
+        title: str | None = None,
+        workspace_id: str | None = None,
+        tags: list[str] | None = None,
+    ) -> DocumentBatchUploadResponse:
+        uploaded: list[DocumentResponse] = []
+        failed: list[DocumentUploadFailure] = []
+
+        for filename, content in files:
+            try:
+                uploaded.append(
+                    self.upload_document(
+                        filename=filename,
+                        content=content,
+                        title=title,
+                        workspace_id=workspace_id,
+                        tags=tags,
+                    )
+                )
+            except (UnsupportedDocumentTypeError, DocumentProcessingError) as exc:
+                failed.append(DocumentUploadFailure(filename=filename, reason=str(exc)))
+            except Exception as exc:
+                failed.append(DocumentUploadFailure(filename=filename, reason=str(exc)))
+
+        return DocumentBatchUploadResponse(uploaded=uploaded, failed=failed)
 
     def reprocess_document(self, document_id: str) -> DocumentReprocessResponse:
         self._ensure_document_exists(document_id)

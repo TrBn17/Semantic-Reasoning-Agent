@@ -1,8 +1,8 @@
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import { dictionaries, type Language } from "./dictionaries";
+import { getBrowserLanguage, syncBrowserLanguage } from "./locale";
 
 type LanguageState = {
   language: Language;
@@ -11,17 +11,18 @@ type LanguageState = {
 };
 
 export const useLanguageStore = create<LanguageState>()(
-  persist(
-    (set) => ({
-      language: "en",
-      setLanguage: (language) => set({ language }),
-      toggleLanguage: () =>
-        set((state) => ({ language: state.language === "en" ? "vi" : "en" })),
-    }),
-    {
-      name: "semantic-reasoning-language",
+  (set, get) => ({
+    language: getBrowserLanguage(),
+    setLanguage: (language) => {
+      syncBrowserLanguage(language);
+      set({ language });
     },
-  ),
+    toggleLanguage: () => {
+      const nextLanguage = get().language === "en" ? "vi" : "en";
+      syncBrowserLanguage(nextLanguage);
+      set({ language: nextLanguage });
+    },
+  }),
 );
 
 export function useI18n() {

@@ -12,6 +12,7 @@ from .ontology import (
     OntologyVersionORM,
 )
 from .providers import ProviderConfigORM, ProviderSecretORM, TaskModelConfigORM
+from .runtime import EvidenceRecordORM, TaskRunORM, ToolCallORM, WorkflowRunORM
 
 __all__ = [
     "Base",
@@ -33,4 +34,8 @@ __all__ = [
     "ProviderConfigORM",
     "ProviderSecretORM",
     "TaskModelConfigORM",
+    "TaskRunORM",
+    "WorkflowRunORM",
+    "ToolCallORM",
+    "EvidenceRecordORM",
 ]

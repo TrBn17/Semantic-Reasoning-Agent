@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
-from semantic_reasoning_agent.persistence.models import Base
+from semantic_reasoning_agent.persistence.models.base import Base
 
 
 class DatabaseManager:

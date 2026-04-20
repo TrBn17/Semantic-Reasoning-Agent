@@ -5,15 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from semantic_reasoning_agent.entrypoints.router import api_router
 from semantic_reasoning_agent.core.config import get_settings
-from semantic_reasoning_agent.persistence.database import get_database_manager
-from semantic_reasoning_agent.services.alembic_service import AlembicService
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    database_manager = get_database_manager()
-    database_manager.create_schema()
-    AlembicService(database_manager).upgrade()
     yield
 
 

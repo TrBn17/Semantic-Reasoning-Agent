@@ -2,7 +2,7 @@
 set -e
 
 echo "Running migrations before API startup..."
-sh apps/backend/migrate.sh
+python apps/backend/run_migrations.py
 
 echo "Starting API server..."
 python apps/backend/serve.py

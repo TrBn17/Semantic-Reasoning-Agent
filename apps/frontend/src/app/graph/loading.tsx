@@ -1,5 +1,3 @@
-import { PageSkeleton } from "@/components/layout/page-skeleton";
+import { RouteLoadingCanvas } from "@/components/layout/route-loading";
 
-export default function Loading() {
-  return <PageSkeleton variant="canvas" />;
-}
+export default RouteLoadingCanvas;

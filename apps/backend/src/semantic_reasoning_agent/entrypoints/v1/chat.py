@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from semantic_reasoning_agent.entrypoints.dependencies import get_chat_stream_service
 from semantic_reasoning_agent.schemas.chat import ChatReply, SendMessageRequest
-from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService, ProviderNotReadyError
+from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService
 from semantic_reasoning_agent.services.conversation_service import (
     ConversationNotFoundError,
     ConversationPolicyError,
 )
+from semantic_reasoning_agent.services.runtime_errors import ProviderNotReadyError
 
 
 router = APIRouter()

@@ -21,10 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-function composeValue(provider: string, model: string) {
-  return `${provider}::${model}`;
-}
+import { useI18n } from "@/src/shared/i18n/use-language";
+import { composeProviderModel, parseProviderModelValue } from "@/lib/model-routing";
 
 export function ChatRuntimeControls({
   conversation,
@@ -35,6 +33,7 @@ export function ChatRuntimeControls({
   models: ModelOption[];
   onConversationChange: (conversation: ConversationResponse) => void;
 }) {
+  const { t } = useI18n();
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const { data: profiles } = useQuery({
     queryKey: queryKeys.agents.profiles(workspaceId),
@@ -43,15 +42,16 @@ export function ChatRuntimeControls({
 
   const updateModelMutation = useMutation({
     mutationFn: (value: string) => {
-      const [provider, model] = value.split("::");
+      const parsed = parseProviderModelValue(value);
+      if (!parsed) throw new Error("Invalid model selection");
       return updateConversationModelSelection(conversation.id, {
-        provider,
-        model,
+        provider: parsed.provider,
+        model: parsed.model,
         workspace_id: conversation.workspace_id,
       });
     },
     onSuccess: onConversationChange,
-    onError: (err) => toast.error(`Model update failed: ${(err as Error).message}`),
+    onError: (err) => toast.error(`${t.common.modelUpdateFailedPrefix} ${(err as Error).message}`),
   });
 
   const updateProfileMutation = useMutation({
@@ -62,7 +62,7 @@ export function ChatRuntimeControls({
         clear_model_override: !conversation.uses_model_override,
       }),
     onSuccess: onConversationChange,
-    onError: (err) => toast.error(`Profile update failed: ${(err as Error).message}`),
+    onError: (err) => toast.error(`${t.common.profileUpdateFailedPrefix} ${(err as Error).message}`),
   });
 
   const grouped: Record<string, ModelOption[]> = {};
@@ -83,10 +83,10 @@ export function ChatRuntimeControls({
         }
       >
         <SelectTrigger className="w-[220px]">
-          <SelectValue placeholder="Select profile" />
+          <SelectValue placeholder={t.common.selectProfile} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__workspace__">Workspace default</SelectItem>
+          <SelectItem value="__workspace__">{t.common.workspaceDefault}</SelectItem>
           {(profiles ?? []).map((profile) => (
             <SelectItem key={profile.id} value={profile.id}>
               {profile.name}
@@ -96,12 +96,12 @@ export function ChatRuntimeControls({
       </Select>
 
       <Select
-        value={composeValue(conversation.provider, conversation.model)}
+        value={composeProviderModel(conversation.provider, conversation.model)}
         onValueChange={(value) => updateModelMutation.mutate(value)}
         disabled={!allowOverride}
       >
         <SelectTrigger className="w-[240px]">
-          <SelectValue placeholder="Select model" />
+          <SelectValue placeholder={t.common.selectModel} />
         </SelectTrigger>
         <SelectContent>
           {Object.entries(grouped).map(([providerName, opts]) => (
@@ -109,8 +109,8 @@ export function ChatRuntimeControls({
               <SelectLabel className="capitalize">{providerName}</SelectLabel>
               {opts.map((opt) => (
                 <SelectItem
-                  key={composeValue(opt.provider, opt.model)}
-                  value={composeValue(opt.provider, opt.model)}
+                  key={composeProviderModel(opt.provider, opt.model)}
+                  value={composeProviderModel(opt.provider, opt.model)}
                 >
                   <span className="flex items-center gap-2">
                     {opt.ready ? (
@@ -128,9 +128,9 @@ export function ChatRuntimeControls({
       </Select>
 
       <Badge variant={conversation.uses_model_override ? "info" : "outline"}>
-        {conversation.uses_model_override ? "Session override" : "Inherited default"}
+        {conversation.uses_model_override ? t.common.sessionOverride : t.common.inheritedDefault}
       </Badge>
-      {!allowOverride && <Badge variant="warning">Profile locks model override</Badge>}
+      {!allowOverride && <Badge variant="warning">{t.common.profileLocksModelOverride}</Badge>}
     </div>
   );
 }

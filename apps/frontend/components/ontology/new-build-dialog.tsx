@@ -18,11 +18,14 @@ import {
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { listDocuments } from "@/lib/api/documents";
-import { createBuild } from "@/lib/api/ontology";
+import { extractAndPublish } from "@/lib/api/ontology";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function NewBuildDialog() {
+  const { t } = useI18n();
+  const x = t.knowledgeGraph.extractDialog;
   const queryClient = useQueryClient();
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const [open, setOpen] = useState(false);
@@ -35,11 +38,11 @@ export function NewBuildDialog() {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      if (documentIds.length === 0) throw new Error("Pick at least one document");
+      if (documentIds.length === 0) throw new Error(x.pickError);
       const queued = await Promise.allSettled(
-        documentIds.map((documentId) =>
-          createBuild({
-            document_id: documentId,
+        documentIds.map((document_id) =>
+          extractAndPublish({
+            document_id,
             workspace_id: workspaceId ?? undefined,
           }),
         ),
@@ -52,7 +55,7 @@ export function NewBuildDialog() {
           successCount += 1;
           return;
         }
-        failures.push(result.reason instanceof Error ? result.reason.message : "Unknown error");
+        failures.push(result.reason instanceof Error ? result.reason.message : t.common.unknown);
       });
 
       return { successCount, failures };
@@ -63,21 +66,25 @@ export function NewBuildDialog() {
       }
 
       if (successCount > 0 && failures.length === 0) {
-        toast.success(`Queued ${successCount} build(s)`);
+        toast.success(x.toastPublished.replace("{n}", String(successCount)));
         setOpen(false);
       } else if (successCount > 0) {
         toast.warning(
-          `Queued ${successCount} build(s), failed ${failures.length}: ${failures
-            .slice(0, 2)
-            .join(" | ")}`,
+          x.toastPartial
+            .replace("{ok}", String(successCount))
+            .replace("{fail}", String(failures.length))
+            .replace("{detail}", failures.slice(0, 2).join(" | ")),
         );
       } else {
-        toast.error(`Build failed: ${failures.slice(0, 2).join(" | ")}`);
+        toast.error(
+          x.toastFailed.replace("{detail}", failures.slice(0, 2).join(" | ")),
+        );
       }
 
       setDocumentIds([]);
     },
-    onError: (err) => toast.error(`Build failed: ${(err as Error).message}`),
+    onError: (err) =>
+      toast.error(`${x.toastError} ${(err as Error).message}`),
   });
 
   const indexed = (documents ?? []).filter((d) => d.status === "indexed");
@@ -94,19 +101,16 @@ export function NewBuildDialog() {
       <DialogTrigger asChild>
         <Button>
           <Plus className="h-4 w-4" />
-          New build
+          {x.trigger}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Run ontology extraction</DialogTitle>
-          <DialogDescription>
-            Pick an indexed document. The worker extracts candidate entities
-            and relations, then they land in the review queue.
-          </DialogDescription>
+          <DialogTitle>{x.title}</DialogTitle>
+          <DialogDescription>{x.description}</DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <Label>Documents</Label>
+          <Label>{x.documentsLabel}</Label>
           <ScrollArea className="h-56 rounded-md border">
             <div className="space-y-1 p-2">
               {indexed.map((d) => {
@@ -124,35 +128,33 @@ export function NewBuildDialog() {
                   >
                     <span className="truncate">{d.title}</span>
                     <span className="text-xs text-muted-foreground">
-                      {checked ? "Selected" : "Select"}
+                      {checked ? x.selected : x.unselected}
                     </span>
                   </button>
                 );
               })}
               {indexed.length === 0 && (
-                <div className="p-2 text-xs text-muted-foreground">
-                  No indexed documents. Upload and wait for indexing to finish.
-                </div>
+                <div className="p-2 text-xs text-muted-foreground">{x.noIndexedDocs}</div>
               )}
             </div>
           </ScrollArea>
           {documentIds.length > 0 && (
             <p className="text-xs text-muted-foreground">
-              {documentIds.length} document(s) selected.
+              {documentIds.length} {x.nSelected}
             </p>
           )}
         </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" type="button">
-              Cancel
+              {x.cancel}
             </Button>
           </DialogClose>
           <Button
             onClick={() => mutation.mutate()}
             disabled={documentIds.length === 0 || mutation.isPending}
           >
-            {mutation.isPending ? "Queueing..." : "Start selected builds"}
+            {mutation.isPending ? x.running : x.run}
           </Button>
         </DialogFooter>
       </DialogContent>

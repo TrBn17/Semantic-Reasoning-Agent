@@ -5,7 +5,7 @@ from sqlalchemy import delete, select
 
 from semantic_reasoning_agent.core.config import Settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import DocumentChunkORM
+from semantic_reasoning_agent.persistence.models.documents import DocumentChunkORM
 from semantic_reasoning_agent.infrastructure.vector import TokenVectorBackend
 from semantic_reasoning_agent.ports.vector_backend import VectorBackendPort
 from semantic_reasoning_agent.infrastructure.parsers.models import IndexedChunk, ParsedDocument

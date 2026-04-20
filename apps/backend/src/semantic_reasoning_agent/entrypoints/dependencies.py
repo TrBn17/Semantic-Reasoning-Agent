@@ -1,5 +1,4 @@
 from semantic_reasoning_agent.core.container import get_app_container
-from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService
 from semantic_reasoning_agent.services.conversation_service import ConversationService
 from semantic_reasoning_agent.services.document_service import DocumentService
@@ -8,9 +7,11 @@ from semantic_reasoning_agent.services.model_config_service import ModelConfigSe
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
-from semantic_reasoning_agent.services.secret_service import SecretService
+from semantic_reasoning_agent.services.runtime_audit_service import RuntimeAuditService
+from semantic_reasoning_agent.services.task_runtime import TaskRuntime
 from semantic_reasoning_agent.services.tool_registry import ToolRegistry
 from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
+from semantic_reasoning_agent.services.workflow_runtime import WorkflowRuntime
 
 
 def get_conversation_service() -> ConversationService:
@@ -23,14 +24,6 @@ def get_agent_profile_service() -> AgentProfileService:
 
 def get_model_config_service() -> ModelConfigService:
     return get_app_container().model_config_service
-
-
-def get_secret_service() -> SecretService:
-    return get_app_container().secret_service
-
-
-def get_adapter_registry() -> AdapterRegistry:
-    return get_app_container().adapter_registry
 
 
 def get_document_service() -> DocumentService:
@@ -59,3 +52,15 @@ def get_tool_registry() -> ToolRegistry:
 
 def get_tool_runtime() -> ToolRuntime:
     return get_app_container().tool_runtime
+
+
+def get_task_runtime() -> TaskRuntime:
+    return get_app_container().task_runtime
+
+
+def get_workflow_runtime() -> WorkflowRuntime:
+    return get_app_container().workflow_runtime
+
+
+def get_runtime_audit_service() -> RuntimeAuditService:
+    return get_app_container().runtime_audit_service

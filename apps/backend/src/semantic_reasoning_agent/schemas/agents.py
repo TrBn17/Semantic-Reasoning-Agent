@@ -36,6 +36,8 @@ class ProviderFieldDefinition(BaseModel):
     required: bool = True
     secret: bool = False
     help_text: str
+    input_type: Literal["text", "select"] = "text"
+    options: list[str] = Field(default_factory=list)
 
 
 class ProviderFieldValue(BaseModel):

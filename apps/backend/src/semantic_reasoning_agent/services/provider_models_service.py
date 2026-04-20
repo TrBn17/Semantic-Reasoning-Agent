@@ -23,6 +23,7 @@ from anthropic import Anthropic
 from google import genai
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
+from semantic_reasoning_agent.services.anthropic_provider_service import resolve_anthropic_base_url
 
 CHAT_MODEL_PREFIXES: tuple[str, ...] = ("gpt-", "chatgpt-", "o1", "o3", "o4")
 NON_CHAT_MODEL_MARKERS: tuple[str, ...] = (
@@ -235,7 +236,10 @@ class ProviderModelsService:
 
         if provider == "anthropic":
             resolved_api_key = api_key or self._settings.anthropic_api_key
-            resolved_base_url = base_url or self._settings.anthropic_base_url
+            resolved_base_url = resolve_anthropic_base_url(
+                provider_target=self._settings.anthropic_provider_target,
+                explicit_base_url=base_url or self._settings.anthropic_base_url,
+            )
             if not resolved_api_key:
                 raise ValueError("Anthropic API key not configured")
             try:

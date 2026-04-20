@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import ProviderSecretORM
+from semantic_reasoning_agent.persistence.models.providers import ProviderSecretORM
 from semantic_reasoning_agent.ports.secret_repo import SecretDescriptor, SecretRepository
 
 

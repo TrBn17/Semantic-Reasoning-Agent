@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import {
   ArrowRight,
   FileText,
@@ -10,12 +9,13 @@ import {
   Search,
   Sparkles,
 } from "lucide-react";
+import { LoadingLink as Link } from "@/components/navigation/loading-link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listConversations } from "@/lib/api/conversations";
 import { listDocuments } from "@/lib/api/documents";
-import { listBuilds, getGraph } from "@/lib/api/ontology";
+import { getGraph } from "@/lib/api/ontology";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 import { useCapabilities } from "@/src/shared/capabilities/useCapabilities";
@@ -55,10 +55,6 @@ export function HomeView() {
     queryKey: queryKeys.documents.list(),
     queryFn: listDocuments,
   });
-  const builds = useQuery({
-    queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
-    queryFn: () => listBuilds(workspaceId ?? undefined),
-  });
   const graph = useQuery({
     queryKey: queryKeys.ontology.graph(workspaceId ?? undefined),
     queryFn: () => getGraph(workspaceId ?? undefined),
@@ -72,32 +68,53 @@ export function HomeView() {
     .slice()
     .sort(sortByUpdatedAtDesc)
     .slice(0, 5);
-  const activeBuilds = (builds.data ?? [])
-    .slice()
-    .sort(sortByUpdatedAtDesc)
-    .slice(0, 5);
   const recentConversations = (conversations.data ?? [])
     .slice()
     .sort(sortByUpdatedAtDesc)
     .slice(0, 4);
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">{t.home.title}</h1>
-        <p className="text-sm text-muted-foreground">{t.home.subtitle}</p>
-      </header>
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-8 lg:px-8 lg:py-10">
+      <section className="hero-panel surface-panel-strong relative overflow-hidden px-6 py-7 lg:px-8 lg:py-8">
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:28px_28px] opacity-40" />
+        <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.85fr)] lg:items-end">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.22em] text-primary">
+              <Sparkles className="h-3.5 w-3.5" />
+              {t.home.heroBadge}
+            </div>
+            <div className="space-y-2">
+              <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+                {t.home.title}
+              </h1>
+              <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+                {t.home.subtitle}
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <SummaryPill label={t.home.summary.documents} value={recentDocuments.length} />
+            <SummaryPill
+              label={t.home.summary.graphEntities}
+              value={graph.data?.entities?.length ?? 0}
+            />
+            <SummaryPill label={t.home.summary.conversations} value={recentConversations.length} />
+          </div>
+        </div>
+      </section>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {quickActions.map(({ href, icon: Icon }) => (
           <Link key={href} href={href} className="group">
-            <Card className="h-full transition-colors group-hover:border-primary/50">
+            <Card className="surface-panel h-full transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-primary/35 group-hover:shadow-lg">
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Icon className="h-4 w-4 text-muted-foreground" />
+                  <span className="rounded-lg bg-primary/10 p-2 text-primary ring-1 ring-primary/10">
+                    <Icon className="h-4 w-4" />
+                  </span>
                   {translateQuickActionTitle(href, t)}
                 </CardTitle>
-                <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground">
@@ -110,7 +127,7 @@ export function HomeView() {
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
+        <Card variant="surface">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-sm">{t.home.sections.recentDocuments}</CardTitle>
             <Link
@@ -129,7 +146,7 @@ export function HomeView() {
               <Link
                 key={d.id}
                 href={`/documents/${d.id}`}
-                className="flex items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-accent"
+                className="flex items-center justify-between rounded-xl px-3 py-3 text-sm transition-colors hover:bg-accent/60"
               >
                 <div className="min-w-0">
                   <div className="truncate font-medium">{d.title}</div>
@@ -143,7 +160,7 @@ export function HomeView() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card variant="surface">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-sm">{t.home.sections.ontologyBuilds}</CardTitle>
             <Link
@@ -154,30 +171,28 @@ export function HomeView() {
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
-            {builds.isLoading && <Skeletons count={3} />}
-            {!builds.isLoading && activeBuilds.length === 0 && (
+            {graph.isLoading && <Skeletons count={2} />}
+            {!graph.isLoading && !graph.data?.version && (
               <EmptyState text={t.home.empty.builds} />
             )}
-            {activeBuilds.map((b) => (
+            {graph.data?.version && (
               <Link
-                key={b.id}
-                href={`/ontology/builds/${b.id}`}
-                className="flex items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-accent"
+                href="/ontology/builds"
+                className="flex flex-col rounded-xl px-3 py-3 text-sm transition-colors hover:bg-accent/60"
               >
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{b.id.slice(0, 8)}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {b.entity_count} entities · {b.relation_count} relations ·{" "}
-                    {formatDateTime(b.updated_at)}
-                  </div>
+                <div className="font-medium">
+                  v{graph.data.version.version_number} · {graph.data.entities.length} entities ·{" "}
+                  {graph.data.relations.length} relations
                 </div>
-                <Badge variant={badgeVariant(b.status)}>{b.status}</Badge>
+                <div className="text-xs text-muted-foreground">
+                  {formatDateTime(graph.data.version.created_at)}
+                </div>
               </Link>
-            ))}
+            )}
           </CardContent>
         </Card>
 
-        <Card>
+        <Card variant="surface">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">{t.home.sections.publishedGraph}</CardTitle>
           </CardHeader>
@@ -207,7 +222,7 @@ export function HomeView() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card variant="surface">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <CardTitle className="text-sm">{t.home.sections.recentConversations}</CardTitle>
             <Link
@@ -226,7 +241,7 @@ export function HomeView() {
               <Link
                 key={c.id}
                 href={`/ask/${c.id}`}
-                className="block rounded-md px-2 py-2 text-sm hover:bg-accent"
+                className="block rounded-xl px-3 py-3 text-sm transition-colors hover:bg-accent/60"
               >
                 <div className="truncate font-medium">{c.title}</div>
                 <div className="truncate text-xs text-muted-foreground">
@@ -240,7 +255,7 @@ export function HomeView() {
 
       {!caps.tasksAvailable && (
         <section>
-          <Card className="border-dashed">
+          <Card className="surface-panel border-dashed">
             <CardHeader className="flex flex-row items-center gap-2 space-y-0 pb-2">
               <Sparkles className="h-4 w-4 text-muted-foreground" />
               <CardTitle className="text-sm">{t.home.tasks.title}</CardTitle>
@@ -257,6 +272,15 @@ export function HomeView() {
 }
 
 type WithUpdated = { updated_at: string };
+
+function SummaryPill({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="surface-panel flex flex-col items-center justify-center px-4 py-4 text-center">
+      <div className="text-2xl font-semibold text-foreground">{value}</div>
+      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
+    </div>
+  );
+}
 
 function sortByUpdatedAtDesc<T extends WithUpdated>(a: T, b: T) {
   return b.updated_at.localeCompare(a.updated_at);

@@ -104,7 +104,11 @@ class OpenDomainLLMExtractor:
             known_relation_types=schema.relation_types,
             prompt_version=self._settings.ontology_prompt_version,
         )
-        payload = self._invoke_anthropic(prompt, model=model)
+        payload = self._invoke_anthropic(
+            prompt,
+            model=model,
+            workspace_id=workspace_id,
+        )
         extraction = self._parse_payload(payload)
         return self._to_domain_result(
             extraction,
@@ -113,14 +117,23 @@ class OpenDomainLLMExtractor:
             model=model,
         )
 
-    def _invoke_anthropic(self, prompt: str, *, model: str) -> str:
+    def _invoke_anthropic(
+        self,
+        prompt: str,
+        *,
+        model: str,
+        workspace_id: str | None,
+    ) -> str:
         from anthropic import Anthropic
 
-        client_kwargs: dict[str, str] = {}
-        if self._settings.anthropic_api_key:
-            client_kwargs["api_key"] = self._settings.anthropic_api_key
-        if self._settings.anthropic_base_url:
-            client_kwargs["base_url"] = self._settings.anthropic_base_url
+        client_kwargs = {
+            key: value
+            for key, value in self._model_config_service.get_provider_runtime_config(
+                "anthropic",
+                workspace_id,
+            ).items()
+            if value
+        }
 
         client = Anthropic(**client_kwargs)
         response = client.messages.create(

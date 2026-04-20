@@ -1,5 +1,3 @@
-import { PageSkeleton } from "@/components/layout/page-skeleton";
+import { RouteLoadingSplit } from "@/components/layout/route-loading";
 
-export default function Loading() {
-  return <PageSkeleton variant="split" />;
-}
+export default RouteLoadingSplit;

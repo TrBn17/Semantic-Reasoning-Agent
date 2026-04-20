@@ -41,6 +41,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/src/shared/i18n/use-language";
+import { readinessBadgeVariant } from "@/lib/badges/readiness";
+import { composeProviderModel, parseProviderModelValue } from "@/lib/model-routing";
 
 interface ProviderDraft {
   enabled: boolean;
@@ -48,21 +50,6 @@ interface ProviderDraft {
 }
 
 type AgentProvider = AgentSettingsResponse["providers"][number];
-
-function composeValue(provider: string, model: string) {
-  return `${provider}::${model}`;
-}
-
-function parseComposedValue(value?: string | null) {
-  if (!value) return null;
-  const [provider, model] = value.split("::");
-  if (!provider || !model) return null;
-  return { provider, model };
-}
-
-function statusVariant(ready: boolean): "success" | "warning" {
-  return ready ? "success" : "warning";
-}
 
 function hydrateProviderDrafts(settings: AgentSettingsResponse): Record<string, ProviderDraft> {
   return Object.fromEntries(
@@ -90,9 +77,35 @@ function hydrateTaskDrafts(settings: AgentSettingsResponse): Record<string, stri
   return Object.fromEntries(
     settings.task_assignments.map((task) => [
       task.task_type,
-      composeValue(task.provider, task.model),
+      composeProviderModel(task.provider, task.model),
     ]),
   );
+}
+
+function buildSettingsPayload(
+  settings: AgentSettingsResponse,
+  providerDrafts: Record<string, ProviderDraft>,
+  taskDrafts: Record<string, string>,
+): {
+  providers: ProviderConfigUpdate[];
+  task_assignments: TaskAssignmentUpdate[];
+} {
+  return {
+    providers: settings.providers.map((provider) => ({
+      provider: provider.provider,
+      enabled: providerDrafts[provider.provider]?.enabled ?? provider.enabled,
+      values: providerDrafts[provider.provider]?.values ?? {},
+    })),
+    task_assignments: settings.tasks
+      .map((task) => {
+        const value = taskDrafts[task.task_type];
+        if (!value) return null;
+        const [provider, model] = value.split("::");
+        if (!provider || !model) return null;
+        return { task_type: task.task_type, provider, model };
+      })
+      .filter(Boolean) as TaskAssignmentUpdate[],
+  };
 }
 
 function getProviderPreview(provider: AgentProvider, draft?: ProviderDraft) {
@@ -177,7 +190,7 @@ const TaskModelPicker = memo(function TaskModelPicker({
   labels,
 }: TaskModelPickerProps) {
   const selected = useMemo(
-    () => models.find((item) => composeValue(item.provider, item.model) === value),
+    () => models.find((item) => composeProviderModel(item.provider, item.model) === value),
     [models, value],
   );
   const providers = useMemo(
@@ -189,7 +202,7 @@ const TaskModelPicker = memo(function TaskModelPicker({
   const deferredSearchText = useDeferredValue(searchText);
 
   useEffect(() => {
-    const selectedValue = parseComposedValue(value);
+    const selectedValue = parseProviderModelValue(value);
     if (!selectedValue) {
       setProviderFilter("all");
       return;
@@ -255,8 +268,8 @@ const TaskModelPicker = memo(function TaskModelPicker({
         <SelectContent>
           {filteredModels.map((model) => (
             <SelectItem
-              key={composeValue(model.provider, model.model)}
-              value={composeValue(model.provider, model.model)}
+              key={composeProviderModel(model.provider, model.model)}
+              value={composeProviderModel(model.provider, model.model)}
             >
               {model.label} · {model.provider}
             </SelectItem>
@@ -325,7 +338,7 @@ export function AgentSettingsView() {
     setProfileAllowOverrideDraft(selected.allow_chat_model_override);
     setProfileTaskDrafts(
       Object.fromEntries(
-        selected.task_models.map((item) => [item.task_type, composeValue(item.provider, item.model)]),
+        selected.task_models.map((item) => [item.task_type, composeProviderModel(item.provider, item.model)]),
       ),
     );
   }, [preferredAgentProfileId, profiles, selectedProfileId, setPreferredAgentProfileId]);
@@ -333,7 +346,7 @@ export function AgentSettingsView() {
   const modelLookup = useMemo(() => {
     const source = data?.models ?? [];
     return Object.fromEntries(
-      source.map((item) => [composeValue(item.provider, item.model), item]),
+      source.map((item) => [composeProviderModel(item.provider, item.model), item]),
     );
   }, [data]);
 
@@ -367,10 +380,21 @@ export function AgentSettingsView() {
           reason: model.reason,
         };
         const preview = getModelPreview(model, providerPreview);
-        return [composeValue(preview.provider, preview.model), preview];
+        return [composeProviderModel(preview.provider, preview.model), preview];
       }),
     );
   }, [data?.models, providerPreviewByName]);
+
+  const hasPendingSettingsChanges = useMemo(() => {
+    if (!data) return false;
+    const baseline = buildSettingsPayload(
+      data,
+      hydrateProviderDrafts(data),
+      hydrateTaskDrafts(data),
+    );
+    const current = buildSettingsPayload(data, providerDrafts, taskDrafts);
+    return JSON.stringify(current) !== JSON.stringify(baseline);
+  }, [data, providerDrafts, taskDrafts]);
 
   const mutation = useMutation({
     mutationFn: (payload: {
@@ -463,65 +487,55 @@ export function AgentSettingsView() {
   }
 
   const handleSaveSettings = () => {
-    mutation.mutate({
-      providers: data.providers.map((provider) => ({
-        provider: provider.provider,
-        enabled: providerDrafts[provider.provider]?.enabled ?? provider.enabled,
-        values: providerDrafts[provider.provider]?.values ?? {},
-      })),
-      task_assignments: data.tasks
-        .map((task) => {
-          const value = taskDrafts[task.task_type];
-          if (!value) return null;
-          const [provider, model] = value.split("::");
-          if (!provider || !model) return null;
-          return { task_type: task.task_type, provider, model };
-        })
-        .filter(Boolean) as TaskAssignmentUpdate[],
-    });
+    mutation.mutate(buildSettingsPayload(data, providerDrafts, taskDrafts));
   };
 
+  const showFloatingActions = hasPendingSettingsChanges;
+
   return (
-    <div className="space-y-4 pb-28 sm:space-y-6 sm:pb-32">
-      <div className="fixed inset-x-0 bottom-2 z-30 px-3 sm:bottom-4 sm:px-6">
-        <div className="mx-auto max-w-6xl rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm text-muted-foreground">
-            {t.agentsSettings.builder.description}
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowAdvanced((current) => !current)}
-              className="w-full"
-            >
-              {showAdvanced
-                ? t.agentsSettings.builder.hideAdvanced
-                : t.agentsSettings.builder.showAdvanced}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void refetch()}
-              disabled={isFetching || mutation.isPending}
-              className="w-full"
-            >
-              <RefreshCcw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-              {t.agentsSettings.builder.refreshCatalog}
-            </Button>
-            <Button
-              onClick={handleSaveSettings}
-              disabled={mutation.isPending}
-              className="col-span-2 w-full sm:col-span-1 sm:min-w-[160px]"
-            >
-              <Save className="h-4 w-4" />
-              {t.agentsSettings.builder.saveSettings}
-            </Button>
+    <div className="space-y-4 pb-20 sm:space-y-6 sm:pb-24">
+      {showFloatingActions && (
+        <div className="fixed inset-x-0 bottom-2 z-30 px-3 sm:bottom-3 sm:px-6">
+          <div className="mx-auto max-w-3xl rounded-lg border bg-background/94 px-3 py-2 shadow-md backdrop-blur">
+            <div className="flex items-center justify-between gap-3">
+              <p className="min-w-0 truncate text-[11px] text-muted-foreground sm:text-xs">
+                {t.agentsSettings.builder.description}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowAdvanced((current) => !current)}
+                className="h-7 shrink-0 px-2 text-[11px] sm:text-xs"
+              >
+                {showAdvanced
+                  ? t.agentsSettings.builder.hideAdvanced
+                  : t.agentsSettings.builder.showAdvanced}
+              </Button>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void refetch()}
+                  disabled={isFetching || mutation.isPending}
+                  className="h-8 w-full text-xs"
+                >
+                  <RefreshCcw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+                  {t.agentsSettings.builder.refreshCatalog}
+                </Button>
+                <Button
+                  onClick={handleSaveSettings}
+                  disabled={mutation.isPending || !hasPendingSettingsChanges}
+                  className="h-8 w-full text-xs"
+                >
+                  <Save className="h-4 w-4" />
+                  {t.agentsSettings.builder.saveSettings}
+                </Button>
+            </div>
           </div>
         </div>
-        </div>
-      </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -552,7 +566,7 @@ export function AgentSettingsView() {
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold">{provider.label}</h3>
-                      <Badge variant={statusVariant(providerPreview.ready)}>
+                      <Badge variant={readinessBadgeVariant(providerPreview.ready)}>
                         {providerPreview.ready
                           ? t.agentsSettings.taskRouting.ready
                           : t.agentsSettings.providerEnv.needsSetup}
@@ -589,30 +603,61 @@ export function AgentSettingsView() {
                   {provider.fields.map((field) => {
                     const valueState = provider.values.find((item) => item.key === field.key);
                     const currentValue = draft?.values[field.key] ?? "";
+                    const placeholder =
+                      currentValue ? field.placeholder : valueState?.masked_value || field.placeholder;
                     return (
                       <div key={field.key} className="space-y-2">
                         <Label htmlFor={`${provider.provider}-${field.key}`}>
                           {field.label}
                           {!field.required ? " (optional)" : ""}
                         </Label>
-                        <Input
-                          id={`${provider.provider}-${field.key}`}
-                          type={field.secret ? "password" : "text"}
-                          value={currentValue}
-                          placeholder={currentValue ? field.placeholder : valueState?.masked_value || field.placeholder}
-                          onChange={(event) =>
-                            setProviderDrafts((current) => ({
-                              ...current,
-                              [provider.provider]: {
-                                enabled: current[provider.provider]?.enabled ?? provider.enabled,
-                                values: {
-                                  ...(current[provider.provider]?.values ?? {}),
-                                  [field.key]: event.target.value,
+                        {field.input_type === "select" ? (
+                          <Select
+                            value={currentValue || valueState?.masked_value || field.placeholder}
+                            onValueChange={(value) =>
+                              setProviderDrafts((current) => ({
+                                ...current,
+                                [provider.provider]: {
+                                  enabled: current[provider.provider]?.enabled ?? provider.enabled,
+                                  values: {
+                                    ...(current[provider.provider]?.values ?? {}),
+                                    [field.key]: value,
+                                  },
                                 },
-                              },
-                            }))
-                          }
-                        />
+                              }))
+                            }
+                          >
+                            <SelectTrigger id={`${provider.provider}-${field.key}`}>
+                              <SelectValue placeholder={field.placeholder} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {field.options.map((option) => (
+                                <SelectItem key={option} value={option}>
+                                  {option}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            id={`${provider.provider}-${field.key}`}
+                            type={field.secret ? "password" : "text"}
+                            value={currentValue}
+                            placeholder={placeholder}
+                            onChange={(event) =>
+                              setProviderDrafts((current) => ({
+                                ...current,
+                                [provider.provider]: {
+                                  enabled: current[provider.provider]?.enabled ?? provider.enabled,
+                                  values: {
+                                    ...(current[provider.provider]?.values ?? {}),
+                                    [field.key]: event.target.value,
+                                  },
+                                },
+                              }))
+                            }
+                          />
+                        )}
                         <p className="text-xs text-muted-foreground">
                           {valueState?.configured
                             ? `${t.agentsSettings.providerEnv.currentPrefix} ${valueState.masked_value}`
@@ -669,7 +714,7 @@ export function AgentSettingsView() {
                       Object.fromEntries(
                         profile.task_models.map((item) => [
                           item.task_type,
-                          composeValue(item.provider, item.model),
+                          composeProviderModel(item.provider, item.model),
                         ]),
                       ),
                     );
@@ -800,7 +845,7 @@ export function AgentSettingsView() {
                     </p>
                   </div>
                   {selectedModel && (
-                    <Badge variant={statusVariant(selectedModel.ready)}>
+                    <Badge variant={readinessBadgeVariant(selectedModel.ready)}>
                       {selectedModel.ready
                         ? t.agentsSettings.taskRouting.ready
                         : t.agentsSettings.taskRouting.blocked}
@@ -869,12 +914,12 @@ export function AgentSettingsView() {
             ))}
           </div>
           {catalogModels.map((model) => {
-            const preview = modelPreviewLookup[composeValue(model.provider, model.model)] ?? model;
+            const preview = modelPreviewLookup[composeProviderModel(model.provider, model.model)] ?? model;
             return (
-              <div key={composeValue(model.provider, model.model)} className="rounded-xl border p-4">
+              <div key={composeProviderModel(model.provider, model.model)} className="rounded-xl border p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="font-semibold">{preview.label}</h3>
-                  <Badge variant={statusVariant(preview.ready)}>
+                  <Badge variant={readinessBadgeVariant(preview.ready)}>
                     {preview.ready
                       ? t.agentsSettings.modelCatalog.ready
                       : t.agentsSettings.modelCatalog.blocked}

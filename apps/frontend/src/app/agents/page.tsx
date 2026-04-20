@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { AgentBuilderView } from "@/components/agents/agent-builder-view";
 
 export default function AgentsPage() {
-  redirect("/settings");
+  return <AgentBuilderView />;
 }

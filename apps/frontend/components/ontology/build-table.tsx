@@ -1,91 +1,67 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
-import { BuildStatusBadge } from "@/components/ontology/status-badges";
+import { LoadingLink as Link } from "@/components/navigation/loading-link";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { listBuilds } from "@/lib/api/ontology";
+import { getGraph } from "@/lib/api/ontology";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 import { formatDateTime } from "@/lib/utils";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
-export function BuildTable({ limit }: { limit?: number }) {
+export function BuildTable({ limit: _limit }: { limit?: number }) {
+  const { t } = useI18n();
+  const kg = t.knowledgeGraph.buildTable;
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const { data, isLoading, isError } = useQuery({
-    queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
-    queryFn: () => listBuilds(workspaceId ?? undefined),
+    queryKey: queryKeys.ontology.graph(workspaceId ?? undefined),
+    queryFn: () => getGraph(workspaceId ?? undefined),
   });
 
-  if (isLoading) return <Skeleton className="h-64 w-full" />;
-  if (isError)
-    return <p className="text-sm text-destructive">Failed to load builds.</p>;
+  if (isLoading) return <Skeleton className="h-48 w-full" />;
+  if (isError) return <p className="text-sm text-destructive">{kg.loadFailed}</p>;
 
-  const rows = limit ? (data ?? []).slice(0, limit) : data ?? [];
-  if (rows.length === 0)
-    return (
-      <p className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-        No ontology builds yet.
-      </p>
-    );
+  const entities = data?.entities ?? [];
+  const relations = data?.relations ?? [];
+  const version = data?.version;
 
   return (
-    <div className="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Build</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Domain</TableHead>
-            <TableHead className="text-right">Entities</TableHead>
-            <TableHead className="text-right">Relations</TableHead>
-            <TableHead className="text-right">Pending</TableHead>
-            <TableHead>Updated</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((b) => (
-            <TableRow key={b.id}>
-              <TableCell>
-                <Link
-                  href={`/ontology/builds/${b.id}`}
-                  className="font-mono text-xs underline-offset-4 hover:underline"
-                >
-                  {b.id.slice(0, 8)}…
-                </Link>
-                <div className="text-xs text-muted-foreground">
-                  doc {b.document_id.slice(0, 8)}…
-                </div>
-              </TableCell>
-              <TableCell>
-                <BuildStatusBadge status={b.status} />
-              </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {b.domain ?? "—"}
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {b.entity_count}
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {b.relation_count}
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {b.pending_entity_count + b.pending_relation_count}
-              </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {formatDateTime(b.updated_at)}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{kg.cardTitle}</CardTitle>
+          <CardDescription>{kg.cardDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border bg-muted/30 px-4 py-3">
+            <p className="text-xs uppercase text-muted-foreground">{kg.metricEntities}</p>
+            <p className="text-2xl font-semibold">{entities.length}</p>
+          </div>
+          <div className="rounded-lg border bg-muted/30 px-4 py-3">
+            <p className="text-xs uppercase text-muted-foreground">{kg.metricRelations}</p>
+            <p className="text-2xl font-semibold">{relations.length}</p>
+          </div>
+          <div className="rounded-lg border bg-muted/30 px-4 py-3">
+            <p className="text-xs uppercase text-muted-foreground">{kg.metricVersion}</p>
+            <p className="text-2xl font-semibold">
+              {version ? `v${version.version_number}` : "—"}
+            </p>
+            {version && (
+              <p className="text-xs text-muted-foreground">
+                {formatDateTime(version.created_at)}
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+      <p className="text-xs text-muted-foreground">
+        {kg.footerBeforeLink}
+        <Link href="/graph" className="text-primary underline">
+          {kg.graphExplorerLink}
+        </Link>
+        {kg.footerAfterLink}
+      </p>
     </div>
   );
 }

@@ -1,14 +1,19 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+/** Default: shadcn card. `surface`: single elevated panel (avoid stacking with `.surface-panel`). */
+export type CardVariant = "default" | "surface";
+
 export const Card = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+  React.HTMLAttributes<HTMLDivElement> & { variant?: CardVariant }
+>(({ className, variant = "default", ...props }, ref) => (
   <div
     ref={ref}
     className={cn(
-      "rounded-xl border bg-card text-card-foreground shadow",
+      variant === "surface"
+        ? "surface-panel text-card-foreground"
+        : "rounded-xl border bg-card text-card-foreground shadow",
       className,
     )}
     {...props}

@@ -1,9 +1,27 @@
 # Keep Docker build context clean and deterministic
 .git
+**/.git
 .venv
 .pytest_cache
 __pycache__/
+**/__pycache__/
 *.pyc
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/*.egg-info/
+**/.cache/
+**/node_modules/
+**/.next/
+**/.turbo/
+**/.gitnexus/
+apps/backend/undefined/
+codeflow/
+docs/
+sample-skill/
+backend_flow.md
+BE\ architecture.md
+frontend_upgrade_spec.md
 
 # Frontend local artifacts that must not be copied from host
 apps/frontend/node_modules/

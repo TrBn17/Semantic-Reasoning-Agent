@@ -50,3 +50,13 @@ class DocumentJobResponse(BaseModel):
 class DocumentReprocessResponse(BaseModel):
     document: DocumentResponse
     jobs: list[DocumentJobResponse]
+
+
+class DocumentUploadFailure(BaseModel):
+    filename: str
+    reason: str
+
+
+class DocumentBatchUploadResponse(BaseModel):
+    uploaded: list[DocumentResponse] = Field(default_factory=list)
+    failed: list[DocumentUploadFailure] = Field(default_factory=list)

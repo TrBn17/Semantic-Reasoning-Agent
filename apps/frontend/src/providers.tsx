@@ -1,9 +1,11 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { RouteTransitionProvider } from "@/components/layout/route-transition-provider";
 import { Toaster } from "@/components/ui/sonner";
-import { useLanguageStore } from "@/src/shared/i18n/use-language";
+
+/** `lang` is set on `<html>` in `layout.tsx` (SSR cookie) and updated via `syncBrowserLanguage` in `use-language`. */
 
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(
@@ -18,16 +20,13 @@ export function Providers({ children }: { children: ReactNode }) {
         },
       }),
   );
-  const language = useLanguageStore((state) => state.language);
-
-  useEffect(() => {
-    document.documentElement.lang = language;
-  }, [language]);
 
   return (
     <QueryClientProvider client={client}>
-      {children}
-      <Toaster richColors position="top-right" />
+      <RouteTransitionProvider>
+        {children}
+        <Toaster richColors position="top-right" />
+      </RouteTransitionProvider>
     </QueryClientProvider>
   );
 }

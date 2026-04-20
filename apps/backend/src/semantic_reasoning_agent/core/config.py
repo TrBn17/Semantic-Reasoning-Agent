@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     default_model: str = Field(default="local-echo", alias="DEFAULT_MODEL")
 
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+    anthropic_provider_target: str | None = Field(default="anthropic", alias="ANTHROPIC_PROVIDER_TARGET")
     anthropic_base_url: str | None = Field(default=None, alias="ANTHROPIC_BASE_URL")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")

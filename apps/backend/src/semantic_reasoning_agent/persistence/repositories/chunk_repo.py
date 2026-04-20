@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import DocumentChunkORM
+from semantic_reasoning_agent.persistence.models.documents import DocumentChunkORM
 
 
 class ChunkRepository:

@@ -1,6 +1,7 @@
 "use client";
 
-import Link from "next/link";
+import { useMemo } from "react";
+import { LoadingLink as Link } from "@/components/navigation/loading-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,13 +13,7 @@ import {
 } from "@/components/ui/sheet";
 import { track } from "@/src/shared/telemetry/track";
 import type { EvidenceItemViewModel } from "@/src/entities/evidence/types";
-
-const SOURCE_LABEL: Record<EvidenceItemViewModel["sourceType"], string> = {
-  retrieval_citation: "Retrieval citation",
-  document_chunk: "Document chunk",
-  ontology_candidate_entity: "Ontology candidate entity",
-  ontology_candidate_relation: "Ontology candidate relation",
-};
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function EvidenceDetailDrawer({
   item,
@@ -27,6 +22,19 @@ export function EvidenceDetailDrawer({
   item: EvidenceItemViewModel | null;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
+  const drawerSourceLabels = useMemo(
+    (): Record<EvidenceItemViewModel["sourceType"], string> => ({
+      retrieval_citation: t.evidencePage.drawerSourceLabels.retrieval,
+      document_chunk: t.evidencePage.drawerSourceLabels.document,
+      ontology_candidate_entity: t.evidencePage.drawerSourceLabels.candidateEntity,
+      ontology_candidate_relation: t.evidencePage.drawerSourceLabels.candidateRelation,
+      ontology_graph_entity: t.evidencePage.drawerSourceLabels.graphEntity,
+      ontology_graph_relation: t.evidencePage.drawerSourceLabels.graphRelation,
+    }),
+    [t],
+  );
+
   return (
     <Sheet open={Boolean(item)} onOpenChange={(open) => !open && onClose()}>
       <SheetContent side="right" className="flex flex-col gap-4 sm:max-w-lg">
@@ -35,19 +43,19 @@ export function EvidenceDetailDrawer({
             <SheetHeader>
               <SheetTitle className="text-base">{item.title}</SheetTitle>
               <SheetDescription>
-                {SOURCE_LABEL[item.sourceType]}
+                {drawerSourceLabels[item.sourceType]}
               </SheetDescription>
             </SheetHeader>
             <div className="flex flex-wrap gap-2">
               {typeof item.score === "number" && (
                 <Badge variant="outline">
-                  score {formatScore(item.score)}
+                  {t.evidencePage.scoreBadgePrefix} {formatScore(item.score)}
                 </Badge>
               )}
               {typeof item.trustScore === "number" &&
                 item.trustScore !== item.score && (
                   <Badge variant="outline">
-                    trust {formatScore(item.trustScore)}
+                    {t.evidencePage.trustBadgePrefix} {formatScore(item.trustScore)}
                   </Badge>
                 )}
               {item.citationLabel && (
@@ -57,7 +65,7 @@ export function EvidenceDetailDrawer({
             {item.contentSnippet && (
               <section className="space-y-1">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Snippet
+                  {t.evidencePage.drawerSnippet}
                 </div>
                 <p className="rounded-md border bg-muted/30 p-3 text-sm">
                   {item.contentSnippet}
@@ -67,14 +75,14 @@ export function EvidenceDetailDrawer({
             {item.provenanceSummary && (
               <section className="space-y-1">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Provenance
+                  {t.evidencePage.drawerProvenance}
                 </div>
                 <p className="text-sm">{item.provenanceSummary}</p>
               </section>
             )}
             <section className="space-y-2">
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Links
+                {t.evidencePage.drawerLinks}
               </div>
               <div className="flex flex-wrap gap-2">
                 {item.documentId && (
@@ -89,7 +97,7 @@ export function EvidenceDetailDrawer({
                         })
                       }
                     >
-                      Open document
+                      {t.evidencePage.openDocument}
                     </Button>
                   </Link>
                 )}
@@ -105,7 +113,7 @@ export function EvidenceDetailDrawer({
                         })
                       }
                     >
-                      Open build
+                      {t.evidencePage.openBuild}
                     </Button>
                   </Link>
                 )}
@@ -121,7 +129,7 @@ export function EvidenceDetailDrawer({
                         })
                       }
                     >
-                      External source
+                      {t.evidencePage.externalSource}
                     </Button>
                   </a>
                 )}

@@ -6,7 +6,8 @@ from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import AgentProfileORM, ConversationORM, MessageORM
+from semantic_reasoning_agent.persistence.models.agent_profiles import AgentProfileORM
+from semantic_reasoning_agent.persistence.models.conversations import ConversationORM, MessageORM
 from semantic_reasoning_agent.schemas.chat import (
     ConversationAgentProfileRequest,
     ConversationCreateRequest,

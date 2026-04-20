@@ -7,8 +7,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fetchMe } from "@/lib/api/auth";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function WorkspaceBadge() {
+  const { t } = useI18n();
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.me,
     queryFn: fetchMe,
@@ -25,7 +27,7 @@ export function WorkspaceBadge() {
   if (isError || !data)
     return (
       <Badge variant="destructive" className="text-xs">
-        Backend unreachable
+        {t.common.serviceUnavailable}
       </Badge>
     );
 

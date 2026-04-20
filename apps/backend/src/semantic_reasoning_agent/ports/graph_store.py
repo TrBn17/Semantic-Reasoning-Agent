@@ -34,3 +34,7 @@ class GraphStore:
 
     def get_graph(self, workspace_id: str) -> OntologyGraphResponse:
         raise NotImplementedError
+
+    def delete_workspace(self, workspace_id: str) -> None:
+        """Remove projected ontology versions for a workspace (no-op when disabled)."""
+        return None

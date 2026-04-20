@@ -5,6 +5,7 @@ export type Capabilities = {
   ontologyAvailable: boolean;
   graphAvailable: boolean;
   settingsAvailable: boolean;
+  agentsAvailable: boolean;
 
   tasksAvailable: boolean;
   workflowsAvailable: boolean;
@@ -23,9 +24,10 @@ const DEFAULT_CAPABILITIES: Capabilities = {
   ontologyAvailable: true,
   graphAvailable: true,
   settingsAvailable: true,
+  agentsAvailable: true,
 
-  tasksAvailable: false,
-  workflowsAvailable: false,
+  tasksAvailable: true,
+  workflowsAvailable: true,
   toolsAvailable: true,
   artifactsAvailable: false,
   connectorsAvailable: false,

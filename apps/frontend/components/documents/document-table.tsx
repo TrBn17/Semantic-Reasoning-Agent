@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
 import {
   Table,
   TableBody,
@@ -10,13 +9,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { LoadingLink as Link } from "@/components/navigation/loading-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentStatusBadge } from "@/components/documents/status-badges";
 import { listDocuments } from "@/lib/api/documents";
 import { queryKeys } from "@/lib/query/keys";
+import { EmptyPanel } from "@/components/layout/empty-panel";
 import { formatDateTime } from "@/lib/utils";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function DocumentTable() {
+  const { t } = useI18n();
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.documents.list(),
     queryFn: listDocuments,
@@ -26,25 +29,22 @@ export function DocumentTable() {
   if (isLoading) return <Skeleton className="h-64 w-full" />;
   if (isError)
     return (
-      <p className="text-sm text-destructive">Failed to load documents.</p>
+      <p className="text-sm text-destructive">{t.common.failedToLoadDocuments}</p>
     );
-  if (!data || data.length === 0)
-    return (
-      <p className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-        No documents yet. Upload a PDF, DOCX, or XLSX to start.
-      </p>
-    );
+  if (!data || data.length === 0) {
+    return <EmptyPanel description={t.common.noDocumentsYet} />;
+  }
 
   return (
     <div className="rounded-md border">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Title</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Chunks</TableHead>
-            <TableHead>Updated</TableHead>
+            <TableHead>{t.common.title}</TableHead>
+            <TableHead>{t.common.type}</TableHead>
+            <TableHead>{t.common.status}</TableHead>
+            <TableHead className="text-right">{t.common.chunks}</TableHead>
+            <TableHead>{t.common.updated}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

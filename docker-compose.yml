@@ -191,7 +191,7 @@ services:
     build:
       context: .
       dockerfile: apps/backend/Dockerfile
-    image: semantic-reasoning-api
+    image: semantic-reasoning-worker
     container_name: semantic-reasoning-worker
     working_dir: /workspace
     command: sh apps/backend/worker-entrypoint.sh
