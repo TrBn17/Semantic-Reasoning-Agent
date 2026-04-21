@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     neo4j_user: str = Field(default="neo4j", alias="NEO4J_USER")
     neo4j_password: str = Field(default="semantic-neo4j", alias="NEO4J_PASSWORD")
     neo4j_database: str = Field(default="neo4j", alias="NEO4J_DATABASE")
+    graphiti_enabled: bool = Field(default=False, alias="GRAPHITI_ENABLED")
+    graphiti_database: str = Field(default="graphiti", alias="GRAPHITI_DATABASE")
 
     default_workspace_id: str = Field(default="workspace-demo", alias="DEFAULT_WORKSPACE_ID")
     default_workspace_name: str = Field(default="Demo Workspace", alias="DEFAULT_WORKSPACE_NAME")
@@ -46,6 +48,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     anthropic_base_url: str | None = Field(default=None, alias="ANTHROPIC_BASE_URL")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    openai_base_url: str | None = Field(default=None, alias="OPENAI_BASE_URL")
+    openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
+    openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        alias="OPENROUTER_BASE_URL",
+    )
     google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ontology_llm_provider: str = Field(default="anthropic", alias="ONTOLOGY_LLM_PROVIDER")
@@ -64,6 +72,11 @@ class Settings(BaseSettings):
     vector_store_backend: str = Field(default="postgres", alias="VECTOR_STORE_BACKEND")
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
     qdrant_collection_name: str = Field(default="document_chunks", alias="QDRANT_COLLECTION_NAME")
+    pdf_parser_backend: str = Field(default="marker", alias="PDF_PARSER_BACKEND")
+    pdf_parser_default_mode: str = Field(default="fast", alias="PDF_PARSER_DEFAULT_MODE")
+    marker_torch_device: str | None = Field(default=None, alias="MARKER_TORCH_DEVICE")
+    marker_use_llm_in_accurate: bool = Field(default=False, alias="MARKER_USE_LLM_IN_ACCURATE")
+    marker_max_pages_per_doc: int | None = Field(default=None, alias="MARKER_MAX_PAGES_PER_DOC")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

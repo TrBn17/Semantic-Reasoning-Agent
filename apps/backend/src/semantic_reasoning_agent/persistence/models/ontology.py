@@ -130,11 +130,59 @@ class OntologyVersionORM(Base):
         cascade="all, delete-orphan",
         order_by="OntologyEntityORM.name",
     )
+    entity_types: Mapped[list["OntologyEntityTypeDefinitionORM"]] = relationship(
+        back_populates="version",
+        cascade="all, delete-orphan",
+        order_by="OntologyEntityTypeDefinitionORM.name",
+    )
+    relation_types: Mapped[list["OntologyRelationTypeDefinitionORM"]] = relationship(
+        back_populates="version",
+        cascade="all, delete-orphan",
+        order_by="OntologyRelationTypeDefinitionORM.name",
+    )
     relations: Mapped[list["OntologyRelationORM"]] = relationship(
         back_populates="version",
         cascade="all, delete-orphan",
         order_by="OntologyRelationORM.relation_type",
     )
+
+
+class OntologyEntityTypeDefinitionORM(Base):
+    __tablename__ = "ontology_entity_type_definitions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("ontology_versions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attributes: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    examples: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    version: Mapped[OntologyVersionORM] = relationship(back_populates="entity_types")
+
+
+class OntologyRelationTypeDefinitionORM(Base):
+    __tablename__ = "ontology_relation_type_definitions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("ontology_versions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attributes: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    allowed_source_targets: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    version: Mapped[OntologyVersionORM] = relationship(back_populates="relation_types")
 
 
 class OntologyEntityORM(Base):

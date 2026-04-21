@@ -10,7 +10,6 @@ from semantic_reasoning_agent.domain.contracts.evidence import (
 )
 from semantic_reasoning_agent.domain.contracts.tool_envelope import (
     ToolEnvelope,
-    ToolMeta,
     ToolResult,
 )
 from semantic_reasoning_agent.domain.contracts.tool_spec import ToolSpec

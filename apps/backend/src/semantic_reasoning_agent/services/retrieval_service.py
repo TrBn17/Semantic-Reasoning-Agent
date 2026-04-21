@@ -4,11 +4,11 @@ from uuid import uuid4
 from sqlalchemy import delete, select
 
 from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.documents.models import IndexedChunk, ParsedDocument
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import DocumentChunkORM
 from semantic_reasoning_agent.infrastructure.vector import TokenVectorBackend
 from semantic_reasoning_agent.ports.vector_backend import VectorBackendPort
-from semantic_reasoning_agent.infrastructure.parsers.models import IndexedChunk, ParsedDocument
 from semantic_reasoning_agent.schemas.documents import DocumentResponse
 from semantic_reasoning_agent.schemas.retrieval import Citation, RetrievalResult, RetrievalSearchResponse
 
@@ -141,12 +141,12 @@ class RetrievalService:
         elif chunk.document_type == "docx" and chunk.heading_path:
             location_label = chunk.heading_path
         elif (
-            chunk.document_type == "xlsx"
-            and chunk.sheet_name
+            chunk.document_type in {"xlsx", "csv"}
             and chunk.row_start is not None
             and chunk.row_end is not None
         ):
-            location_label = f"{chunk.sheet_name} rows {chunk.row_start}-{chunk.row_end}"
+            prefix = f"{chunk.sheet_name} " if chunk.sheet_name else ""
+            location_label = f"{prefix}rows {chunk.row_start}-{chunk.row_end}".strip()
 
         return Citation(
             chunk_id=chunk.chunk_id,

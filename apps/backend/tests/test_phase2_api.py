@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from reportlab.pdfgen import canvas
 
+from semantic_reasoning_agent.documents.parsers.pdf_marker_parser import PdfMarkerParser
 from semantic_reasoning_agent.main import app
 
 
@@ -78,6 +79,25 @@ def test_xlsx_search_returns_sheet_and_row_range_citation() -> None:
     assert len(results) >= 1
     assert results[0]["citation"]["sheet_name"] == "Sales"
     assert "Sales rows" in results[0]["citation"]["location_label"]
+
+
+def test_csv_search_returns_row_range_citation() -> None:
+    upload_response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("sales.csv", _build_csv_bytes(), "text/csv")},
+    )
+    document = upload_response.json()
+
+    search_response = client.post(
+        "/api/v1/retrieval/search",
+        json={"query": "What revenue did East have in January?", "document_ids": [document["id"]], "top_k": 3},
+    )
+
+    assert search_response.status_code == 200
+    results = search_response.json()["results"]
+    assert len(results) >= 1
+    assert results[0]["citation"]["sheet_name"] is None
+    assert "rows" in results[0]["citation"]["location_label"]
 
 
 def test_chat_with_retrieval_returns_citations() -> None:
@@ -163,6 +183,54 @@ def test_upload_queues_ingestion_when_dispatcher_does_not_execute(document_servi
     assert all(job["status"] == "pending" for job in jobs)
 
 
+def test_upload_pdf_accurate_mode_persists_ingestion_options(monkeypatch) -> None:
+    def fake_render(self, content: bytes, options):  # noqa: ANN001
+        del self, content
+
+        class _Page:
+            def __init__(self, children):
+                self.children = children
+
+        class _Block:
+            def __init__(self, markdown: str):
+                self.markdown = markdown
+
+        class _Rendered:
+            def __init__(self):
+                self.children = [_Page([_Block("Accurate OCR text")])]
+
+        assert options.pdf_mode == "accurate"
+        return _Rendered(), "Accurate OCR text"
+
+    monkeypatch.setattr(PdfMarkerParser, "_render_pdf", fake_render)
+
+    upload_response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("accurate.pdf", _build_pdf_bytes("ignored"), "application/pdf")},
+        data={"pdf_mode": "accurate"},
+    )
+
+    assert upload_response.status_code == 201
+    document = upload_response.json()
+    assert document["ingestion_options"]["pdf_mode"] == "accurate"
+    assert document["parser_version"] == "marker-v1"
+
+    reprocess_response = client.post(f"/api/v1/documents/{document['id']}/reprocess")
+    assert reprocess_response.status_code == 200
+    assert reprocess_response.json()["document"]["ingestion_options"]["pdf_mode"] == "accurate"
+
+
+def test_upload_pdf_with_invalid_mode_returns_400() -> None:
+    response = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("bad.pdf", _build_pdf_bytes("ignored"), "application/pdf")},
+        data={"pdf_mode": "turbo"},
+    )
+
+    assert response.status_code == 400
+    assert "pdf_mode" in response.json()["detail"]
+
+
 def _build_pdf_bytes(text: str) -> bytes:
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer)
@@ -193,3 +261,14 @@ def _build_xlsx_bytes() -> bytes:
     buffer = BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
+
+
+def _build_csv_bytes() -> bytes:
+    return "\n".join(
+        [
+            "Month,Region,Revenue,Product",
+            "January,East,120,Alpha",
+            "January,West,90,Beta",
+            "February,East,150,Alpha",
+        ]
+    ).encode("utf-8")

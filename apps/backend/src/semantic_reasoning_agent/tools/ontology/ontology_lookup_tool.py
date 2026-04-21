@@ -152,6 +152,8 @@ def _current_version_result(
         "version_id": version.id,
         "version_number": version.version_number,
         "workspace_id": version.workspace_id,
+        "entity_type_count": version.entity_type_count,
+        "relation_type_count": version.relation_type_count,
         "entity_count": version.entity_count,
         "relation_count": version.relation_count,
         "created_at": version.created_at.isoformat(),

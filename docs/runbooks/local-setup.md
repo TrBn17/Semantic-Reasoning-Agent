@@ -12,6 +12,12 @@ docker compose up -d postgres redis neo4j
 .venv\Scripts\python.exe -m pip install -e .[dev]
 ```
 
+Optional high-accuracy PDF parsing with Marker:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e .[dev,pdf_parsing]
+```
+
 ## API
 
 ```powershell
@@ -43,3 +49,7 @@ npm run dev
 - `pdf`
 - `docx`
 - `xlsx`
+- `csv`
+
+PDF uploads accept `pdf_mode=fast|accurate`.
+`accurate` requires the optional `pdf_parsing` extra so Marker is available.

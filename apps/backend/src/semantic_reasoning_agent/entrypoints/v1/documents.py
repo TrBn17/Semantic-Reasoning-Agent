@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
+from semantic_reasoning_agent.documents.errors import UnsupportedDocumentTypeError
 from semantic_reasoning_agent.entrypoints.dependencies import get_document_service
-from semantic_reasoning_agent.infrastructure.parsers.local_parser import UnsupportedDocumentTypeError
 from semantic_reasoning_agent.schemas.documents import (
     DocumentJobResponse,
     DocumentReprocessResponse,
     DocumentResponse,
 )
-from semantic_reasoning_agent.services.document_service import (
+from semantic_reasoning_agent.documents.service import (
     DocumentNotFoundError,
     DocumentProcessingError,
     DocumentService,
@@ -23,6 +23,7 @@ async def upload_document(
     title: str | None = Form(default=None),
     workspace_id: str | None = Form(default=None),
     tags: str | None = Form(default=None),
+    pdf_mode: str | None = Form(default=None),
     document_service: DocumentService = Depends(get_document_service),
 ) -> DocumentResponse:
     try:
@@ -35,6 +36,7 @@ async def upload_document(
             title=title,
             workspace_id=workspace_id,
             tags=parsed_tags,
+            pdf_mode=pdf_mode,
         )
     except UnsupportedDocumentTypeError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

@@ -6,6 +6,8 @@ from sqlalchemy import delete, desc, func, select
 from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.domain.contracts.published_ontology_snapshot import PublishedOntologySnapshot
+from semantic_reasoning_agent.infrastructure.graphiti.graphiti_gateway import GraphitiGateway
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import (
     DocumentChunkORM,
@@ -15,14 +17,15 @@ from semantic_reasoning_agent.persistence.models import (
     OntologyCandidateEntityORM,
     OntologyCandidateRelationORM,
     OntologyEntityORM,
+    OntologyEntityTypeDefinitionORM,
     OntologyRelationORM,
+    OntologyRelationTypeDefinitionORM,
     OntologyVersionORM,
 )
 from semantic_reasoning_agent.domain.ontology.models import ExtractedEntity, ExtractedRelation
 from semantic_reasoning_agent.domain.ontology.models import OntologySourceChunk
 from semantic_reasoning_agent.domain.ontology.pipeline_steps import ONTOLOGY_BUILD_STEP_NAMES
 from semantic_reasoning_agent.ports.ontology_extractor import OntologyExtractorPort
-from semantic_reasoning_agent.ports.graph_store import GraphStore, GraphStoreError, PublishedOntologySnapshot
 from semantic_reasoning_agent.schemas.documents import DocumentStatus
 from semantic_reasoning_agent.schemas.ontology import (
     OntologyBuildCreateRequest,
@@ -31,14 +34,20 @@ from semantic_reasoning_agent.schemas.ontology import (
     OntologyBuildStepResponse,
     OntologyCandidateEntityResponse,
     OntologyCandidateRelationResponse,
+    OntologyEntityTypeDefinitionResponse,
     OntologyEntityResponse,
     OntologyGraphResponse,
+    OntologyRelationTypeDefinitionResponse,
     OntologyPublishResponse,
     OntologyRelationResponse,
     OntologyReviewAction,
     OntologyReviewStatus,
     OntologyStepStatus,
     OntologyVersionResponse,
+)
+from semantic_reasoning_agent.services.ontology_graph_publisher import (
+    OntologyGraphPublisher,
+    OntologyGraphPublisherError,
 )
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
@@ -72,13 +81,14 @@ class OntologyService:
         settings: Settings,
         database_manager: DatabaseManager,
         task_dispatcher: TaskDispatcher,
-        graph_store: GraphStore,
+        graphiti_gateway: GraphitiGateway,
         ontology_extractor: OntologyExtractorPort,
     ) -> None:
         self._settings = settings
         self._database_manager = database_manager
         self._task_dispatcher = task_dispatcher
-        self._graph_store = graph_store
+        self._graphiti_gateway = graphiti_gateway
+        self._graph_publisher = OntologyGraphPublisher(graphiti_gateway)
         self._ontology_extractor = ontology_extractor
 
     def create_build(self, request: OntologyBuildCreateRequest) -> OntologyBuildResponse:
@@ -232,10 +242,8 @@ class OntologyService:
 
         snapshot = self._prepare_published_snapshot(build_id)
         try:
-            if self._graph_store.is_enabled():
-                self._graph_store.verify_connection()
-                self._graph_store.sync_published_graph(snapshot)
-        except GraphStoreError as exc:
+            self._graph_publisher.publish(snapshot)
+        except OntologyGraphPublisherError as exc:
             raise OntologyPublishError(str(exc)) from exc
 
         with self._database_manager.session() as session:
@@ -253,11 +261,6 @@ class OntologyService:
 
     def get_graph(self, workspace_id: str | None = None) -> OntologyGraphResponse:
         resolved_workspace_id = workspace_id or self._settings.default_workspace_id
-        if self._graph_store.is_enabled():
-            try:
-                return self._graph_store.get_graph(resolved_workspace_id)
-            except GraphStoreError as exc:
-                raise OntologyGraphError(str(exc)) from exc
         return self._get_relational_graph(resolved_workspace_id)
 
     def process_build(self, build_id: str) -> None:
@@ -331,9 +334,9 @@ class OntologyService:
             sync_detail = (
                 "Neo4j is disabled; publish will keep the relational snapshot as the source of truth."
             )
-            if self._graph_store.is_enabled():
-                self._graph_store.verify_connection()
-                sync_detail = "Neo4j connection verified; publish will sync the approved graph snapshot."
+            if self._graph_publisher.is_enabled():
+                self._graph_publisher.publish()
+                sync_detail = "Graphiti runtime graph is enabled; publish will refresh runtime graph indices."
             self._mark_step_completed(
                 build_id,
                 "sync_neo4j",
@@ -654,7 +657,9 @@ class OntologyService:
                     select(OntologyVersionORM)
                     .options(
                         selectinload(OntologyVersionORM.entities),
+                        selectinload(OntologyVersionORM.entity_types),
                         selectinload(OntologyVersionORM.relations),
+                        selectinload(OntologyVersionORM.relation_types),
                     )
                     .where(OntologyVersionORM.id == build.published_version_id)
                 )
@@ -662,6 +667,14 @@ class OntologyService:
                 return PublishedOntologySnapshot(
                     workspace_id=build.workspace_id,
                     version=self._to_version_schema(existing_version),
+                    entity_type_definitions=[
+                        self._to_entity_type_definition_schema(entity_type)
+                        for entity_type in existing_version.entity_types
+                    ],
+                    relation_type_definitions=[
+                        self._to_relation_type_definition_schema(relation_type)
+                        for relation_type in existing_version.relation_types
+                    ],
                     entities=[self._to_entity_schema(entity) for entity in existing_version.entities],
                     relations=[self._to_relation_schema(relation) for relation in existing_version.relations],
                 )
@@ -670,7 +683,9 @@ class OntologyService:
                 select(OntologyVersionORM)
                 .options(
                     selectinload(OntologyVersionORM.entities),
+                    selectinload(OntologyVersionORM.entity_types),
                     selectinload(OntologyVersionORM.relations),
+                    selectinload(OntologyVersionORM.relation_types),
                 )
                 .where(OntologyVersionORM.source_build_id == build.id)
             ).all()
@@ -692,6 +707,28 @@ class OntologyService:
                 created_at=version_timestamp,
             )
             session.add(version)
+
+            entity_type_definitions = self._build_entity_type_definitions(
+                workspace_id=build.workspace_id,
+                version_id=version_id,
+                entities=approved_entities,
+                created_at=version_timestamp,
+            )
+            relation_type_definitions = self._build_relation_type_definitions(
+                workspace_id=build.workspace_id,
+                version_id=version_id,
+                entities=approved_entities,
+                relations=[
+                    relation
+                    for relation in build.relations
+                    if relation.status == OntologyReviewStatus.approved.value
+                ],
+                created_at=version_timestamp,
+            )
+            for entity_type_definition in entity_type_definitions:
+                session.add(entity_type_definition)
+            for relation_type_definition in relation_type_definitions:
+                session.add(relation_type_definition)
 
             version_entities: list[OntologyEntityResponse] = []
             published_entity_ids: dict[str, str] = {}
@@ -744,12 +781,22 @@ class OntologyService:
                 version_number=next_version_number,
                 source_build_id=build.id,
                 created_at=version_timestamp,
+                entity_type_count=len(entity_type_definitions),
+                relation_type_count=len(relation_type_definitions),
                 entity_count=len(version_entities),
                 relation_count=len(version_relations),
             )
             return PublishedOntologySnapshot(
                 workspace_id=build.workspace_id,
                 version=version_schema,
+                entity_type_definitions=[
+                    self._to_entity_type_definition_schema(entity_type_definition)
+                    for entity_type_definition in entity_type_definitions
+                ],
+                relation_type_definitions=[
+                    self._to_relation_type_definition_schema(relation_type_definition)
+                    for relation_type_definition in relation_type_definitions
+                ],
                 entities=version_entities,
                 relations=version_relations,
             )
@@ -760,7 +807,9 @@ class OntologyService:
                 select(OntologyVersionORM)
                 .options(
                     selectinload(OntologyVersionORM.entities),
+                    selectinload(OntologyVersionORM.entity_types),
                     selectinload(OntologyVersionORM.relations),
+                    selectinload(OntologyVersionORM.relation_types),
                 )
                 .where(OntologyVersionORM.workspace_id == workspace_id)
                 .order_by(desc(OntologyVersionORM.version_number))
@@ -770,6 +819,14 @@ class OntologyService:
             return OntologyGraphResponse(
                 workspace_id=workspace_id,
                 version=self._to_version_schema(version),
+                entity_type_definitions=[
+                    self._to_entity_type_definition_schema(entity_type)
+                    for entity_type in version.entity_types
+                ],
+                relation_type_definitions=[
+                    self._to_relation_type_definition_schema(relation_type)
+                    for relation_type in version.relation_types
+                ],
                 entities=[self._to_entity_schema(entity) for entity in version.entities],
                 relations=[self._to_relation_schema(relation) for relation in version.relations],
             )
@@ -937,6 +994,8 @@ class OntologyService:
             relation_count=relation_count,
             pending_entity_count=pending_entity_count,
             pending_relation_count=pending_relation_count,
+            entity_type_definitions=self._build_candidate_entity_type_definitions(build),
+            relation_type_definitions=self._build_candidate_relation_type_definitions(build),
             steps=[self._to_step_schema(step) for step in steps],
         )
 
@@ -1005,8 +1064,40 @@ class OntologyService:
             version_number=version.version_number,
             source_build_id=version.source_build_id,
             created_at=version.created_at,
+            entity_type_count=len(version.entity_types),
+            relation_type_count=len(version.relation_types),
             entity_count=len(version.entities),
             relation_count=len(version.relations),
+        )
+
+    @staticmethod
+    def _to_entity_type_definition_schema(
+        entity_type: OntologyEntityTypeDefinitionORM,
+    ) -> OntologyEntityTypeDefinitionResponse:
+        return OntologyEntityTypeDefinitionResponse(
+            id=entity_type.id,
+            version_id=entity_type.version_id,
+            workspace_id=entity_type.workspace_id,
+            name=entity_type.name,
+            description=entity_type.description,
+            attributes=entity_type.attributes or [],
+            examples=entity_type.examples or [],
+            created_at=entity_type.created_at,
+        )
+
+    @staticmethod
+    def _to_relation_type_definition_schema(
+        relation_type: OntologyRelationTypeDefinitionORM,
+    ) -> OntologyRelationTypeDefinitionResponse:
+        return OntologyRelationTypeDefinitionResponse(
+            id=relation_type.id,
+            version_id=relation_type.version_id,
+            workspace_id=relation_type.workspace_id,
+            name=relation_type.name,
+            description=relation_type.description,
+            attributes=relation_type.attributes or [],
+            allowed_source_targets=relation_type.allowed_source_targets or [],
+            created_at=relation_type.created_at,
         )
 
     @staticmethod
@@ -1046,3 +1137,129 @@ class OntologyService:
         if step.name in ONTOLOGY_BUILD_STEP_NAMES:
             return ONTOLOGY_BUILD_STEP_NAMES.index(step.name)
         return len(ONTOLOGY_BUILD_STEP_NAMES)
+
+    @staticmethod
+    def _build_candidate_entity_type_definitions(
+        build: OntologyBuildORM,
+    ) -> list[OntologyEntityTypeDefinitionResponse]:
+        entity_examples = OntologyService._collect_entity_examples(build.entities)
+        return [
+            OntologyEntityTypeDefinitionResponse(
+                id=f"{build.id}:entity_type:{entity_type}",
+                workspace_id=build.workspace_id,
+                name=entity_type,
+                description=f"Derived entity type for {entity_type}.",
+                examples=examples[:3],
+                created_at=build.updated_at,
+            )
+            for entity_type, examples in sorted(entity_examples.items())
+        ]
+
+    @staticmethod
+    def _build_candidate_relation_type_definitions(
+        build: OntologyBuildORM,
+    ) -> list[OntologyRelationTypeDefinitionResponse]:
+        allowed_pairs = OntologyService._collect_relation_allowed_pairs(
+            entities=build.entities,
+            relations=build.relations,
+        )
+        return [
+            OntologyRelationTypeDefinitionResponse(
+                id=f"{build.id}:relation_type:{relation_type}",
+                workspace_id=build.workspace_id,
+                name=relation_type,
+                description=f"Derived relation type for {relation_type}.",
+                allowed_source_targets=[
+                    {
+                        "source_entity_type": source_type,
+                        "target_entity_type": target_type,
+                    }
+                    for source_type, target_type in sorted(pairs)
+                ],
+                created_at=build.updated_at,
+            )
+            for relation_type, pairs in sorted(allowed_pairs.items())
+        ]
+
+    @staticmethod
+    def _build_entity_type_definitions(
+        *,
+        workspace_id: str,
+        version_id: str,
+        entities: list[OntologyCandidateEntityORM],
+        created_at: datetime,
+    ) -> list[OntologyEntityTypeDefinitionORM]:
+        entity_examples = OntologyService._collect_entity_examples(entities)
+        return [
+            OntologyEntityTypeDefinitionORM(
+                id=str(uuid4()),
+                version_id=version_id,
+                workspace_id=workspace_id,
+                name=entity_type,
+                description=f"Derived entity type for {entity_type}.",
+                attributes=[],
+                examples=examples[:3],
+                created_at=created_at,
+            )
+            for entity_type, examples in sorted(entity_examples.items())
+        ]
+
+    @staticmethod
+    def _build_relation_type_definitions(
+        *,
+        workspace_id: str,
+        version_id: str,
+        entities: list[OntologyCandidateEntityORM],
+        relations: list[OntologyCandidateRelationORM],
+        created_at: datetime,
+    ) -> list[OntologyRelationTypeDefinitionORM]:
+        allowed_pairs = OntologyService._collect_relation_allowed_pairs(
+            entities=entities,
+            relations=relations,
+        )
+        return [
+            OntologyRelationTypeDefinitionORM(
+                id=str(uuid4()),
+                version_id=version_id,
+                workspace_id=workspace_id,
+                name=relation_type,
+                description=f"Derived relation type for {relation_type}.",
+                attributes=[],
+                allowed_source_targets=[
+                    {
+                        "source_entity_type": source_type,
+                        "target_entity_type": target_type,
+                    }
+                    for source_type, target_type in sorted(pairs)
+                ],
+                created_at=created_at,
+            )
+            for relation_type, pairs in sorted(allowed_pairs.items())
+        ]
+
+    @staticmethod
+    def _collect_entity_examples(
+        entities: list[OntologyCandidateEntityORM],
+    ) -> dict[str, list[str]]:
+        entity_examples: dict[str, list[str]] = defaultdict(list)
+        for entity in entities:
+            if entity.canonical_name not in entity_examples[entity.entity_type]:
+                entity_examples[entity.entity_type].append(entity.canonical_name)
+        return entity_examples
+
+    @staticmethod
+    def _collect_relation_allowed_pairs(
+        *,
+        entities: list[OntologyCandidateEntityORM],
+        relations: list[OntologyCandidateRelationORM],
+    ) -> dict[str, set[tuple[str, str]]]:
+        entity_types_by_candidate_id = {
+            entity.id: entity.entity_type for entity in entities if entity.id is not None
+        }
+        allowed_pairs: dict[str, set[tuple[str, str]]] = defaultdict(set)
+        for relation in relations:
+            source_type = entity_types_by_candidate_id.get(relation.source_entity_id or "")
+            target_type = entity_types_by_candidate_id.get(relation.target_entity_id or "")
+            if source_type and target_type:
+                allowed_pairs[relation.relation_type].add((source_type, target_type))
+        return allowed_pairs

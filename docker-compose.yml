@@ -33,6 +33,13 @@ x-backend-environment: &backend-environment
   DEFAULT_USER_NAME: ${DEFAULT_USER_NAME:-Demo User}
   DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-echo}
   DEFAULT_MODEL: ${DEFAULT_MODEL:-local-echo}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+  GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL_DOCKER:-http://host.docker.internal:11434}
   ONTOLOGY_LLM_PROVIDER: ${ONTOLOGY_LLM_PROVIDER:-anthropic}
   ONTOLOGY_LLM_MODEL: ${ONTOLOGY_LLM_MODEL:-claude-sonnet-4-5}
@@ -83,7 +90,7 @@ services:
       retries: 10
 
   neo4j:
-    image: neo4j:5
+    image: neo4j:5.26.0
     container_name: semantic-reasoning-neo4j
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-semantic-neo4j}

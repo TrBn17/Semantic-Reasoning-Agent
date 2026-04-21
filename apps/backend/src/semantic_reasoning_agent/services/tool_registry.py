@@ -12,6 +12,7 @@ from semantic_reasoning_agent.domain.contracts.tool_spec import (
 from semantic_reasoning_agent.tools.base import Tool
 
 if TYPE_CHECKING:
+    from semantic_reasoning_agent.infrastructure.graphiti.graphiti_gateway import GraphitiGateway
     from semantic_reasoning_agent.services.ontology_service import OntologyService
     from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 
@@ -88,6 +89,7 @@ def build_tool_registry(
     *,
     retrieval_service: "RetrievalService | None" = None,
     ontology_service: "OntologyService | None" = None,
+    graphiti_gateway: "GraphitiGateway | None" = None,
 ) -> ToolRegistry:
     """Construct a ``ToolRegistry`` and register the Phase-3 tools.
 
@@ -113,5 +115,17 @@ def build_tool_registry(
         registry.register(
             OntologyLookupTool.SPEC,
             lambda svc=ontology_service: OntologyLookupTool(svc),
+        )
+    if graphiti_gateway is not None:
+        from semantic_reasoning_agent.tools.graph.graphiti_ingest_tool import GraphitiIngestTool
+        from semantic_reasoning_agent.tools.graph.graphiti_search_tool import GraphitiSearchTool
+
+        registry.register(
+            GraphitiSearchTool.SPEC,
+            lambda gateway=graphiti_gateway: GraphitiSearchTool(gateway),
+        )
+        registry.register(
+            GraphitiIngestTool.SPEC,
+            lambda gateway=graphiti_gateway: GraphitiIngestTool(gateway),
         )
     return registry

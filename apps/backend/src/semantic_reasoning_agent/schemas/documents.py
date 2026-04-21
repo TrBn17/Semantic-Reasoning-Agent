@@ -32,6 +32,7 @@ class DocumentResponse(BaseModel):
     parser_version: str
     chunk_count: int = 0
     tags: list[str] = Field(default_factory=list)
+    ingestion_options: dict[str, object] = Field(default_factory=dict)
     source_url: str
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

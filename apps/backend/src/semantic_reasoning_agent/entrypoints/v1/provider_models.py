@@ -46,6 +46,7 @@ async def list_provider_models(
 
     **Supported providers:**
     - `openai`: Lists all available OpenAI models
+    - `openrouter`: Lists all available OpenRouter models
     - `anthropic`: Lists all available Claude models
     - `gemini`: Lists all available Google Gemini models
     - `ollama`: Lists all models in local Ollama instance
@@ -105,7 +106,7 @@ async def list_all_provider_models(
     Otherwise, queries all configured providers.
 
     **Query Parameters:**
-    - `provider` (optional): Specific provider to query (openai, anthropic, gemini, ollama)
+    - `provider` (optional): Specific provider to query (openai, openrouter, anthropic, gemini, ollama)
 
     **Example:**
     ```

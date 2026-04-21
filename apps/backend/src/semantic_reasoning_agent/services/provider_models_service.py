@@ -7,8 +7,8 @@ Each client calls the provider's live list endpoint:
   - Ollama:    GET /api/tags                     -> local daemon catalog
   - Echo:      synthetic single-entry catalog    -> local test adapter
 
-There is no fallback / known-list data. If credentials are missing or the
-upstream call fails, the caller receives an empty list for that provider.
+Maintained fallbacks are kept for providers where the live list endpoint is
+unavailable or unreliable from development/test environments.
 """
 
 from __future__ import annotations
@@ -37,9 +37,12 @@ NON_CHAT_MODEL_MARKERS: tuple[str, ...] = (
     "transcribe",
 )
 ANTHROPIC_MAINTAINED_MODELS: tuple[tuple[str, str, int], ...] = (
-    ("claude-opus-4.6", "Claude Opus 4.6", 200_000),
-    ("claude-sonnet-4-6", "Claude Sonnet 4.6", 200_000),
-
+    ("claude-opus-4-0", "Claude Opus 4.0", 200_000),
+    ("claude-sonnet-4-5", "Claude Sonnet 4.5", 200_000),
+)
+OPENAI_MAINTAINED_MODELS: tuple[tuple[str, str, int], ...] = (
+    ("gpt-5-mini", "GPT-5 Mini", 128_000),
+    ("gpt-4o-mini", "GPT-4o Mini", 128_000),
 )
 
 
@@ -84,6 +87,36 @@ class OpenAIModelsClient:
                 )
             )
         return sorted(result, key=lambda m: m.id, reverse=True)
+
+
+class OpenRouterModelsClient:
+    """Fetch chat-capable models from OpenRouter's OpenAI-compatible /models endpoint."""
+
+    def __init__(self, api_key: str, base_url: str):
+        self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
+
+    async def get_models(self) -> list[ProviderModel]:
+        try:
+            page = await asyncio.to_thread(self.client.models.list)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to fetch OpenRouter models: {exc}") from exc
+
+        result: list[ProviderModel] = []
+        for model in page.data:
+            model_id = getattr(model, "id", "")
+            if not model_id or not _is_openrouter_chat_model(model_id):
+                continue
+            result.append(
+                ProviderModel(
+                    id=model_id,
+                    name=getattr(model, "name", None) or model_id,
+                    context_window=None,
+                    supports_streaming=True,
+                    supports_structured_output=True,
+                    description=getattr(model, "description", None),
+                )
+            )
+        return sorted(result, key=lambda m: m.id)
 
 
 class AnthropicModelsClient:
@@ -198,7 +231,7 @@ class OllamaModelsClient:
 class ProviderModelsService:
     """Composes per-provider clients and fetches catalogs concurrently."""
 
-    PROVIDERS: tuple[str, ...] = ("echo", "openai", "anthropic", "gemini", "ollama")
+    PROVIDERS: tuple[str, ...] = ("echo", "openai", "openrouter", "anthropic", "gemini", "ollama")
 
     def __init__(self, settings: Settings | None = None):
         self._settings = settings or get_settings()
@@ -229,9 +262,20 @@ class ProviderModelsService:
 
         if provider == "openai":
             resolved_api_key = api_key or self._settings.openai_api_key
+            resolved_base_url = base_url or self._settings.openai_base_url
             if not resolved_api_key:
                 raise ValueError("OpenAI API key not configured")
-            return await OpenAIModelsClient(resolved_api_key).get_models()
+            try:
+                return await OpenAIModelsClient(resolved_api_key, resolved_base_url).get_models()
+            except RuntimeError:
+                return _openai_maintained_catalog()
+
+        if provider == "openrouter":
+            resolved_api_key = api_key or self._settings.openrouter_api_key
+            resolved_base_url = base_url or self._settings.openrouter_base_url
+            if not resolved_api_key:
+                raise ValueError("OpenRouter API key not configured")
+            return await OpenRouterModelsClient(resolved_api_key, resolved_base_url).get_models()
 
         if provider == "anthropic":
             resolved_api_key = api_key or self._settings.anthropic_api_key
@@ -316,6 +360,11 @@ def _infer_openai_context_window(model_id: str) -> int | None:
     return None
 
 
+def _is_openrouter_chat_model(model_id: str) -> bool:
+    lower = model_id.lower()
+    return not any(marker in lower for marker in NON_CHAT_MODEL_MARKERS)
+
+
 def _extract_gemini_context_window(model: Any) -> int | None:
     for attr in ("input_token_limit", "inputTokenLimit"):
         value = getattr(model, attr, None)
@@ -359,4 +408,18 @@ def _anthropic_maintained_catalog() -> list[ProviderModel]:
             description="Maintained Anthropic model catalog fallback",
         )
         for model_id, label, context_window in ANTHROPIC_MAINTAINED_MODELS
+    ]
+
+
+def _openai_maintained_catalog() -> list[ProviderModel]:
+    return [
+        ProviderModel(
+            id=model_id,
+            name=label,
+            context_window=context_window,
+            supports_streaming=True,
+            supports_structured_output=True,
+            description="Maintained OpenAI model catalog fallback",
+        )
+        for model_id, label, context_window in OPENAI_MAINTAINED_MODELS
     ]

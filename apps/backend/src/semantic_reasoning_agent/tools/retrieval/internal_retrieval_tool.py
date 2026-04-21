@@ -159,13 +159,10 @@ def _anchor_from_citation(citation: Citation) -> tuple[AnchorType, str]:
         return "page", str(citation.page_number)
     if citation.document_type == "docx" and citation.heading_path:
         return "section", citation.heading_path
-    if (
-        citation.document_type == "xlsx"
-        and citation.sheet_name
-        and citation.row_start is not None
-        and citation.row_end is not None
-    ):
+    if citation.document_type == "xlsx" and citation.sheet_name and citation.row_start is not None and citation.row_end is not None:
         return "sheet_row", f"{citation.sheet_name}!{citation.row_start}:{citation.row_end}"
+    if citation.document_type == "csv" and citation.row_start is not None and citation.row_end is not None:
+        return "sheet_row", f"rows:{citation.row_start}-{citation.row_end}"
     return "section", citation.location_label or "document"
 
 

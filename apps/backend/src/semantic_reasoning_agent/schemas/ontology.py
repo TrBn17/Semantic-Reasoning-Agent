@@ -49,6 +49,39 @@ class OntologyBuildStepResponse(BaseModel):
     finished_at: datetime | None = None
 
 
+class OntologyAttributeDefinitionResponse(BaseModel):
+    name: str
+    value_type: str = "text"
+    description: str | None = None
+
+
+class OntologySourceTargetDefinitionResponse(BaseModel):
+    source_entity_type: str
+    target_entity_type: str
+
+
+class OntologyEntityTypeDefinitionResponse(BaseModel):
+    id: str
+    version_id: str | None = None
+    workspace_id: str
+    name: str
+    description: str | None = None
+    attributes: list[OntologyAttributeDefinitionResponse] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class OntologyRelationTypeDefinitionResponse(BaseModel):
+    id: str
+    version_id: str | None = None
+    workspace_id: str
+    name: str
+    description: str | None = None
+    attributes: list[OntologyAttributeDefinitionResponse] = Field(default_factory=list)
+    allowed_source_targets: list[OntologySourceTargetDefinitionResponse] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class OntologyCandidateEntityResponse(BaseModel):
     id: str
     build_id: str
@@ -104,6 +137,8 @@ class OntologyBuildResponse(BaseModel):
     relation_count: int = 0
     pending_entity_count: int = 0
     pending_relation_count: int = 0
+    entity_type_definitions: list[OntologyEntityTypeDefinitionResponse] = Field(default_factory=list)
+    relation_type_definitions: list[OntologyRelationTypeDefinitionResponse] = Field(default_factory=list)
     steps: list[OntologyBuildStepResponse] = Field(default_factory=list)
 
 
@@ -117,6 +152,8 @@ class OntologyVersionResponse(BaseModel):
     version_number: int
     source_build_id: str
     created_at: datetime = Field(default_factory=utc_now)
+    entity_type_count: int = 0
+    relation_type_count: int = 0
     entity_count: int = 0
     relation_count: int = 0
 
@@ -157,5 +194,7 @@ class OntologyPublishResponse(BaseModel):
 class OntologyGraphResponse(BaseModel):
     workspace_id: str
     version: OntologyVersionResponse | None = None
+    entity_type_definitions: list[OntologyEntityTypeDefinitionResponse] = Field(default_factory=list)
+    relation_type_definitions: list[OntologyRelationTypeDefinitionResponse] = Field(default_factory=list)
     entities: list[OntologyEntityResponse] = Field(default_factory=list)
     relations: list[OntologyRelationResponse] = Field(default_factory=list)

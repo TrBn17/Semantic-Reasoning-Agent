@@ -6,8 +6,6 @@ from semantic_reasoning_agent.domain.contracts import (
     Evidence,
     OntologyContext,
     OntologyContextRef,
-    ParsedChunk,
-    ParsedDocument,
     Provenance,
     ToolConstraints,
     ToolEnvelope,
@@ -15,6 +13,7 @@ from semantic_reasoning_agent.domain.contracts import (
     ToolResult,
     ToolSpec,
 )
+from semantic_reasoning_agent.documents.models import ParsedChunk, ParsedDocument
 from semantic_reasoning_agent.domain.errors import (
     DomainError,
     ExtractionError,
@@ -82,12 +81,11 @@ def test_citation_and_evidence_construct() -> None:
 
 
 def test_parsed_document_construct() -> None:
-    chunk = ParsedChunk(ordinal=0, text="hello", page=1, char_start=0, char_end=5)
+    chunk = ParsedChunk(text="hello", chunk_index=0, page_number=1)
     pd = ParsedDocument(
-        document_id=uuid4(),
-        mime_type="application/pdf",
+        document_type="pdf",
+        title="hello",
         chunks=(chunk,),
-        extracted_text_length=5,
         parser_name="pypdf",
         parser_version="local-structured-v1",
         page_count=1,

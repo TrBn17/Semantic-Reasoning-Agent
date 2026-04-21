@@ -26,5 +26,13 @@ def build_adapter_registry(settings: Settings | None = None) -> AdapterRegistry:
             base_url=cfg.anthropic_base_url,
         )
     if cfg.openai_api_key:
-        adapters["openai"] = OpenAIAdapter(api_key=cfg.openai_api_key)
+        adapters["openai"] = OpenAIAdapter(
+            api_key=cfg.openai_api_key,
+            base_url=cfg.openai_base_url,
+        )
+    if cfg.openrouter_api_key:
+        adapters["openrouter"] = OpenAIAdapter(
+            api_key=cfg.openrouter_api_key,
+            base_url=cfg.openrouter_base_url,
+        )
     return AdapterRegistry(adapters=adapters)

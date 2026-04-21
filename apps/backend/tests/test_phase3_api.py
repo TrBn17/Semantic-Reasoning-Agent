@@ -4,9 +4,6 @@ from docx import Document as DocxDocument
 from fastapi.testclient import TestClient
 
 from semantic_reasoning_agent.main import app
-from semantic_reasoning_agent.schemas.ontology import OntologyGraphResponse
-
-
 client = TestClient(app)
 
 
@@ -34,6 +31,11 @@ def test_ontology_build_review_and_publish_flow() -> None:
     assert build["relation_count"] >= 2
     assert build["pending_entity_count"] == build["entity_count"]
     assert build["pending_relation_count"] == build["relation_count"]
+    assert {entity_type["name"] for entity_type in build["entity_type_definitions"]} >= {"test_thing"}
+    assert {relation_type["name"] for relation_type in build["relation_type_definitions"]} >= {
+        "depends_on",
+        "uses",
+    }
     assert [step["name"] for step in build["steps"]] == [
         "classify_document_domain",
         "extract_entities",
@@ -93,12 +95,19 @@ def test_ontology_build_review_and_publish_flow() -> None:
     publish_payload = publish_response.json()
     assert publish_payload["build"]["status"] == "published"
     assert publish_payload["version"]["version_number"] == 1
+    assert publish_payload["version"]["entity_type_count"] >= 1
+    assert publish_payload["version"]["relation_type_count"] >= 2
     assert publish_payload["version"]["relation_count"] >= 2
 
     graph_response = client.get("/api/v1/ontology/graph")
     assert graph_response.status_code == 200
     graph = graph_response.json()
     assert graph["version"]["source_build_id"] == build["id"]
+    assert {entity_type["name"] for entity_type in graph["entity_type_definitions"]} >= {"test_thing"}
+    assert {relation_type["name"] for relation_type in graph["relation_type_definitions"]} >= {
+        "depends_on",
+        "uses",
+    }
     assert {entity["resolution_key"] for entity in graph["entities"]} >= {
         "alpha-initiative",
         "beta-system",
@@ -144,11 +153,13 @@ def test_ontology_build_queues_when_dispatcher_does_not_execute(ontology_service
     assert build["status"] == "pending"
     assert build["entity_count"] == 0
     assert build["relation_count"] == 0
+    assert build["entity_type_definitions"] == []
+    assert build["relation_type_definitions"] == []
     assert queued_build_ids == [build["id"]]
     assert all(step["status"] == "pending" for step in build["steps"])
 
 
-def test_publish_syncs_to_graph_store_when_enabled(ontology_service) -> None:
+def test_publish_records_snapshot_for_graphiti_publish(ontology_service) -> None:
     upload_response = client.post(
         "/api/v1/documents/upload",
         files={
@@ -171,40 +182,31 @@ def test_publish_syncs_to_graph_store_when_enabled(ontology_service) -> None:
     for relation in relations:
         client.post(f"/api/v1/ontology/relations/{relation['id']}/review", json={"action": "approve"})
 
-    class FakeGraphStore:
+    class FakePublisher:
         def __init__(self) -> None:
             self.snapshot = None
 
         def is_enabled(self) -> bool:
             return True
 
-        def verify_connection(self) -> None:
-            return None
-
-        def sync_published_graph(self, snapshot) -> None:
+        def publish(self, snapshot=None) -> None:
             self.snapshot = snapshot
 
-        def get_graph(self, workspace_id: str) -> OntologyGraphResponse:
-            assert self.snapshot is not None
-            return OntologyGraphResponse(
-                workspace_id=workspace_id,
-                version=self.snapshot.version,
-                entities=self.snapshot.entities,
-                relations=self.snapshot.relations,
-            )
-
-    fake_graph_store = FakeGraphStore()
-    original_graph_store = ontology_service._graph_store
-    ontology_service._graph_store = fake_graph_store
+    fake_publisher = FakePublisher()
+    original_publisher = ontology_service._graph_publisher
+    ontology_service._graph_publisher = fake_publisher
     try:
         publish_response = client.post(f"/api/v1/ontology/builds/{build['id']}/publish")
         graph_response = client.get("/api/v1/ontology/graph")
     finally:
-        ontology_service._graph_store = original_graph_store
+        ontology_service._graph_publisher = original_publisher
 
     assert publish_response.status_code == 200
-    assert fake_graph_store.snapshot is not None
-    assert fake_graph_store.snapshot.version.source_build_id == build["id"]
+    assert fake_publisher.snapshot is not None
+    assert fake_publisher.snapshot.version.source_build_id == build["id"]
+    assert {entity_type.name for entity_type in fake_publisher.snapshot.entity_type_definitions} >= {
+        "test_thing",
+    }
     assert graph_response.status_code == 200
     graph = graph_response.json()
     assert graph["version"]["source_build_id"] == build["id"]

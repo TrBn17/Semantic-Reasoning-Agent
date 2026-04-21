@@ -40,7 +40,9 @@ What is already implemented in this repository:
 - Postgres as the current durable system of record
 - optional Neo4j projection for published ontology graph reads
 - DB-backed object storage and DB-backed chunk retrieval/vector seam
-- parser stack for `pdf`, `docx`, and `xlsx` using `pypdf`, `python-docx`, and `openpyxl`
+- document ingestion for `pdf`, `docx`, `xlsx`, and `csv`
+- PDF parsing prefers `marker` when the optional `pdf_parsing` extra is installed, with `pypdf` fast-mode fallback
+- DOCX/XLSX/CSV parsing uses `python-docx`, `openpyxl`, and stdlib `csv`
 - rule/LLM-assisted ontology extraction path with review and publish flow
 
 What is provisioned but still behind stable ports/contracts:
@@ -70,9 +72,10 @@ The canonical local compose file is [`docker-compose.yml`](docker-compose.yml).
   /backend
     /src/semantic_reasoning_agent
       /core            # settings, DI container
+      /documents       # document ingestion flow, parser registry, parser implementations
       /domain          # errors, ontology logic, runtime contracts
       /entrypoints     # FastAPI routers and request dependencies
-      /infrastructure  # graph, parser, storage, vector, LLM adapters
+      /infrastructure  # graph, storage, vector, LLM adapters
       /persistence     # SQLAlchemy models, repositories, database manager
       /ports           # stable backend seams
       /schemas         # request/response schemas
@@ -137,6 +140,12 @@ docker compose up -d postgres redis neo4j minio qdrant
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -e .[dev]
+```
+
+Optional PDF stack with Marker:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e .[dev,pdf_parsing]
 ```
 
 5. Run the API on the host:

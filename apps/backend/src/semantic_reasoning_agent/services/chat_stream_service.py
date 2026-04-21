@@ -1,17 +1,11 @@
-from semantic_reasoning_agent.domain.contracts.llm import LLMMessage
-from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.schemas.chat import (
     ChatReply,
     ConversationModelSelectionRequest,
     SendMessageRequest,
 )
-from semantic_reasoning_agent.schemas.retrieval import Citation
-from semantic_reasoning_agent.services.conversation_service import (
-    ConversationPolicyError,
-    ConversationService,
-)
+from semantic_reasoning_agent.services.conversation_service import ConversationService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
-from semantic_reasoning_agent.services.retrieval_service import RetrievalService
+from semantic_reasoning_agent.services.task_runtime import TaskRuntimeService
 
 
 class ProviderNotReadyError(ValueError):
@@ -23,13 +17,11 @@ class ChatStreamService:
         self,
         conversation_service: ConversationService,
         model_config_service: ModelConfigService,
-        adapter_registry: AdapterRegistry,
-        retrieval_service: RetrievalService,
+        task_runtime_service: TaskRuntimeService,
     ) -> None:
         self._conversation_service = conversation_service
         self._model_config_service = model_config_service
-        self._adapter_registry = adapter_registry
-        self._retrieval_service = retrieval_service
+        self._task_runtime_service = task_runtime_service
 
     def send_message(self, payload: SendMessageRequest) -> ChatReply:
         conversation = self._conversation_service.get_conversation(payload.conversation_id)
@@ -61,51 +53,27 @@ class ChatStreamService:
                 f"Provider '{runtime_provider}' with model '{runtime_model}' is not ready yet."
             )
 
-        adapter = self._adapter_registry.get(runtime_provider)
-        if adapter is None:
-            raise ProviderNotReadyError(f"No adapter is registered for provider '{runtime_provider}'.")
-
         self._conversation_service.append_message(
             conversation_id=payload.conversation_id,
             role="user",
             content=payload.content,
         )
 
-        citations: list[Citation] = []
         system_prompt = self._conversation_service.get_system_prompt(payload.conversation_id)
-        llm_response = adapter.run(
-            messages=[LLMMessage(role="user", content=payload.content)],
-            tools=(),
-            tool_choice="none",
-            system=system_prompt,
+        task_result = self._task_runtime_service.resolve_chat_request(
+            payload,
+            provider=runtime_provider,
             model=runtime_model,
+            system_prompt=system_prompt,
         )
-        reply_text = llm_response.content or ""
-        if payload.use_retrieval:
-            search_response = self._retrieval_service.search(
-                query=payload.content,
-                workspace_id=payload.workspace_id or conversation.workspace_id,
-                document_ids=payload.document_ids,
-                top_k=payload.top_k,
-            )
-            citations = [result.citation for result in search_response.results]
-            if citations:
-                reply_text = self._compose_grounded_reply(payload.content, citations)
-            else:
-                reply_text = "No indexed document context matched that question."
 
         updated = self._conversation_service.append_message(
             conversation_id=payload.conversation_id,
             role="assistant",
-            content=reply_text,
+            content=task_result.content,
         )
-        return ChatReply(conversation=updated, reply=updated.messages[-1], citations=citations)
-
-    @staticmethod
-    def _compose_grounded_reply(prompt: str, citations: list[Citation]) -> str:
-        lines = [f"Question: {prompt}", "Relevant context:"]
-        for citation in citations:
-            lines.append(
-                f"- {citation.document_title} ({citation.location_label}): {citation.excerpt}"
-            )
-        return "\n".join(lines)
+        return ChatReply(
+            conversation=updated,
+            reply=updated.messages[-1],
+            citations=task_result.citations,
+        )

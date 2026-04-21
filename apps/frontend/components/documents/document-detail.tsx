@@ -91,6 +91,11 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
       <p className="text-sm text-destructive">Document not found.</p>
     );
 
+  const pdfMode =
+    doc.document_type === "pdf"
+      ? String(doc.ingestion_options?.pdf_mode ?? "fast")
+      : null;
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -103,6 +108,11 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
             {doc.filename} · {doc.document_type.toUpperCase()} ·{" "}
             {doc.chunk_count} chunks · parser {doc.parser_version}
           </p>
+          {pdfMode && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              PDF mode: {pdfMode}
+            </p>
+          )}
           <p className="mt-1 text-xs text-muted-foreground">
             Created {formatDateTime(doc.created_at)} · Updated{" "}
             {formatDateTime(doc.updated_at)}

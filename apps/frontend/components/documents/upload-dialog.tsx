@@ -17,6 +17,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { uploadDocuments } from "@/lib/api/documents";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
@@ -27,6 +34,8 @@ export function UploadDialog() {
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [tags, setTags] = useState("");
+  const [pdfMode, setPdfMode] = useState<"fast" | "accurate">("fast");
+  const hasPdf = files.some((file) => file.name.toLowerCase().endsWith(".pdf"));
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -38,6 +47,7 @@ export function UploadDialog() {
           .split(",")
           .map((t) => t.trim())
           .filter(Boolean),
+        pdfMode,
       });
     },
     onSuccess: ({ uploaded, failed }) => {
@@ -63,6 +73,7 @@ export function UploadDialog() {
 
       setFiles([]);
       setTags("");
+      setPdfMode("fast");
     },
     onError: (err) => toast.error(`Upload failed: ${(err as Error).message}`),
   });
@@ -79,7 +90,7 @@ export function UploadDialog() {
         <DialogHeader>
           <DialogTitle>Upload a document</DialogTitle>
           <DialogDescription>
-            PDF, DOCX, or XLSX. Parsed and indexed by the ingestion worker.
+            PDF, DOCX, XLSX, or CSV. Parsed and indexed by the ingestion worker.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -88,7 +99,7 @@ export function UploadDialog() {
             <Input
               id="file"
               type="file"
-              accept=".pdf,.docx,.xlsx"
+              accept=".pdf,.docx,.xlsx,.csv"
               multiple
               onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
             />
@@ -99,6 +110,20 @@ export function UploadDialog() {
               </p>
             )}
           </div>
+          {hasPdf && (
+            <div className="space-y-1">
+              <Label htmlFor="pdf-mode">PDF mode</Label>
+              <Select value={pdfMode} onValueChange={(value) => setPdfMode(value as "fast" | "accurate")}>
+                <SelectTrigger id="pdf-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fast">Fast</SelectItem>
+                  <SelectItem value="accurate">Accurate</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1">
             <Label htmlFor="tags">Tags (comma separated)</Label>
             <Input

@@ -4,23 +4,26 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
-from semantic_reasoning_agent.persistence.database import DatabaseManager, get_database_manager
-from semantic_reasoning_agent.infrastructure.graph import build_graph_store
-from semantic_reasoning_agent.ports.graph_store import GraphStore
+from semantic_reasoning_agent.documents.parsers import build_document_parser
+from semantic_reasoning_agent.documents.service import DocumentService
+from semantic_reasoning_agent.infrastructure.graphiti import build_graphiti_gateway
+from semantic_reasoning_agent.infrastructure.graphiti.graphiti_gateway import GraphitiGateway
 from semantic_reasoning_agent.infrastructure.ontology import OpenDomainLLMExtractor
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry, build_adapter_registry
+from semantic_reasoning_agent.persistence.database import DatabaseManager, get_database_manager
 from semantic_reasoning_agent.persistence.repositories.ontology_repo import OntologyRepository
 from semantic_reasoning_agent.services.agent_profile_service import AgentProfileService
 from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService
 from semantic_reasoning_agent.services.conversation_service import ConversationService
-from semantic_reasoning_agent.services.document_service import DocumentService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 from semantic_reasoning_agent.services.secret_service import DatabaseSecretRepository, SecretService
+from semantic_reasoning_agent.services.task_runtime import TaskRuntimeService
 from semantic_reasoning_agent.services.tool_registry import ToolRegistry, build_tool_registry
 from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
+from semantic_reasoning_agent.services.workflow_registry_service import WorkflowRegistryService
 from semantic_reasoning_agent.tools.ontology.schema_registry import OntologySchemaRegistry
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
@@ -34,15 +37,17 @@ class AppContainer:
     model_config_service: ModelConfigService
     provider_models_service: ProviderModelsService
     adapter_registry: AdapterRegistry
-    graph_store: GraphStore
+    graphiti_gateway: GraphitiGateway
     retrieval_service: RetrievalService
     conversation_service: ConversationService
     task_dispatcher: TaskDispatcher
     document_service: DocumentService
     ontology_service: OntologyService
-    chat_stream_service: ChatStreamService
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
+    task_runtime_service: TaskRuntimeService
+    workflow_registry_service: WorkflowRegistryService
+    chat_stream_service: ChatStreamService
 
 
 @lru_cache
@@ -60,7 +65,8 @@ def get_app_container() -> AppContainer:
         provider_models_service=provider_models_service,
         settings=settings,
     )
-    graph_store = build_graph_store(settings)
+    graphiti_gateway = build_graphiti_gateway(settings)
+    parser_registry = build_document_parser(settings)
     retrieval_service = RetrievalService(settings, database_manager)
     conversation_service = ConversationService(
         database_manager,
@@ -71,6 +77,7 @@ def get_app_container() -> AppContainer:
     task_dispatcher = TaskDispatcher()
     document_service = DocumentService(
         settings,
+        parser_registry,
         retrieval_service,
         database_manager,
         task_dispatcher,
@@ -81,24 +88,31 @@ def get_app_container() -> AppContainer:
         settings,
         database_manager,
         task_dispatcher,
-        graph_store,
+        graphiti_gateway,
         ontology_extractor=OpenDomainLLMExtractor(
             settings=settings,
             model_config_service=model_config_service,
             schema_registry=schema_registry,
         ),
     )
-    chat_stream_service = ChatStreamService(
-        conversation_service=conversation_service,
-        model_config_service=model_config_service,
-        adapter_registry=adapter_registry,
-        retrieval_service=retrieval_service,
-    )
     tool_registry = build_tool_registry(
         retrieval_service=retrieval_service,
         ontology_service=ontology_service,
+        graphiti_gateway=graphiti_gateway,
     )
     tool_runtime = ToolRuntime(tool_registry)
+    task_runtime_service = TaskRuntimeService(
+        settings=settings,
+        model_config_service=model_config_service,
+        adapter_registry=adapter_registry,
+        tool_runtime=tool_runtime,
+    )
+    workflow_registry_service = WorkflowRegistryService()
+    chat_stream_service = ChatStreamService(
+        conversation_service=conversation_service,
+        model_config_service=model_config_service,
+        task_runtime_service=task_runtime_service,
+    )
     return AppContainer(
         settings=settings,
         database_manager=database_manager,
@@ -107,13 +121,15 @@ def get_app_container() -> AppContainer:
         model_config_service=model_config_service,
         provider_models_service=provider_models_service,
         adapter_registry=adapter_registry,
-        graph_store=graph_store,
+        graphiti_gateway=graphiti_gateway,
         retrieval_service=retrieval_service,
         conversation_service=conversation_service,
         task_dispatcher=task_dispatcher,
         document_service=document_service,
         ontology_service=ontology_service,
-        chat_stream_service=chat_stream_service,
         tool_registry=tool_registry,
         tool_runtime=tool_runtime,
+        task_runtime_service=task_runtime_service,
+        workflow_registry_service=workflow_registry_service,
+        chat_stream_service=chat_stream_service,
     )

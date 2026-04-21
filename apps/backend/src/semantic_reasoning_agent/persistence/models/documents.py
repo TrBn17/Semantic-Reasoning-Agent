@@ -19,6 +19,7 @@ class DocumentORM(Base):
     parser_version: Mapped[str] = mapped_column(String(128))
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    ingestion_options: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     source_url: Mapped[str] = mapped_column(Text)
     binary_content: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

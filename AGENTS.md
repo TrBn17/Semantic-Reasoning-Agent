@@ -25,7 +25,7 @@ The current codebase already provides a real backend baseline:
 - PostgreSQL as the current durable system of record
 - optional Neo4j sync and graph read path
 - DB-backed object storage and DB-backed chunk retrieval
-- PDF parsing with `pypdf.PdfReader`, DOCX parsing with `python-docx`, XLSX parsing with `openpyxl`
+- PDF parsing through a parser registry with `marker` preferred for PDF and `pypdf` fast-mode fallback, DOCX parsing with `python-docx`, XLSX parsing with `openpyxl`, CSV parsing with stdlib `csv`
 
 This PRD defines the **next upgrade step**, not a greenfield rewrite. The upgrade should preserve current service seams and evolve them into a unified task runtime.
 
@@ -53,7 +53,7 @@ Current baseline that must be preserved:
 
 - Postgres-backed document metadata, chunks, jobs, ontology review, and version state
 - Celery-dispatched document and ontology workers
-- current parser stack: `pypdf`, `python-docx`, `openpyxl`
+- current parser stack: `marker` preferred for PDF via optional extra, `pypdf` fallback for fast PDF mode, `python-docx`, `openpyxl`, stdlib `csv`
 - current optional graph projection to Neo4j
 
 Near-term additions allowed without architectural churn:
@@ -793,9 +793,10 @@ When the requested output class is an answer, the answer path is:
 
 As of the current repository state, document parsing is implemented with:
 
-- PDF: `pypdf.PdfReader`
+- PDF: `marker` via `documents/parsers/pdf_marker_parser.py` when the optional `pdf_parsing` extra is installed, otherwise `pypdf` fast-mode fallback
 - DOCX: `python-docx`
 - XLSX: `openpyxl`
+- CSV: stdlib `csv`
 
 Current ingestion jobs are:
 
@@ -810,24 +811,18 @@ The current implementation still writes chunks to Postgres and uses a DB-backed 
 
 Short-term strategy:
 
-- preserve the current parser stack
-- formalize a parser port and normalized parse contract
-- improve PDF parsing without changing upstream workflow contracts
-
-If the team wants `PyMuPDF`, place it here:
-
-- as a PDF parser backend under the parser port
-- as a higher-fidelity PDF text and layout extractor
-- optionally as the preferred backend for PDF-only paths
-
-This is the least disruptive way to adopt it.
+- keep a normalized parser contract behind the documents parser registry
+- use `marker` as the preferred PDF backend with two modes: `fast` and `accurate`
+- keep `pypdf` as the fast fallback when the optional Marker extra is not installed
+- keep DOCX/XLSX/CSV on native parsers without changing upstream workflow contracts
 
 ### Parser Fallback
 
 Fallback rules:
 
-- use the primary PDF parser first
-- fallback when text extraction quality is low, layout is broken, or OCR is required
+- use `marker` first when available
+- `fast` mode may fallback to `pypdf` if Marker is unavailable in the runtime
+- `accurate` mode requires Marker because it is the OCR-heavy path
 - keep fallback choice in parser provenance
 
 ### Parse Output Contract
@@ -837,7 +832,7 @@ Fallback rules:
   "document_id": "string",
   "workspace_id": "string",
   "source_object_ref": "string",
-  "file_type": "pdf | docx | xlsx",
+  "file_type": "pdf | docx | xlsx | csv",
   "parser_name": "string",
   "parser_version": "string",
   "ocr_used": false,
@@ -1225,8 +1220,8 @@ API rule:
 
 ### Phase 2: Parsing + RAG
 
-- formalize parser contract around the current parser stack
-- keep `pypdf` baseline or add `PyMuPDF` behind the same parser seam
+- formalize parser contract around the documents parser registry
+- prefer `marker` for PDF, keep `pypdf` fallback for fast mode, and extend ingestion to `csv`
 - improve chunk and citation quality
 - keep current Postgres retrieval path while preparing Qdrant as a later backend
 
@@ -1305,3 +1300,47 @@ Still to land in this phase:
 - evidence and promotion spec
 - ontology review and publish spec
 - storage migration spec for MinIO and Qdrant
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **Semantic-Reasoning-Agent** (8182 symbols, 19473 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/Semantic-Reasoning-Agent/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/Semantic-Reasoning-Agent/clusters` | All functional areas |
+| `gitnexus://repo/Semantic-Reasoning-Agent/processes` | All execution flows |
+| `gitnexus://repo/Semantic-Reasoning-Agent/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->

@@ -8,7 +8,9 @@ from .ontology import (
     OntologyCandidateEntityORM,
     OntologyCandidateRelationORM,
     OntologyEntityORM,
+    OntologyEntityTypeDefinitionORM,
     OntologyRelationORM,
+    OntologyRelationTypeDefinitionORM,
     OntologyVersionORM,
 )
 from .providers import ProviderConfigORM, ProviderSecretORM, TaskModelConfigORM
@@ -28,7 +30,9 @@ __all__ = [
     "OntologyCandidateEntityORM",
     "OntologyCandidateRelationORM",
     "OntologyEntityORM",
+    "OntologyEntityTypeDefinitionORM",
     "OntologyRelationORM",
+    "OntologyRelationTypeDefinitionORM",
     "OntologyVersionORM",
     "ProviderConfigORM",
     "ProviderSecretORM",

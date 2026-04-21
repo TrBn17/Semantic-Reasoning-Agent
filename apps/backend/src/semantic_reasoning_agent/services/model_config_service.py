@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager
@@ -111,6 +110,36 @@ PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
                 help_text="API key để gọi model OpenAI.",
                 secret=True,
             ),
+            ProviderFieldSpec(
+                key="OPENAI_BASE_URL",
+                label="OpenAI Base URL",
+                placeholder="https://api.openai.com/v1",
+                help_text="Endpoint tùy chỉnh cho OpenAI-compatible gateway.",
+                required=False,
+                secret=False,
+            ),
+        ),
+    ),
+    ProviderSpec(
+        provider="openrouter",
+        label="OpenRouter",
+        description="OpenAI-compatible router cho nhiều model bên thứ ba.",
+        fields=(
+            ProviderFieldSpec(
+                key="OPENROUTER_API_KEY",
+                label="OpenRouter API Key",
+                placeholder="sk-or-...",
+                help_text="API key để gọi OpenRouter.",
+                secret=True,
+            ),
+            ProviderFieldSpec(
+                key="OPENROUTER_BASE_URL",
+                label="OpenRouter Base URL",
+                placeholder="https://openrouter.ai/api/v1",
+                help_text="Endpoint OpenRouter-compatible. Mặc định là OpenRouter public API.",
+                required=False,
+                secret=False,
+            ),
         ),
     ),
     ProviderSpec(
@@ -198,6 +227,29 @@ class ModelConfigService:
                     "OPENAI_API_KEY",
                     provider_configs,
                     secret=True,
+                ),
+                "base_url": self._resolve_provider_field_value(
+                    workspace_id,
+                    "openai",
+                    "OPENAI_BASE_URL",
+                    provider_configs,
+                    secret=False,
+                ),
+            },
+            "openrouter": {
+                "api_key": self._resolve_provider_field_value(
+                    workspace_id,
+                    "openrouter",
+                    "OPENROUTER_API_KEY",
+                    provider_configs,
+                    secret=True,
+                ),
+                "base_url": self._resolve_provider_field_value(
+                    workspace_id,
+                    "openrouter",
+                    "OPENROUTER_BASE_URL",
+                    provider_configs,
+                    secret=False,
                 ),
             },
             "anthropic": {
@@ -384,7 +436,10 @@ class ModelConfigService:
         
         if not provider_spec:
             return False
-            
+
+        if provider != "echo" and provider not in provider_configs:
+            return False
+
         provider_config = provider_configs.get(provider)
         enabled = provider_config.enabled if provider_config is not None else True
         
@@ -662,6 +717,9 @@ class ModelConfigService:
     def _runtime_env_value(self, field_key: str) -> str | None:
         attr_by_env = {
             "OPENAI_API_KEY": self._settings.openai_api_key,
+            "OPENAI_BASE_URL": self._settings.openai_base_url,
+            "OPENROUTER_API_KEY": self._settings.openrouter_api_key,
+            "OPENROUTER_BASE_URL": self._settings.openrouter_base_url,
             "ANTHROPIC_API_KEY": self._settings.anthropic_api_key,
             "ANTHROPIC_BASE_URL": self._settings.anthropic_base_url,
             "GOOGLE_API_KEY": self._settings.google_api_key,
