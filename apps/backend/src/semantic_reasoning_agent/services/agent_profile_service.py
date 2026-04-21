@@ -13,6 +13,7 @@ from semantic_reasoning_agent.schemas.agent_profiles import (
     AgentProfileCreateRequest,
     AgentProfileResponse,
     AgentProfileTaskModelAssignment,
+    AgentProfileToolAssignment,
     AgentProfileUpdateRequest,
 )
 
@@ -61,6 +62,7 @@ class AgentProfileService:
                 is_default=payload.is_default,
                 status=payload.status,
                 policy_config=payload.policy_config,
+                tool_assignments=[item.model_dump() for item in payload.tool_assignments],
                 created_at=now,
                 updated_at=now,
             )
@@ -102,6 +104,8 @@ class AgentProfileService:
                 profile.status = payload.status
             if payload.policy_config is not None:
                 profile.policy_config = payload.policy_config
+            if payload.tool_assignments is not None:
+                profile.tool_assignments = [item.model_dump() for item in payload.tool_assignments]
             profile.updated_at = utc_now()
 
             if payload.task_models is not None:
@@ -187,6 +191,10 @@ class AgentProfileService:
                     model=task_model.model,
                 )
                 for task_model in profile.task_models
+            ],
+            tool_assignments=[
+                AgentProfileToolAssignment(**assignment)
+                for assignment in (profile.tool_assignments or [])
             ],
             created_at=profile.created_at,
             updated_at=profile.updated_at,

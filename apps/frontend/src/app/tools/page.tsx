@@ -6,7 +6,7 @@ export default function ToolsPage() {
       <div>
         <h1 className="text-xl font-semibold">Tools</h1>
         <p className="text-sm text-muted-foreground">
-          Registered execution primitives per AGENTS.md §9. Invoke directly for
+          Registered execution primitives per AGENTS.md Section 9. Invoke directly for
           diagnostics, or wait for the agentic loop (Phase 4) to dispatch them
           from chat.
         </p>

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { IdlePrefetcher } from "@/components/layout/idle-prefetcher";
-import { Providers } from "@/src/providers";
+import { Providers } from "@/providers";
 import "@/src/globals.css";
 
 export const metadata: Metadata = {
@@ -18,6 +18,10 @@ export const metadata: Metadata = {
     shortcut: ["/logo-badge.svg"],
     apple: [{ url: "/logo-badge.svg" }],
   },
+  // themeColor moved to viewport export below
+};
+
+export const viewport = {
   themeColor: "#111827",
 };
 

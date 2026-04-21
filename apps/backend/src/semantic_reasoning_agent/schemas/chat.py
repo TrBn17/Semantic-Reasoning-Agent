@@ -45,6 +45,8 @@ class ConversationResponse(BaseModel):
     provider: str
     model: str
     uses_model_override: bool = False
+    effective_agent_name: str | None = None
+    effective_tool_names: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     messages: list[Message]
@@ -59,12 +61,19 @@ class SendMessageRequest(BaseModel):
     workspace_id: str | None = None
     document_ids: list[str] = Field(default_factory=list)
     top_k: int = 3
+    enabled_tool_names: list[str] | None = None
 
 
 class ChatReply(BaseModel):
-    conversation: ConversationResponse
+    conversation_id: str
     reply: Message
     citations: list[Citation] = Field(default_factory=list)
+    tool_calls: list[dict[str, str | int | None]] = Field(default_factory=list)
+
+
+class ChatStreamEvent(BaseModel):
+    event: str
+    data: dict
 
 
 class ModelOption(BaseModel):

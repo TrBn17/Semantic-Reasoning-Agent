@@ -19,6 +19,7 @@ class AgentProfileORM(Base):
     is_default: Mapped[bool] = mapped_column(default=False)
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
     policy_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    tool_assignments: Mapped[list[dict]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 

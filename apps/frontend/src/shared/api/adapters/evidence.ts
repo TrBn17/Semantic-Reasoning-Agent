@@ -3,11 +3,11 @@ import type {
   OntologyCandidateEntityResponse,
   OntologyCandidateRelationResponse,
   RetrievalResult,
-} from "@/lib/api/types";
+} from "@/shared/api/types";
 import type {
   EvidenceItemViewModel,
   EvidenceSourceType,
-} from "@/src/entities/evidence/types";
+} from "@/entities/evidence/types";
 
 export function retrievalResultToEvidence(
   r: RetrievalResult,

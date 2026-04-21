@@ -3,12 +3,12 @@ import type {
   OntologyCandidateRelationResponse,
   OntologyEntityResponse,
   OntologyRelationResponse,
-} from "@/lib/api/types";
+} from "@/shared/api/types";
 import type {
   GraphEdgeViewModel,
   GraphNodeViewModel,
   OntologyReviewItemViewModel,
-} from "@/src/entities/ontology/types";
+} from "@/entities/ontology/types";
 
 export function candidateEntityToReviewItem(
   e: OntologyCandidateEntityResponse,
@@ -32,7 +32,7 @@ export function candidateRelationToReviewItem(
     id: r.id,
     buildId: r.build_id,
     itemType: "relation",
-    label: `${r.source_name} → ${r.target_name}`,
+    label: `${r.source_name} -> ${r.target_name}`,
     candidateType: r.relation_type,
     confidence: r.confidence,
     status: r.status,

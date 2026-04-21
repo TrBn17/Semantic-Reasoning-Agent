@@ -15,6 +15,11 @@ class AgentProfileTaskModelAssignment(BaseModel):
     model: str
 
 
+class AgentProfileToolAssignment(BaseModel):
+    tool_name: str
+    enabled: bool = True
+
+
 class AgentProfileResponse(BaseModel):
     id: str
     workspace_id: str
@@ -26,6 +31,7 @@ class AgentProfileResponse(BaseModel):
     status: str
     policy_config: dict = Field(default_factory=dict)
     task_models: list[AgentProfileTaskModelAssignment] = Field(default_factory=list)
+    tool_assignments: list[AgentProfileToolAssignment] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -40,6 +46,7 @@ class AgentProfileCreateRequest(BaseModel):
     status: str = "active"
     policy_config: dict = Field(default_factory=dict)
     task_models: list[AgentProfileTaskModelAssignment] = Field(default_factory=list)
+    tool_assignments: list[AgentProfileToolAssignment] = Field(default_factory=list)
 
 
 class AgentProfileUpdateRequest(BaseModel):
@@ -50,3 +57,4 @@ class AgentProfileUpdateRequest(BaseModel):
     status: str | None = None
     policy_config: dict | None = None
     task_models: list[AgentProfileTaskModelAssignment] | None = None
+    tool_assignments: list[AgentProfileToolAssignment] | None = None

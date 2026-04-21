@@ -23,11 +23,13 @@ def test_ontology_build_review_and_publish_flow() -> None:
 
     build_response = client.post(
         "/api/v1/ontology/builds",
-        json={"document_id": document["id"]},
+        json={"document_id": document["id"], "provider": "echo", "model": "local-echo"},
     )
     assert build_response.status_code == 201
     build = build_response.json()
     assert build["status"] == "completed"
+    assert build["provider"] == "echo"
+    assert build["model"] == "local-echo"
     assert build["relation_count"] >= 2
     assert build["pending_entity_count"] == build["entity_count"]
     assert build["pending_relation_count"] == build["relation_count"]

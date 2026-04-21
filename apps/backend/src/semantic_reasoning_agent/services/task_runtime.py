@@ -5,13 +5,14 @@ from uuid import uuid4
 
 from semantic_reasoning_agent.core.config import Settings
 from semantic_reasoning_agent.domain.contracts.llm import LLMMessage
-from semantic_reasoning_agent.domain.contracts.tool_envelope import OntologyContextRef, ToolConstraints, ToolEnvelope
+from semantic_reasoning_agent.domain.contracts.tool_envelope import ToolConstraints, ToolEnvelope
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.schemas.chat import SendMessageRequest
 from semantic_reasoning_agent.schemas.retrieval import Citation
 from semantic_reasoning_agent.schemas.tasks import TaskResolveRequest, TaskResolveResponse
 from semantic_reasoning_agent.schemas.tools import CitationAnchorSchema, EvidenceSchema, ProvenanceSchema
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
+from semantic_reasoning_agent.services.tool_registry import ToolRegistry
 from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
 
 
@@ -22,6 +23,7 @@ class TaskRuntimeResult:
     citations: list[Citation]
     evidence: list[EvidenceSchema]
     next_action_hints: list[str]
+    tool_calls: list[dict[str, str | int | None]]
 
 
 class TaskRuntimeService:
@@ -31,11 +33,13 @@ class TaskRuntimeService:
         model_config_service: ModelConfigService,
         adapter_registry: AdapterRegistry,
         tool_runtime: ToolRuntime,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self._settings = settings
         self._model_config_service = model_config_service
         self._adapter_registry = adapter_registry
         self._tool_runtime = tool_runtime
+        self._tool_registry = tool_registry
 
     def resolve_request(
         self,
@@ -50,9 +54,9 @@ class TaskRuntimeService:
         workflow_id = "task.resolve.chat"
         evidence: list[EvidenceSchema] = []
         citations: list[Citation] = []
-        next_action_hints: list[str] = []
+        tool_calls: list[dict[str, str | int | None]] = []
 
-        if request.use_retrieval:
+        if request.use_retrieval and self._tool_enabled("retrieval.internal", request.enabled_tool_names):
             retrieval_result = self._tool_runtime.invoke(
                 ToolEnvelope(
                     call_id=uuid4(),
@@ -71,43 +75,22 @@ class TaskRuntimeService:
                 )
             )
             evidence.extend(_to_evidence_schema(item) for item in retrieval_result.evidence)
-            citations.extend(_citation_from_evidence(item) for item in retrieval_result.evidence if item.source_type == "internal_chunk")
-            next_action_hints.extend(retrieval_result.next_action_hints)
-
-        ontology_result = self._tool_runtime.invoke(
-            ToolEnvelope(
-                call_id=uuid4(),
-                tool_name="ontology.lookup",
-                workspace_id=workspace_id,
-                task_id=task_id,
-                workflow_id=workflow_id,
-                task_type="chat.answer",
-                task_payload={"content": request.content},
-                arguments={"mode": "entity_lookup", "query": request.content},
-                ontology_context=OntologyContextRef(domain="workspace_ontology"),
+            tool_calls.append(
+                {
+                    "tool_name": retrieval_result.tool_name,
+                    "status": retrieval_result.status,
+                    "latency_ms": retrieval_result.latency_ms,
+                    "trace_id": retrieval_result.meta.trace_id,
+                }
             )
-        )
-        evidence.extend(_to_evidence_schema(item) for item in ontology_result.evidence)
-        next_action_hints.extend(ontology_result.next_action_hints)
-
-        graph_result = self._tool_runtime.invoke(
-            ToolEnvelope(
-                call_id=uuid4(),
-                tool_name="graphiti.search",
-                workspace_id=workspace_id,
-                task_id=task_id,
-                workflow_id=workflow_id,
-                task_type="chat.answer",
-                task_payload={"content": request.content},
-                arguments={"query": request.content, "max_results": request.top_k},
-                ontology_context=OntologyContextRef(domain="workspace_runtime_graph"),
+            citations.extend(
+                _citation_from_evidence(item)
+                for item in retrieval_result.evidence
+                if item.source_type == "internal_chunk"
             )
-        )
-        evidence.extend(_to_evidence_schema(item) for item in graph_result.evidence)
-        next_action_hints.extend(graph_result.next_action_hints)
 
-        content = self._compose_answer(request.content, citations=citations, evidence=evidence)
-        if not citations and not evidence:
+        content = self._compose_answer(request.content, citations=citations)
+        if not citations:
             content = self._fallback_answer(
                 prompt=request.content,
                 workspace_id=workspace_id,
@@ -121,18 +104,20 @@ class TaskRuntimeService:
             content=content,
             citations=citations,
             evidence=evidence,
-            next_action_hints=sorted(set(next_action_hints)),
+            next_action_hints=[],
+            tool_calls=tool_calls,
         )
 
     def resolve_api_request(self, request: TaskResolveRequest) -> TaskResolveResponse:
-        result = self.resolve_request(request)
+        result = self.resolve_request(
+            request,
+            provider=request.provider,
+            model=request.model,
+        )
         return TaskResolveResponse(
             task_id=str(uuid4()),
-            workflow_id=result.workflow_id,
             content=result.content,
             citations=result.citations,
-            evidence=result.evidence,
-            next_action_hints=result.next_action_hints,
         )
 
     def resolve_chat_request(
@@ -153,6 +138,7 @@ class TaskRuntimeService:
                 use_retrieval=payload.use_retrieval,
                 document_ids=payload.document_ids,
                 top_k=payload.top_k,
+                enabled_tool_names=payload.enabled_tool_names,
             ),
             provider=provider,
             model=model,
@@ -169,12 +155,12 @@ class TaskRuntimeService:
         system_prompt: str | None,
     ) -> str:
         if not provider or not model:
-            return "No indexed document or graph context matched that question."
+            return "No indexed document matched that question."
         if not self._model_config_service.is_ready(provider, model, workspace_id):
-            return "No indexed document or graph context matched that question."
+            return "No indexed document matched that question."
         adapter = self._adapter_registry.get(provider)
         if adapter is None:
-            return "No indexed document or graph context matched that question."
+            return "No indexed document matched that question."
         response = adapter.run(
             messages=[LLMMessage(role="user", content=prompt)],
             tools=(),
@@ -189,28 +175,19 @@ class TaskRuntimeService:
         prompt: str,
         *,
         citations: list[Citation],
-        evidence: list[EvidenceSchema],
     ) -> str:
         if citations:
             lines = [f"Question: {prompt}", "Relevant context:"]
             for citation in citations:
                 lines.append(f"- {citation.document_title} ({citation.location_label}): {citation.excerpt}")
-            graph_lines = [
-                item for item in evidence
-                if item.source_type in {"graph_edge", "graph_node"}
-            ]
-            if graph_lines:
-                lines.append("Graph context:")
-                for item in graph_lines[:3]:
-                    lines.append(f"- {item.title}: {item.content}")
             return "\n".join(lines)
-        graph_lines = [item for item in evidence if item.source_type in {"graph_edge", "graph_node"}]
-        if graph_lines:
-            lines = [f"Question: {prompt}", "Graph context:"]
-            for item in graph_lines[:5]:
-                lines.append(f"- {item.title}: {item.content}")
-            return "\n".join(lines)
-        return "No indexed document or graph context matched that question."
+        return "No indexed document matched that question."
+
+    @staticmethod
+    def _tool_enabled(tool_name: str, enabled_tool_names: list[str] | None) -> bool:
+        if enabled_tool_names is None:
+            return True
+        return tool_name in enabled_tool_names
 
 
 def _citation_from_evidence(evidence) -> Citation:  # noqa: ANN001

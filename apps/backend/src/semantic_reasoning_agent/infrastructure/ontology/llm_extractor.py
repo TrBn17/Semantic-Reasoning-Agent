@@ -13,9 +13,12 @@ from semantic_reasoning_agent.domain.ontology.models import (
     ExtractionResult,
     OntologySourceChunk,
 )
+from semantic_reasoning_agent.domain.contracts.llm import LLMMessage
+from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.infrastructure.ontology.llm_prompts import (
     build_open_domain_prompt,
 )
+from semantic_reasoning_agent.ports.llm_adapter import ProviderAdapter
 from semantic_reasoning_agent.ports.task_model_resolver import TaskModelResolverPort
 from semantic_reasoning_agent.tools.ontology.schema_registry import OntologySchemaRegistry
 
@@ -59,10 +62,12 @@ class OpenDomainLLMExtractor:
         self,
         settings: Settings,
         model_config_service: TaskModelResolverPort,
+        adapter_registry: AdapterRegistry,
         schema_registry: OntologySchemaRegistry,
     ) -> None:
         self._settings = settings
         self._model_config_service = model_config_service
+        self._adapter_registry = adapter_registry
         self._schema_registry = schema_registry
 
     def classify_document_domain(self, chunks: list[OntologySourceChunk]) -> str:
@@ -90,9 +95,10 @@ class OpenDomainLLMExtractor:
             "ontology_extraction",
             workspace_id,
         )
-        if provider != "anthropic" or not self._model_config_service.is_ready(
-            provider, model, workspace_id
-        ):
+        if not self._model_config_service.is_ready(provider, model, workspace_id):
+            return ExtractionResult(domain="unavailable", entities=[], relations=[])
+        adapter = self._adapter_registry.get(provider)
+        if adapter is None:
             return ExtractionResult(domain="unavailable", entities=[], relations=[])
 
         text = "\n\n".join(chunk.text for chunk in chunks[: self._settings.ontology_chunk_limit])
@@ -104,7 +110,7 @@ class OpenDomainLLMExtractor:
             known_relation_types=schema.relation_types,
             prompt_version=self._settings.ontology_prompt_version,
         )
-        payload = self._invoke_anthropic(prompt, model=model)
+        payload = self._invoke_llm(prompt, model=model, adapter=adapter)
         extraction = self._parse_payload(payload)
         return self._to_domain_result(
             extraction,
@@ -113,28 +119,18 @@ class OpenDomainLLMExtractor:
             model=model,
         )
 
-    def _invoke_anthropic(self, prompt: str, *, model: str) -> str:
-        from anthropic import Anthropic
-
-        client_kwargs: dict[str, str] = {}
-        if self._settings.anthropic_api_key:
-            client_kwargs["api_key"] = self._settings.anthropic_api_key
-        if self._settings.anthropic_base_url:
-            client_kwargs["base_url"] = self._settings.anthropic_base_url
-
-        client = Anthropic(**client_kwargs)
-        response = client.messages.create(
+    @staticmethod
+    def _invoke_llm(prompt: str, *, model: str, adapter: ProviderAdapter) -> str:
+        response = adapter.run(
+            messages=[LLMMessage(role="user", content=prompt)],
+            tools=(),
+            tool_choice="none",
+            system=None,
             model=model,
             max_tokens=3000,
             temperature=0,
-            messages=[{"role": "user", "content": prompt}],
         )
-        texts = [
-            block.text
-            for block in response.content
-            if getattr(block, "type", "") == "text" and hasattr(block, "text")
-        ]
-        return "\n".join(texts).strip()
+        return (response.content or "").strip()
 
     @staticmethod
     def _parse_payload(payload: str) -> _LLMExtraction:

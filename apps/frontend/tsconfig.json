@@ -15,7 +15,11 @@
     "plugins": [{ "name": "next" }],
     "esModuleInterop": true,
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@/components/*": ["./src/components/*"],
+      "@/shared/*": ["./src/shared/*"],
+      "@/entities/*": ["./src/entities/*"],
+      "@/providers": ["./src/providers"]
     }
   },
   "include": [

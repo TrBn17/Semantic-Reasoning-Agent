@@ -92,8 +92,10 @@ def get_app_container() -> AppContainer:
         ontology_extractor=OpenDomainLLMExtractor(
             settings=settings,
             model_config_service=model_config_service,
+            adapter_registry=adapter_registry,
             schema_registry=schema_registry,
         ),
+        model_config_service=model_config_service,
     )
     tool_registry = build_tool_registry(
         retrieval_service=retrieval_service,
@@ -106,6 +108,7 @@ def get_app_container() -> AppContainer:
         model_config_service=model_config_service,
         adapter_registry=adapter_registry,
         tool_runtime=tool_runtime,
+        tool_registry=tool_registry,
     )
     workflow_registry_service = WorkflowRegistryService()
     chat_stream_service = ChatStreamService(

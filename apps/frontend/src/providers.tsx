@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "@/components/ui/sonner";
-import { useLanguageStore } from "@/src/shared/i18n/use-language";
+import { useLanguageStore } from "@/shared/i18n/use-language";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(

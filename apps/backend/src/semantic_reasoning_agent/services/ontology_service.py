@@ -49,6 +49,7 @@ from semantic_reasoning_agent.services.ontology_graph_publisher import (
     OntologyGraphPublisher,
     OntologyGraphPublisherError,
 )
+from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
 
@@ -83,6 +84,7 @@ class OntologyService:
         task_dispatcher: TaskDispatcher,
         graphiti_gateway: GraphitiGateway,
         ontology_extractor: OntologyExtractorPort,
+        model_config_service: ModelConfigService,
     ) -> None:
         self._settings = settings
         self._database_manager = database_manager
@@ -90,6 +92,7 @@ class OntologyService:
         self._graphiti_gateway = graphiti_gateway
         self._graph_publisher = OntologyGraphPublisher(graphiti_gateway)
         self._ontology_extractor = ontology_extractor
+        self._model_config_service = model_config_service
 
     def create_build(self, request: OntologyBuildCreateRequest) -> OntologyBuildResponse:
         with self._database_manager.session() as session:
@@ -103,6 +106,11 @@ class OntologyService:
 
             build_id = str(uuid4())
             timestamp = utc_now()
+            provider, model = self._resolve_build_model(
+                request.workspace_id or document.workspace_id,
+                request.provider,
+                request.model,
+            )
             session.add(
                 OntologyBuildORM(
                     id=build_id,
@@ -110,6 +118,8 @@ class OntologyService:
                     workspace_id=request.workspace_id or document.workspace_id,
                     status=OntologyBuildStatus.pending.value,
                     domain=None,
+                    provider=provider,
+                    model=model,
                     created_at=timestamp,
                     started_at=None,
                     finished_at=None,
@@ -378,6 +388,8 @@ class OntologyService:
                 workspace_id=build.workspace_id,
                 status=build.status,
                 domain=build.domain,
+                provider=build.provider,
+                model=build.model,
                 created_at=build.created_at,
                 started_at=build.started_at,
                 finished_at=build.finished_at,
@@ -984,6 +996,8 @@ class OntologyService:
             workspace_id=build.workspace_id,
             status=build.status,
             domain=build.domain,
+            provider=build.provider,
+            model=build.model,
             created_at=build.created_at,
             started_at=build.started_at,
             finished_at=build.finished_at,
@@ -1137,6 +1151,23 @@ class OntologyService:
         if step.name in ONTOLOGY_BUILD_STEP_NAMES:
             return ONTOLOGY_BUILD_STEP_NAMES.index(step.name)
         return len(ONTOLOGY_BUILD_STEP_NAMES)
+
+    def _resolve_build_model(
+        self,
+        workspace_id: str,
+        provider: str | None,
+        model: str | None,
+    ) -> tuple[str | None, str | None]:
+        if provider and model:
+            if not self._model_config_service.is_ready(provider, model, workspace_id):
+                raise OntologyBuildError(
+                    f"Provider '{provider}' with model '{model}' is not ready for ontology extraction."
+                )
+            return provider, model
+        return self._model_config_service.resolve_ready_task_model(
+            "ontology_extraction",
+            workspace_id,
+        )
 
     @staticmethod
     def _build_candidate_entity_type_definitions(

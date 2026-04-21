@@ -1,5 +1,9 @@
+import json
+from collections.abc import Iterator
+
 from semantic_reasoning_agent.schemas.chat import (
     ChatReply,
+    ChatStreamEvent,
     ConversationModelSelectionRequest,
     SendMessageRequest,
 )
@@ -25,6 +29,7 @@ class ChatStreamService:
 
     def send_message(self, payload: SendMessageRequest) -> ChatReply:
         conversation = self._conversation_service.get_conversation(payload.conversation_id)
+        workspace_id = payload.workspace_id or conversation.workspace_id
         runtime_provider = conversation.provider
         runtime_model = conversation.model
 
@@ -35,7 +40,7 @@ class ChatStreamService:
                     ConversationModelSelectionRequest(
                         provider=payload.provider,
                         model=payload.model,
-                        workspace_id=payload.workspace_id or conversation.workspace_id,
+                        workspace_id=workspace_id,
                     ),
                 )
                 runtime_provider = updated.provider
@@ -47,11 +52,32 @@ class ChatStreamService:
         if not self._model_config_service.is_ready(
             runtime_provider,
             runtime_model,
-            payload.workspace_id or conversation.workspace_id,
+            workspace_id,
         ):
-            raise ProviderNotReadyError(
-                f"Provider '{runtime_provider}' with model '{runtime_model}' is not ready yet."
+            if payload.provider or payload.model:
+                raise ProviderNotReadyError(
+                    f"Provider '{runtime_provider}' with model '{runtime_model}' is not ready yet."
+                )
+            fallback_provider, fallback_model = self._model_config_service.resolve_ready_task_model(
+                "chat",
+                workspace_id,
+                conversation.agent_profile_id,
             )
+            if self._model_config_service.is_ready(fallback_provider, fallback_model, workspace_id):
+                updated = self._conversation_service.update_runtime_selection(
+                    payload.conversation_id,
+                    ConversationModelSelectionRequest(
+                        provider=fallback_provider,
+                        model=fallback_model,
+                        workspace_id=workspace_id,
+                    ),
+                )
+                runtime_provider = updated.provider
+                runtime_model = updated.model
+            else:
+                raise ProviderNotReadyError(
+                    f"Provider '{runtime_provider}' with model '{runtime_model}' is not ready yet."
+                )
 
         self._conversation_service.append_message(
             conversation_id=payload.conversation_id,
@@ -73,7 +99,63 @@ class ChatStreamService:
             content=task_result.content,
         )
         return ChatReply(
-            conversation=updated,
+            conversation_id=updated.id,
             reply=updated.messages[-1],
             citations=task_result.citations,
+            tool_calls=task_result.tool_calls,
         )
+
+    def stream_message(self, payload: SendMessageRequest) -> Iterator[str]:
+        yield self._serialize_event(
+            ChatStreamEvent(
+                event="message_start",
+                data={"conversation_id": payload.conversation_id},
+            )
+        )
+        try:
+            reply = self.send_message(payload)
+            for tool_call in reply.tool_calls:
+                yield self._serialize_event(ChatStreamEvent(event="tool_call_start", data=tool_call))
+                yield self._serialize_event(ChatStreamEvent(event="tool_call_end", data=tool_call))
+            for chunk in _chunk_text(reply.reply.content):
+                yield self._serialize_event(
+                    ChatStreamEvent(event="content_delta", data={"delta": chunk})
+                )
+            if reply.citations:
+                yield self._serialize_event(
+                    ChatStreamEvent(
+                        event="citations",
+                        data={
+                            "citations": [
+                                citation.model_dump(mode="json") for citation in reply.citations
+                            ]
+                        },
+                    )
+                )
+            yield self._serialize_event(
+                ChatStreamEvent(
+                    event="message_complete",
+                    data={
+                        "conversation_id": reply.conversation_id,
+                        "reply": reply.reply.model_dump(mode="json"),
+                        "citations": [
+                            citation.model_dump(mode="json") for citation in reply.citations
+                        ],
+                        "tool_calls": reply.tool_calls,
+                    },
+                )
+            )
+        except Exception as exc:
+            yield self._serialize_event(
+                ChatStreamEvent(event="error", data={"message": str(exc)})
+            )
+
+    @staticmethod
+    def _serialize_event(event: ChatStreamEvent) -> str:
+        return f"event: {event.event}\ndata: {json.dumps(event.data, default=str)}\n\n"
+
+
+def _chunk_text(text: str, size: int = 120) -> list[str]:
+    if not text:
+        return [""]
+    return [text[index:index + size] for index in range(0, len(text), size)]

@@ -38,6 +38,8 @@ class OntologyReviewAction(str, Enum):
 class OntologyBuildCreateRequest(BaseModel):
     document_id: str
     workspace_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
 
 
 class OntologyBuildStepResponse(BaseModel):
@@ -127,6 +129,8 @@ class OntologyBuildResponse(BaseModel):
     workspace_id: str
     status: OntologyBuildStatus
     domain: str | None = None
+    provider: str | None = None
+    model: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     started_at: datetime | None = None
     finished_at: datetime | None = None

@@ -12,10 +12,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listAgentProfiles } from "@/lib/api/agent-profiles";
-import { createConversation } from "@/lib/api/conversations";
-import { queryKeys } from "@/lib/query/keys";
-import { useWorkspaceStore } from "@/lib/state/workspace-store";
+import { listAgentProfiles } from "@/shared/api/agent-profiles";
+import { createConversation } from "@/shared/api/conversations";
+import { queryKeys } from "@/shared/query/keys";
+import { useWorkspaceStore } from "@/shared/state/workspace-store";
 
 export default function ChatLandingPage() {
   const router = useRouter();

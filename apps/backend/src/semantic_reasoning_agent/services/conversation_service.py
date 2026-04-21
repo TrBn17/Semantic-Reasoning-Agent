@@ -20,6 +20,13 @@ from semantic_reasoning_agent.services.agent_profile_service import (
 )
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 
+DEFAULT_EFFECTIVE_TOOL_NAMES = [
+    "retrieval.internal",
+    "ontology.lookup",
+    "graph.search",
+    "graph.ingest",
+]
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -53,7 +60,13 @@ class ConversationService:
                 .options(selectinload(ConversationORM.messages))
                 .order_by(desc(ConversationORM.updated_at))
             ).all()
-            return [self._to_schema(conversation) for conversation in conversations]
+            return [
+                self._to_schema(
+                    conversation,
+                    profile=self._get_profile_record(session, conversation.agent_profile_id),
+                )
+                for conversation in conversations
+            ]
 
     def create_conversation(self, payload: ConversationCreateRequest) -> ConversationResponse:
         workspace_id = payload.workspace_id or self._settings.default_workspace_id
@@ -66,7 +79,7 @@ class ConversationService:
             provider, model = payload.provider, payload.model
             uses_override = True
         else:
-            provider, model = self._model_config_service.resolve_task_model(
+            provider, model = self._model_config_service.resolve_ready_task_model(
                 "chat",
                 workspace_id,
                 agent_profile_id,
@@ -88,7 +101,10 @@ class ConversationService:
             session.add(conversation)
             session.flush()
             session.refresh(conversation)
-            return self._to_schema(conversation)
+            return self._to_schema(
+                conversation,
+                profile=self._get_profile_record(session, conversation.agent_profile_id),
+            )
 
     def get_conversation(self, conversation_id: str) -> ConversationResponse:
         with self._database_manager.session() as session:
@@ -99,7 +115,10 @@ class ConversationService:
             )
             if conversation is None:
                 raise ConversationNotFoundError(f"Conversation '{conversation_id}' was not found.")
-            return self._to_schema(conversation)
+            return self._to_schema(
+                conversation,
+                profile=self._get_profile_record(session, conversation.agent_profile_id),
+            )
 
     def update_runtime_selection(
         self,
@@ -115,13 +134,21 @@ class ConversationService:
                 raise ConversationPolicyError(
                     f"Conversation '{conversation_id}' does not allow chat model override."
                 )
+            if not self._model_config_service.is_ready(
+                payload.provider,
+                payload.model,
+                payload.workspace_id or conversation.workspace_id,
+            ):
+                raise ConversationPolicyError(
+                    f"Provider '{payload.provider}' with model '{payload.model}' is not ready."
+                )
             conversation.provider = payload.provider
             conversation.model = payload.model
             conversation.uses_model_override = True
             conversation.updated_at = utc_now()
             session.flush()
             session.refresh(conversation)
-            return self._to_schema(conversation)
+            return self._to_schema(conversation, profile=profile)
 
     def update_agent_profile(
         self,
@@ -143,7 +170,7 @@ class ConversationService:
                 conversation.agent_profile_id = None
 
             if payload.clear_model_override or not conversation.uses_model_override:
-                provider, model = self._model_config_service.resolve_task_model(
+                provider, model = self._model_config_service.resolve_ready_task_model(
                     "chat",
                     payload.workspace_id or conversation.workspace_id,
                     conversation.agent_profile_id,
@@ -155,7 +182,10 @@ class ConversationService:
             conversation.updated_at = utc_now()
             session.flush()
             session.refresh(conversation)
-            return self._to_schema(conversation)
+            return self._to_schema(
+                conversation,
+                profile=self._get_profile_record(session, conversation.agent_profile_id),
+            )
 
     def append_message(self, conversation_id: str, role: str, content: str) -> ConversationResponse:
         with self._database_manager.session() as session:
@@ -176,7 +206,10 @@ class ConversationService:
             conversation.messages.append(message)
             conversation.updated_at = message.created_at
             session.flush()
-            return self._to_schema(conversation)
+            return self._to_schema(
+                conversation,
+                profile=self._get_profile_record(session, conversation.agent_profile_id),
+            )
 
     def get_system_prompt(self, conversation_id: str) -> str | None:
         with self._database_manager.session() as session:
@@ -191,7 +224,12 @@ class ConversationService:
             return None
         return session.get(AgentProfileORM, profile_id)
 
-    def _to_schema(self, conversation: ConversationORM) -> ConversationResponse:
+    def _to_schema(
+        self,
+        conversation: ConversationORM,
+        *,
+        profile: AgentProfileORM | None = None,
+    ) -> ConversationResponse:
         messages = [
             Message(
                 id=message.id,
@@ -209,7 +247,30 @@ class ConversationService:
             provider=conversation.provider,
             model=conversation.model,
             uses_model_override=conversation.uses_model_override,
+            effective_agent_name=profile.name if profile is not None else None,
+            effective_tool_names=self._effective_tool_names(profile),
             created_at=conversation.created_at,
             updated_at=conversation.updated_at,
             messages=messages,
         )
+
+    @staticmethod
+    def _effective_tool_names(profile: AgentProfileORM | None) -> list[str]:
+        if profile is None or not profile.tool_assignments:
+            return DEFAULT_EFFECTIVE_TOOL_NAMES.copy()
+        assignment_map = {
+            item.get("tool_name"): bool(item.get("enabled", True))
+            for item in (profile.tool_assignments or [])
+            if item.get("tool_name")
+        }
+        effective = [
+            tool_name
+            for tool_name in DEFAULT_EFFECTIVE_TOOL_NAMES
+            if assignment_map.get(tool_name, True)
+        ]
+        extra_enabled = [
+            tool_name
+            for tool_name, enabled in assignment_map.items()
+            if enabled and tool_name not in effective
+        ]
+        return effective + sorted(extra_enabled)

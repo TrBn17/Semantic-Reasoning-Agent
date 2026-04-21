@@ -149,7 +149,34 @@ def test_create_conversation_and_send_echo_message() -> None:
     assert payload["reply"]["role"] == "assistant"
     assert payload["reply"]["content"] == "echo: hello"
     assert payload["citations"] == []
-    assert len(payload["conversation"]["messages"]) == 2
+    assert payload["tool_calls"] == []
+    assert payload["conversation_id"] == conversation["id"]
+
+
+def test_chat_stream_endpoint_emits_structured_events() -> None:
+    create_response = client.post(
+        "/api/v1/conversations",
+        json={"title": "Streaming chat", "provider": "echo", "model": "local-echo"},
+    )
+    conversation = create_response.json()
+
+    with client.stream(
+        "POST",
+        "/api/v1/chat/messages/stream",
+        json={
+            "conversation_id": conversation["id"],
+            "content": "hello stream",
+            "provider": "echo",
+            "model": "local-echo",
+        },
+    ) as response:
+        assert response.status_code == 200
+        payload = "".join(response.iter_text())
+
+    assert "event: message_start" in payload
+    assert "event: content_delta" in payload
+    assert "event: message_complete" in payload
+    assert "echo: hello stream" in payload
 
 
 def test_default_agent_profile_drives_new_conversation_model() -> None:
@@ -167,6 +194,7 @@ def test_default_agent_profile_drives_new_conversation_model() -> None:
                     "model": "local-echo",
                 }
             ],
+            "tool_assignments": [{"tool_name": "retrieval.internal", "enabled": False}],
         },
     )
     assert profile_response.status_code == 201
@@ -181,6 +209,7 @@ def test_default_agent_profile_drives_new_conversation_model() -> None:
     assert conversation["agent_profile_id"] == profile["id"]
     assert conversation["uses_model_override"] is False
     assert conversation["provider"] == "echo"
+    assert conversation["effective_tool_names"] == ["ontology.lookup", "graph.search", "graph.ingest"]
 
 
 def test_conversation_model_override_persists_per_session() -> None:
@@ -199,6 +228,21 @@ def test_conversation_model_override_persists_per_session() -> None:
     assert updated["uses_model_override"] is True
     assert updated["provider"] == "echo"
     assert updated["model"] == "local-echo"
+
+
+def test_conversation_model_override_rejects_unready_model() -> None:
+    create_response = client.post(
+        "/api/v1/conversations",
+        json={"title": "Bad override chat", "workspace_id": "workspace-demo"},
+    )
+    conversation = create_response.json()
+
+    update_response = client.patch(
+        f"/api/v1/conversations/{conversation['id']}/model-selection",
+        json={"provider": "openai", "model": "gpt-5-mini", "workspace_id": "workspace-demo"},
+    )
+    assert update_response.status_code == 400
+    assert "is not ready" in update_response.json()["detail"]
 
 
 def test_profile_can_block_chat_model_override() -> None:
@@ -256,3 +300,38 @@ def test_unready_provider_is_rejected() -> None:
 
     assert send_response.status_code == 400
     assert "not ready yet" in send_response.json()["detail"]
+
+
+def test_conversation_creation_falls_back_to_ready_model_when_assignment_is_blocked() -> None:
+    update_response = client.put(
+        "/api/v1/agents/settings",
+        json={
+            "workspace_id": "workspace-demo",
+            "providers": [
+                {
+                    "provider": "openai",
+                    "enabled": True,
+                    "values": {"OPENAI_API_KEY": "demo-openai-key"},
+                }
+            ],
+            "task_assignments": [
+                {
+                    "task_type": "chat",
+                    "provider": "openai",
+                    "model": "gpt-5-mini",
+                }
+            ],
+        },
+    )
+    assert update_response.status_code == 200
+
+    create_response = client.post(
+        "/api/v1/conversations",
+        json={"title": "Fallback chat", "workspace_id": "workspace-demo"},
+    )
+    assert create_response.status_code == 201
+    conversation = create_response.json()
+
+    assert conversation["provider"] == "echo"
+    assert conversation["model"] == "local-echo"
+    assert conversation["uses_model_override"] is False

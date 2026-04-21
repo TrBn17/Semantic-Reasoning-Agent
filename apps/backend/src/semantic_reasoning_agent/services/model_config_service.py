@@ -470,6 +470,42 @@ class ModelConfigService:
             return saved.provider, saved.model
         return self._default_assignment(task_type)
 
+    def resolve_ready_task_model(
+        self,
+        task_type: TaskType,
+        workspace_id: str | None = None,
+        agent_profile_id: str | None = None,
+    ) -> tuple[str, str]:
+        workspace_id = workspace_id or self._settings.default_workspace_id
+
+        candidates: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add_candidate(provider: str, model: str) -> None:
+            pair = (provider, model)
+            if pair not in seen:
+                seen.add(pair)
+                candidates.append(pair)
+
+        if agent_profile_id:
+            profile_assignment = self._load_profile_task_assignment(agent_profile_id, task_type)
+            if profile_assignment is not None:
+                add_candidate(*profile_assignment)
+
+        task_configs = self._load_task_configs(workspace_id)
+        saved = task_configs.get(task_type)
+        if saved is not None:
+            add_candidate(saved.provider, saved.model)
+
+        add_candidate(*self._default_assignment(task_type))
+        add_candidate("echo", "local-echo")
+
+        for provider, model in candidates:
+            if self.is_ready(provider, model, workspace_id):
+                return provider, model
+
+        return candidates[0]
+
     def resolve_runtime_model(
         self,
         task_type: TaskType,
