@@ -59,15 +59,15 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
       setResult(output);
       if (output.status === "success") {
         toast.success(
-          `${tool.tool_name} succeeded — ${output.evidence.length} evidence, ${output.latency_ms}ms`,
+          `${tool.tool_name} succeeded - ${output.evidence.length} evidence, ${output.latency_ms}ms`,
         );
       } else if (output.status === "partial") {
         toast.warning(
-          `${tool.tool_name} partial — hints: ${output.next_action_hints.join(", ") || "none"}`,
+          `${tool.tool_name} partial - hints: ${output.next_action_hints.join(", ") || "none"}`,
         );
       } else {
         toast.error(
-          `${tool.tool_name} failed — ${output.error_code ?? "unknown"}: ${output.error_message ?? ""}`,
+          `${tool.tool_name} failed - ${output.error_code ?? "unknown"}: ${output.error_message ?? ""}`,
         );
       }
     },

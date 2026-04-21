@@ -223,27 +223,27 @@ services:
       api:
         condition: service_healthy
 
-  # frontend:
-  #   build:
-  #     context: .
-  #     dockerfile: apps/frontend/Dockerfile
-  #   image: semantic-reasoning-frontend
-  #   container_name: semantic-reasoning-frontend
-  #   working_dir: /workspace/apps/frontend
-  #   command: sh -c "if [ ! -x node_modules/.bin/next ]; then npm install; fi; npm run dev"
-  #   volumes:
-  #     - ./apps/frontend:/workspace/apps/frontend
-  #     - frontend_node_modules:/workspace/apps/frontend/node_modules
-  #     - frontend_next_cache:/workspace/apps/frontend/.next
-  #   ports:
-  #     - "3000:3000"
-  #   environment:
-  #     INTERNAL_API_BASE_URL: http://api:8000/api/v1
-  #     NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api/v1}
-  #     NEXT_TELEMETRY_DISABLED: "1"
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    image: semantic-reasoning-frontend
+    container_name: semantic-reasoning-frontend
+    working_dir: /workspace/apps/frontend
+    command: sh -c "if [ ! -x node_modules/.bin/next ]; then npm install; fi; npm run dev"
+    volumes:
+      - ./apps/frontend:/workspace/apps/frontend
+      - frontend_node_modules:/workspace/apps/frontend/node_modules
+      - frontend_next_cache:/workspace/apps/frontend/.next
+    ports:
+      - "3000:3000"
+    environment:
+      INTERNAL_API_BASE_URL: http://api:8000/api/v1
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/api/v1}
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:

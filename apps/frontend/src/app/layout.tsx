@@ -4,12 +4,12 @@ import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { IdlePrefetcher } from "@/components/layout/idle-prefetcher";
 import { Providers } from "@/providers";
-import "@/src/globals.css";
+import "../globals.css";
 
 export const metadata: Metadata = {
   title: "Semantic Reasoning Agent",
   description:
-    "ChatGPT-style workspace for multi-LLM chat, RAG, and ontology graph review.",
+    "Multi-LLM chat, RAG, and ontology graph review.",
   icons: {
     icon: [
       { url: "/logo-badge.svg", type: "image/svg+xml" },

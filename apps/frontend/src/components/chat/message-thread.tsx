@@ -72,7 +72,7 @@ function MessageRow({
       <div className="flex-1 space-y-1">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="font-medium capitalize">{message.role}</span>
-          <span>•</span>
+          <span>&bull;</span>
           <span>{pending ? "Streaming..." : formatDateTime(message.created_at)}</span>
         </div>
         <div className="whitespace-pre-wrap break-words rounded-2xl bg-card px-4 py-3 text-sm leading-6 shadow-sm ring-1 ring-border">

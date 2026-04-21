@@ -1,15 +1,15 @@
 """Expand alembic_version.version_num to 64 chars
 
-Revision ID: 20260421_expand_alembic_version_num
-Revises: 20260421_agent_tools_ontology_models
+Revision ID: 20260421_expand_alembic_ver
+Revises: 20260421_agent_tools_onto
 Create Date: 2026-04-21 00:30:00.000000
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20260421_expand_alembic_version_num"
-down_revision = "20260421_agent_tools_ontology_models"
+revision = "20260421_expand_alembic_ver"
+down_revision = "20260421_agent_tools_onto"
 branch_labels = None
 depends_on = None
 

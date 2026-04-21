@@ -27,7 +27,13 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       {children}
-      <Toaster richColors position="top-right" />
+      <Toaster
+        position="top-right"
+        richColors={false}
+        closeButton={false}
+        hotkey={[]}
+        containerAriaLabel="Application notifications"
+      />
     </QueryClientProvider>
   );
 }

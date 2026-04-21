@@ -1,6 +1,6 @@
 """Add agent tool assignments and ontology model fields.
 
-Revision ID: 20260421_agent_tools_ontology_models
+Revision ID: 20260421_agent_tools_onto
 Revises: 20260421_doc_ingest_opts
 Create Date: 2026-04-21 00:00:00.000000
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision = "20260421_agent_tools_ontology_models"
+revision = "20260421_agent_tools_onto"
 down_revision = "20260421_doc_ingest_opts"
 branch_labels = None
 depends_on = None
