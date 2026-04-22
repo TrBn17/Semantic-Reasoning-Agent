@@ -14,7 +14,7 @@ from semantic_reasoning_agent.schemas.ontology import (
 @dataclass(slots=True)
 class PublishedOntologySnapshot:
     workspace_id: str
-    version: OntologyVersionResponse
+    version: OntologyVersionResponse | None
     entity_type_definitions: list[OntologyEntityTypeDefinitionResponse]
     relation_type_definitions: list[OntologyRelationTypeDefinitionResponse]
     entities: list[OntologyEntityResponse]

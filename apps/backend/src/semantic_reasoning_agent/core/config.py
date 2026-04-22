@@ -42,8 +42,8 @@ class Settings(BaseSettings):
     default_user_id: str = Field(default="user-demo", alias="DEFAULT_USER_ID")
     default_user_email: str = Field(default="demo@example.com", alias="DEFAULT_USER_EMAIL")
     default_user_name: str = Field(default="Demo User", alias="DEFAULT_USER_NAME")
-    default_provider: str = Field(default="echo", alias="DEFAULT_PROVIDER")
-    default_model: str = Field(default="local-echo", alias="DEFAULT_MODEL")
+    default_provider: str = Field(default="openai", alias="DEFAULT_PROVIDER")
+    default_model: str = Field(default="gpt-5-mini", alias="DEFAULT_MODEL")
 
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     anthropic_base_url: str | None = Field(default=None, alias="ANTHROPIC_BASE_URL")
@@ -56,8 +56,8 @@ class Settings(BaseSettings):
     )
     google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
-    ontology_llm_provider: str = Field(default="anthropic", alias="ONTOLOGY_LLM_PROVIDER")
-    ontology_llm_model: str = Field(default="claude-sonnet-4-5", alias="ONTOLOGY_LLM_MODEL")
+    ontology_llm_provider: str | None = Field(default=None, alias="ONTOLOGY_LLM_PROVIDER")
+    ontology_llm_model: str | None = Field(default=None, alias="ONTOLOGY_LLM_MODEL")
     ontology_prompt_version: str = Field(default="v1", alias="ONTOLOGY_PROMPT_VERSION")
     ontology_chunk_limit: int = Field(default=24, alias="ONTOLOGY_CHUNK_LIMIT")
     ontology_llm_enabled: bool = Field(default=True, alias="ONTOLOGY_LLM_ENABLED")
@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     minio_access_key: str = Field(default="minioadmin", alias="MINIO_ACCESS_KEY")
     minio_secret_key: str = Field(default="minioadmin", alias="MINIO_SECRET_KEY")
     minio_secure: bool = Field(default=False, alias="MINIO_SECURE")
+    minio_public_base_url: str = Field(
+        default="http://localhost:9000",
+        alias="MINIO_PUBLIC_BASE_URL",
+    )
 
     vector_store_backend: str = Field(default="postgres", alias="VECTOR_STORE_BACKEND")
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
@@ -77,6 +81,7 @@ class Settings(BaseSettings):
     marker_torch_device: str | None = Field(default=None, alias="MARKER_TORCH_DEVICE")
     marker_use_llm_in_accurate: bool = Field(default=False, alias="MARKER_USE_LLM_IN_ACCURATE")
     marker_max_pages_per_doc: int | None = Field(default=None, alias="MARKER_MAX_PAGES_PER_DOC")
+    marker_model_cache_dir: str = Field(default=".cache/datalab/models", alias="MARKER_MODEL_CACHE_DIR")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

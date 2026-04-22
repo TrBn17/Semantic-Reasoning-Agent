@@ -17,8 +17,10 @@ import { Label } from "@/components/ui/label";
 import { searchRetrieval } from "@/lib/api/retrieval";
 import type { RetrievalSearchResponse } from "@/lib/api/types";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function RetrievalView() {
+  const { t } = useI18n();
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(5);
@@ -37,7 +39,7 @@ export function RetrievalView() {
           .filter(Boolean),
       }),
     onSuccess: (res) => setResult(res),
-    onError: (err) => toast.error(`Search failed: ${(err as Error).message}`),
+    onError: (err) => toast.error(t.retrieval.searchFailed.replace("{reason}", (err as Error).message)),
   });
 
   function onSubmit(e: FormEvent) {
@@ -49,25 +51,24 @@ export function RetrievalView() {
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
       <div>
-        <h1 className="text-xl font-semibold">Retrieval playground</h1>
+        <h1 className="text-xl font-semibold">{t.retrieval.title}</h1>
         <p className="text-sm text-muted-foreground">
-          Search across indexed document chunks. Useful for validating that
-          ingestion parsed the document the way you expected.
+          {t.retrieval.description}
         </p>
       </div>
       <form onSubmit={onSubmit} className="grid gap-3 rounded-md border p-4">
         <div className="grid gap-1">
-          <Label htmlFor="q">Query</Label>
+          <Label htmlFor="q">{t.retrieval.queryLabel}</Label>
           <Input
             id="q"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask a question or paste keywords"
+            placeholder={t.retrieval.queryPlaceholder}
           />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="grid gap-1">
-            <Label htmlFor="topk">top_k</Label>
+            <Label htmlFor="topk">{t.retrieval.topKLabel}</Label>
             <Input
               id="topk"
               type="number"
@@ -78,19 +79,19 @@ export function RetrievalView() {
             />
           </div>
           <div className="grid gap-1">
-            <Label htmlFor="docs">document_ids (comma sep)</Label>
+            <Label htmlFor="docs">{t.retrieval.docIdsLabel}</Label>
             <Input
               id="docs"
               value={documentIds}
               onChange={(e) => setDocumentIds(e.target.value)}
-              placeholder="optional"
+              placeholder={t.retrieval.docIdsPlaceholder}
             />
           </div>
         </div>
         <div>
           <Button type="submit" disabled={!query.trim() || mutation.isPending}>
             <Search className="h-4 w-4" />
-            Search
+            {t.common.search}
           </Button>
         </div>
       </form>
@@ -98,7 +99,7 @@ export function RetrievalView() {
       {result && (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            {result.results.length} result{result.results.length === 1 ? "" : "s"} for &quot;{result.query}&quot;
+            {result.results.length} {result.results.length === 1 ? t.common.result : t.common.results} for &quot;{result.query}&quot;
           </p>
           {result.results.map((r) => (
             <Card key={r.chunk_id}>
@@ -125,7 +126,7 @@ export function RetrievalView() {
           ))}
           {result.results.length === 0 && (
             <p className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-              No matches. Try a different query or upload more documents.
+              {t.retrieval.noMatches}
             </p>
           )}
         </div>

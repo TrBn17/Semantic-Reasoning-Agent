@@ -29,6 +29,42 @@ class AgentProfileORM(Base):
     )
 
 
+class KnowledgePackORM(Base):
+    __tablename__ = "knowledge_packs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    documents: Mapped[list["KnowledgePackDocumentORM"]] = relationship(
+        back_populates="knowledge_pack",
+        cascade="all, delete-orphan",
+        order_by="KnowledgePackDocumentORM.document_id",
+    )
+
+
+class KnowledgePackDocumentORM(Base):
+    __tablename__ = "knowledge_pack_documents"
+
+    knowledge_pack_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("knowledge_packs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    document_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    knowledge_pack: Mapped[KnowledgePackORM] = relationship(back_populates="documents")
+
+
 class AgentProfileTaskModelORM(Base):
     __tablename__ = "agent_profile_task_models"
 

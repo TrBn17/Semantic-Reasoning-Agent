@@ -20,6 +20,7 @@ interface ProviderModelSelectorProps {
   provider: string;
   onModelSelect: (modelId: string) => void;
   selectedModel?: string;
+  workspaceId?: string | null;
 }
 
 /**
@@ -30,11 +31,12 @@ export function ProviderModelSelector({
   provider,
   onModelSelect,
   selectedModel,
+  workspaceId,
 }: ProviderModelSelectorProps) {
   const { t } = useI18n();
   const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.providers.models(provider),
-    queryFn: () => fetchProviderModels(provider),
+    queryKey: queryKeys.providers.models(provider, workspaceId),
+    queryFn: () => fetchProviderModels(provider, workspaceId),
     staleTime: 5 * 60 * 1000, // 5 minutes
     retry: 1,
   });
@@ -138,11 +140,17 @@ export function ProviderModelComparison({
 /**
  * Inline model loader showing latest models from provider
  */
-export function ProviderModelsPreview({ provider }: { provider: string }) {
+export function ProviderModelsPreview({
+  provider,
+  workspaceId,
+}: {
+  provider: string;
+  workspaceId?: string | null;
+}) {
   const { t } = useI18n();
   const { data, isLoading } = useQuery({
-    queryKey: queryKeys.providers.models(provider),
-    queryFn: () => fetchProviderModels(provider),
+    queryKey: queryKeys.providers.models(provider, workspaceId),
+    queryFn: () => fetchProviderModels(provider, workspaceId),
     staleTime: 5 * 60 * 1000,
     retry: 1,
   });

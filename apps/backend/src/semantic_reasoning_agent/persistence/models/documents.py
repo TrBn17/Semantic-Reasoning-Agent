@@ -21,6 +21,9 @@ class DocumentORM(Base):
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     ingestion_options: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     source_url: Mapped[str] = mapped_column(Text)
+    source_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     binary_content: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -35,6 +38,16 @@ class DocumentORM(Base):
         back_populates="document",
         cascade="all, delete-orphan",
         order_by="DocumentChunkORM.chunk_index",
+    )
+    artifacts: Mapped[list["DocumentArtifactORM"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="DocumentArtifactORM.created_at",
+    )
+    extraction_runs: Mapped[list["DocumentExtractionRunORM"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="DocumentExtractionRunORM.created_at",
     )
 
 
@@ -85,3 +98,47 @@ class DocumentChunkORM(Base):
     column_headers: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     document: Mapped[DocumentORM] = relationship(back_populates="chunks")
+
+
+class DocumentArtifactORM(Base):
+    __tablename__ = "document_artifacts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    artifact_type: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    object_key: Mapped[str] = mapped_column(Text)
+    public_url: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(String(255))
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    document: Mapped[DocumentORM] = relationship(back_populates="artifacts")
+
+
+class DocumentExtractionRunORM(Base):
+    __tablename__ = "document_extraction_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    schema_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    result_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    parser_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    use_llm: Mapped[bool] = mapped_column(default=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    document: Mapped[DocumentORM] = relationship(back_populates="extraction_runs")

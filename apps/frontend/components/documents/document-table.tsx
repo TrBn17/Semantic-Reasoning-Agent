@@ -15,8 +15,10 @@ import { DocumentStatusBadge } from "@/components/documents/status-badges";
 import { listDocuments } from "@/lib/api/documents";
 import { queryKeys } from "@/lib/query/keys";
 import { formatDateTime } from "@/lib/utils";
+import { useI18n } from "@/src/shared/i18n/use-language";
 
 export function DocumentTable() {
+  const { t } = useI18n();
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.documents.list(),
     queryFn: listDocuments,
@@ -26,12 +28,12 @@ export function DocumentTable() {
   if (isLoading) return <Skeleton className="h-64 w-full" />;
   if (isError)
     return (
-      <p className="text-sm text-destructive">Failed to load documents.</p>
+      <p className="text-sm text-destructive">{t.documents.loadError}</p>
     );
   if (!data || data.length === 0)
     return (
       <p className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-        No documents yet. Upload a PDF, DOCX, or XLSX to start.
+        {t.documents.emptyTable}
       </p>
     );
 
@@ -40,11 +42,11 @@ export function DocumentTable() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Title</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Chunks</TableHead>
-            <TableHead>Updated</TableHead>
+            <TableHead>{t.documents.table.title}</TableHead>
+            <TableHead>{t.documents.table.type}</TableHead>
+            <TableHead>{t.documents.table.status}</TableHead>
+            <TableHead className="text-right">{t.documents.table.chunks}</TableHead>
+            <TableHead>{t.documents.table.updated}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

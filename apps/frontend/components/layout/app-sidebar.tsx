@@ -10,9 +10,9 @@ import {
   Home,
   MessageSquare,
   Network,
+  Bot,
   Settings,
   Workflow,
-  Wrench,
   Package,
   Plug,
   type LucideIcon,
@@ -86,12 +86,6 @@ function buildGroups(caps: ReturnType<typeof useCapabilities>): NavGroup[] {
           available: caps.workflowsAvailable,
         },
         {
-          href: "/tools",
-          label: "Tools",
-          icon: Wrench,
-          available: caps.toolsAvailable,
-        },
-        {
           href: "/connectors",
           label: "Connectors",
           icon: Plug,
@@ -113,6 +107,12 @@ function buildGroups(caps: ReturnType<typeof useCapabilities>): NavGroup[] {
     {
       label: "Admin",
       items: [
+        {
+          href: "/agents",
+          label: "Agents",
+          icon: Bot,
+          available: true,
+        },
         {
           href: "/settings",
           label: "Settings",
@@ -141,14 +141,14 @@ export function AppSidebar() {
           <div className="flex h-7 w-7 items-center justify-center rounded-md border bg-slate-100 shadow-sm dark:bg-slate-800/80">
             <Image
               src="/logo.svg"
-              alt="Semantic Agent logo"
+              alt={`${t.appName} logo`}
               width={16}
               height={16}
               className="object-contain"
               priority
             />
           </div>
-          <span className="truncate">Semantic Agent</span>
+          <span className="truncate">{t.appName}</span>
         </Link>
       </div>
       <nav className="flex-1 space-y-5 overflow-y-auto p-3">
@@ -210,8 +210,8 @@ function translateNavLabel(label: string, t: ReturnType<typeof useI18n>["t"]) {
     Evidence: t.nav.evidence,
     Ontology: t.nav.ontology,
     Graph: t.nav.graph,
+    Agents: "Agents",
     Workflows: t.nav.workflows,
-    Tools: t.nav.tools,
     Connectors: t.nav.connectors,
     Artifacts: t.nav.artifacts,
     Settings: t.nav.settings,

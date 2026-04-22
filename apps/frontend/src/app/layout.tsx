@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
@@ -18,6 +18,9 @@ export const metadata: Metadata = {
     shortcut: ["/logo-badge.svg"],
     apple: [{ url: "/logo-badge.svg" }],
   },
+};
+
+export const viewport: Viewport = {
   themeColor: "#111827",
 };
 

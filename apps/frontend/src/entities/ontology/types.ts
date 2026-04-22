@@ -13,8 +13,10 @@ export type GraphNodeViewModel = {
   id: string;
   name: string;
   entityType: string;
+  resolutionKey: string;
   aliases: string[];
   sourceDocumentId: string;
+  sourceBuildId: string;
 };
 
 export type GraphEdgeViewModel = {
@@ -24,4 +26,6 @@ export type GraphEdgeViewModel = {
   relationType: string;
   confidence: number;
   evidenceText?: string;
+  sourceBuildId: string;
+  sourceDocumentId: string;
 };

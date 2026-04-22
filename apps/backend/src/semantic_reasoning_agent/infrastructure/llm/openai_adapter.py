@@ -64,7 +64,21 @@ class OpenAIAdapter(ProviderAdapter):
         model: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        workspace_id: str | None = None,
+        model_config_service: Any | None = None,
     ) -> LLMResponse:
+        api_key = self._api_key
+        base_url = self._base_url
+
+        if workspace_id and model_config_service:
+            # Nếu có workspace_id, chúng ta lookup credentials mới nhất từ DB
+            # Điều này đảm bảo khi người dùng save settings, chat sẽ dùng key mới ngay
+            creds = model_config_service.get_provider_credentials(workspace_id)
+            p_creds = creds.get(self.provider)
+            if p_creds:
+                api_key = p_creds.get("api_key") or api_key
+                base_url = p_creds.get("base_url") or base_url
+
         wire_messages = _to_openai_messages(messages, system=system)
         wire_tools = [spec.to_openai_tool() for spec in tools]
 
@@ -78,7 +92,9 @@ class OpenAIAdapter(ProviderAdapter):
             kwargs["tools"] = wire_tools
             kwargs["tool_choice"] = _to_openai_tool_choice(tool_choice)
 
-        response = self._get_client().chat.completions.create(**kwargs)
+        import openai
+        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        response = client.chat.completions.create(**kwargs)
         return _parse_openai_response(response, model=model, provider=self.provider)
 
 

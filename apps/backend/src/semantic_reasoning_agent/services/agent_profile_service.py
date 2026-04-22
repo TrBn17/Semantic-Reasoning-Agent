@@ -9,11 +9,19 @@ from sqlalchemy.orm import selectinload
 from semantic_reasoning_agent.core.config import Settings, get_settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import AgentProfileORM, AgentProfileTaskModelORM
+from semantic_reasoning_agent.schemas.agent_capabilities import (
+    EvidencePolicySchema,
+    ToolPolicySchema,
+)
 from semantic_reasoning_agent.schemas.agent_profiles import (
     AgentProfileCreateRequest,
     AgentProfileResponse,
     AgentProfileTaskModelAssignment,
     AgentProfileUpdateRequest,
+)
+from semantic_reasoning_agent.services.agent_capability_service import (
+    merge_policy_config,
+    resolve_capability_config,
 )
 
 
@@ -60,7 +68,13 @@ class AgentProfileService:
                 allow_chat_model_override=payload.allow_chat_model_override,
                 is_default=payload.is_default,
                 status=payload.status,
-                policy_config=payload.policy_config,
+                policy_config=merge_policy_config(
+                    payload.policy_config,
+                    capability_preset=payload.capability_preset,
+                    tool_policy=payload.tool_policy,
+                    knowledge_pack_ids=payload.knowledge_pack_ids,
+                    evidence_policy=payload.evidence_policy,
+                ),
                 created_at=now,
                 updated_at=now,
             )
@@ -100,8 +114,13 @@ class AgentProfileService:
                 profile.allow_chat_model_override = payload.allow_chat_model_override
             if payload.status is not None:
                 profile.status = payload.status
-            if payload.policy_config is not None:
-                profile.policy_config = payload.policy_config
+            profile.policy_config = merge_policy_config(
+                payload.policy_config if payload.policy_config is not None else profile.policy_config,
+                capability_preset=payload.capability_preset,
+                tool_policy=payload.tool_policy,
+                knowledge_pack_ids=payload.knowledge_pack_ids,
+                evidence_policy=payload.evidence_policy,
+            )
             profile.updated_at = utc_now()
 
             if payload.task_models is not None:
@@ -170,6 +189,7 @@ class AgentProfileService:
 
     @staticmethod
     def _to_schema(profile: AgentProfileORM) -> AgentProfileResponse:
+        capability = resolve_capability_config(profile.policy_config)
         return AgentProfileResponse(
             id=profile.id,
             workspace_id=profile.workspace_id,
@@ -179,6 +199,10 @@ class AgentProfileService:
             allow_chat_model_override=profile.allow_chat_model_override,
             is_default=profile.is_default,
             status=profile.status,
+            capability_preset=capability.capability_preset,
+            tool_policy=ToolPolicySchema.model_validate(capability.tool_policy),
+            knowledge_pack_ids=list(capability.knowledge_pack_ids),
+            evidence_policy=EvidencePolicySchema.model_validate(capability.evidence_policy),
             policy_config=profile.policy_config or {},
             task_models=[
                 AgentProfileTaskModelAssignment(

@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { BuildStatusBadge } from "@/components/ontology/status-badges";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -19,10 +21,39 @@ import { formatDateTime } from "@/lib/utils";
 
 export function BuildTable({ limit }: { limit?: number }) {
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
+  const previousStatusesRef = useRef<Record<string, string>>({});
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
     queryFn: () => listBuilds(workspaceId ?? undefined),
+    refetchInterval: (query) => {
+      const builds = query.state.data ?? [];
+      return builds.some((build) => build.status === "pending" || build.status === "running")
+        ? 4000
+        : false;
+    },
   });
+
+  useEffect(() => {
+    if (!data || data.length === 0) return;
+
+    const previousStatuses = previousStatusesRef.current;
+    for (const build of data) {
+      const previousStatus = previousStatuses[build.id];
+      if (
+        previousStatus &&
+        (previousStatus === "pending" || previousStatus === "running") &&
+        build.status === "failed"
+      ) {
+        toast.error(
+          `Ontology build ${build.id.slice(0, 8)} failed: ${build.error_message ?? "Unknown error"}`,
+        );
+      }
+    }
+
+    previousStatusesRef.current = Object.fromEntries(
+      data.map((build) => [build.id, build.status]),
+    );
+  }, [data]);
 
   if (isLoading) return <Skeleton className="h-64 w-full" />;
   if (isError)
@@ -51,36 +82,44 @@ export function BuildTable({ limit }: { limit?: number }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((b) => (
-            <TableRow key={b.id}>
+          {rows.map((build) => (
+            <TableRow key={build.id}>
               <TableCell>
                 <Link
-                  href={`/ontology/builds/${b.id}`}
+                  href={`/ontology/builds/${build.id}`}
                   className="font-mono text-xs underline-offset-4 hover:underline"
                 >
-                  {b.id.slice(0, 8)}…
+                  {build.id.slice(0, 8)}...
                 </Link>
                 <div className="text-xs text-muted-foreground">
-                  doc {b.document_id.slice(0, 8)}…
+                  doc {build.document_id.slice(0, 8)}...
                 </div>
+                {build.ontology_title ? (
+                  <div className="mt-1 text-sm font-medium">{build.ontology_title}</div>
+                ) : null}
+                {build.status === "failed" && build.error_message && (
+                  <div className="mt-1 max-w-sm text-xs text-destructive">
+                    {build.error_message}
+                  </div>
+                )}
               </TableCell>
               <TableCell>
-                <BuildStatusBadge status={b.status} />
+                <BuildStatusBadge status={build.status} />
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
-                {b.domain ?? "—"}
+                {build.domain ?? "-"}
               </TableCell>
               <TableCell className="text-right font-mono">
-                {b.entity_count}
+                {build.entity_count}
               </TableCell>
               <TableCell className="text-right font-mono">
-                {b.relation_count}
+                {build.relation_count}
               </TableCell>
               <TableCell className="text-right font-mono">
-                {b.pending_entity_count + b.pending_relation_count}
+                {build.pending_entity_count + build.pending_relation_count}
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
-                {formatDateTime(b.updated_at)}
+                {formatDateTime(build.updated_at)}
               </TableCell>
             </TableRow>
           ))}

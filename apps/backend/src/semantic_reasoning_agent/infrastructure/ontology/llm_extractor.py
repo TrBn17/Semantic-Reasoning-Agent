@@ -7,12 +7,15 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError
 
 from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.domain.contracts.llm import LLMMessage
 from semantic_reasoning_agent.domain.ontology.models import (
     ExtractedEntity,
     ExtractedRelation,
     ExtractionResult,
+    OntologyNarrative,
     OntologySourceChunk,
 )
+from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.infrastructure.ontology.llm_prompts import (
     build_open_domain_prompt,
 )
@@ -46,6 +49,11 @@ class _LLMExtraction(BaseModel):
     relations: list[_LLMRelation] = Field(default_factory=list)
 
 
+class _LLMOntologyNarrative(BaseModel):
+    title: str = "Ontology"
+    summary: str = ""
+
+
 class OpenDomainLLMExtractor:
     """LLM-only ontology extractor. No regex patterns, no hardcoded entity
     or relation types, no fixed domain enum.
@@ -60,10 +68,12 @@ class OpenDomainLLMExtractor:
         settings: Settings,
         model_config_service: TaskModelResolverPort,
         schema_registry: OntologySchemaRegistry,
+        adapter_registry: AdapterRegistry,
     ) -> None:
         self._settings = settings
         self._model_config_service = model_config_service
         self._schema_registry = schema_registry
+        self._adapter_registry = adapter_registry
 
     def classify_document_domain(self, chunks: list[OntologySourceChunk]) -> str:
         """Domain is emitted by the LLM in the same call as entities/relations.
@@ -79,6 +89,8 @@ class OpenDomainLLMExtractor:
         self,
         chunks: list[OntologySourceChunk],
         workspace_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> ExtractionResult:
         if not self._settings.ontology_llm_enabled:
             return ExtractionResult(domain="disabled", entities=[], relations=[])
@@ -86,13 +98,11 @@ class OpenDomainLLMExtractor:
         if not chunks:
             return ExtractionResult(domain="general", entities=[], relations=[])
 
-        provider, model = self._model_config_service.resolve_task_model(
-            "ontology_extraction",
-            workspace_id,
-        )
-        if provider != "anthropic" or not self._model_config_service.is_ready(
-            provider, model, workspace_id
-        ):
+        resolved_provider = provider
+        resolved_model = model
+        if not resolved_provider or not resolved_model:
+            return ExtractionResult(domain="unconfigured", entities=[], relations=[])
+        if not self._model_config_service.is_ready(resolved_provider, resolved_model, workspace_id):
             return ExtractionResult(domain="unavailable", entities=[], relations=[])
 
         text = "\n\n".join(chunk.text for chunk in chunks[: self._settings.ontology_chunk_limit])
@@ -104,37 +114,78 @@ class OpenDomainLLMExtractor:
             known_relation_types=schema.relation_types,
             prompt_version=self._settings.ontology_prompt_version,
         )
-        payload = self._invoke_anthropic(prompt, model=model)
+        payload = self._invoke_model(
+            prompt,
+            provider=resolved_provider,
+            model=resolved_model,
+        )
         extraction = self._parse_payload(payload)
         return self._to_domain_result(
             extraction,
             chunks=chunks,
-            provider=provider,
-            model=model,
+            provider=resolved_provider,
+            model=resolved_model,
         )
 
-    def _invoke_anthropic(self, prompt: str, *, model: str) -> str:
-        from anthropic import Anthropic
+    def summarize_ontology(
+        self,
+        chunks: list[OntologySourceChunk],
+        *,
+        workspace_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        domain: str | None = None,
+    ) -> OntologyNarrative:
+        if not chunks:
+            return OntologyNarrative(title="Ontology", summary="")
 
-        client_kwargs: dict[str, str] = {}
-        if self._settings.anthropic_api_key:
-            client_kwargs["api_key"] = self._settings.anthropic_api_key
-        if self._settings.anthropic_base_url:
-            client_kwargs["base_url"] = self._settings.anthropic_base_url
+        resolved_provider = provider
+        resolved_model = model
+        if (
+            not self._settings.ontology_llm_enabled
+            or not resolved_provider
+            or not resolved_model
+            or not self._model_config_service.is_ready(
+                resolved_provider,
+                resolved_model,
+                workspace_id or self._settings.default_workspace_id,
+            )
+        ):
+            return self._fallback_narrative(chunks, domain=domain)
 
-        client = Anthropic(**client_kwargs)
-        response = client.messages.create(
-            model=model,
+        text = "\n\n".join(chunk.text for chunk in chunks[: self._settings.ontology_chunk_limit])
+        prompt = (
+            "You generate concise ontology metadata for a backend ontology build.\n"
+            "Return strict JSON with keys title and summary.\n"
+            "Rules:\n"
+            "- title: 3 to 8 words, descriptive, no quotes.\n"
+            "- summary: 1 sentence, <= 180 chars.\n"
+            "- reflect the document/topic, not generic AI language.\n"
+            f"- domain hint: {domain or 'general'}.\n\n"
+            f"Source text:\n{text}"
+        )
+        payload = self._invoke_model(prompt, provider=resolved_provider, model=resolved_model)
+        try:
+            narrative = _LLMOntologyNarrative.model_validate(json.loads(payload))
+        except (json.JSONDecodeError, ValidationError):
+            return self._fallback_narrative(chunks, domain=domain)
+        title = (narrative.title or "").strip() or "Ontology"
+        summary = (narrative.summary or "").strip()
+        return OntologyNarrative(title=title[:120], summary=summary[:280])
+
+    def _invoke_model(self, prompt: str, *, provider: str, model: str) -> str:
+        adapter = self._adapter_registry.get(provider)
+        if adapter is None:
+            return ""
+        response = adapter.run(
+            messages=[LLMMessage(role="user", content=prompt)],
+            tools=(),
+            tool_choice="none",
             max_tokens=3000,
             temperature=0,
-            messages=[{"role": "user", "content": prompt}],
+            model=model,
         )
-        texts = [
-            block.text
-            for block in response.content
-            if getattr(block, "type", "") == "text" and hasattr(block, "text")
-        ]
-        return "\n".join(texts).strip()
+        return (response.content or "").strip()
 
     @staticmethod
     def _parse_payload(payload: str) -> _LLMExtraction:
@@ -197,3 +248,19 @@ class OpenDomainLLMExtractor:
             entities=entities,
             relations=relations,
         )
+
+    @staticmethod
+    def _fallback_narrative(
+        chunks: list[OntologySourceChunk],
+        *,
+        domain: str | None = None,
+    ) -> OntologyNarrative:
+        text = " ".join(chunk.text for chunk in chunks[:2]).strip()
+        words = [word.strip(".,:;!?()[]{}\"'") for word in text.split()]
+        words = [word for word in words if word]
+        title_tokens = words[:5]
+        title = " ".join(title_tokens) if title_tokens else "Ontology"
+        if domain and domain not in {"general", "pending"}:
+            title = f"{domain.replace('_', ' ').title()} Ontology"
+        summary = text[:180]
+        return OntologyNarrative(title=title[:120], summary=summary[:280])

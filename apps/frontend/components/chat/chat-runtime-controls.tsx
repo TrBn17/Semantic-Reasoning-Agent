@@ -8,10 +8,14 @@ import {
   updateConversationModelSelection,
 } from "@/lib/api/conversations";
 import { listAgentProfiles } from "@/lib/api/agent-profiles";
-import type { ConversationResponse, ModelOption } from "@/lib/api/types";
+import type { ConversationResponse, SettingsModelOption } from "@/lib/api/types";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 import { Badge } from "@/components/ui/badge";
+import {
+  formatPresetLabel,
+  summarizeKnowledgeScope,
+} from "@/components/agents/model-picker";
 import {
   Select,
   SelectContent,
@@ -32,7 +36,7 @@ export function ChatRuntimeControls({
   onConversationChange,
 }: {
   conversation: ConversationResponse;
-  models: ModelOption[];
+  models: SettingsModelOption[];
   onConversationChange: (conversation: ConversationResponse) => void;
 }) {
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
@@ -65,7 +69,7 @@ export function ChatRuntimeControls({
     onError: (err) => toast.error(`Profile update failed: ${(err as Error).message}`),
   });
 
-  const grouped: Record<string, ModelOption[]> = {};
+  const grouped: Record<string, SettingsModelOption[]> = {};
   for (const opt of models) {
     grouped[opt.provider] = grouped[opt.provider] ?? [];
     grouped[opt.provider].push(opt);
@@ -89,7 +93,7 @@ export function ChatRuntimeControls({
           <SelectItem value="__workspace__">Workspace default</SelectItem>
           {(profiles ?? []).map((profile) => (
             <SelectItem key={profile.id} value={profile.id}>
-              {profile.name}
+              {`${profile.name} · ${formatPresetLabel(profile.capability_preset)} · ${summarizeKnowledgeScope(profile.knowledge_pack_ids.length)}`}
             </SelectItem>
           ))}
         </SelectContent>

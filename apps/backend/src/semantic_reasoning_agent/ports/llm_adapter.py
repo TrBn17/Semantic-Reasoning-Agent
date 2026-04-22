@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Sequence
+from typing import Any, Sequence
 
 from semantic_reasoning_agent.domain.contracts.llm import (
     LLMMessage,
@@ -14,7 +14,7 @@ from semantic_reasoning_agent.domain.contracts.tool_spec import ToolSpec
 class ProviderAdapter(ABC):
     """Unified function-calling interface across providers — AGENTS.md §9.
 
-    Every provider (Anthropic, OpenAI, Echo, …) must implement ``run()`` with
+    Every provider (Anthropic, OpenAI, …) must implement ``run()`` with
     the same shape. The agentic loop composes ``messages`` + ``tools`` and
     dispatches the returned ``LLMResponse.tool_calls`` through the
     ``ToolRuntime``. Tool schemas are serialized via ``ToolSpec.to_anthropic_tool``
@@ -34,6 +34,8 @@ class ProviderAdapter(ABC):
         model: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        workspace_id: str | None = None,
+        model_config_service: Any | None = None,
     ) -> LLMResponse:
         """Return the next assistant turn. May include text and/or tool calls."""
 

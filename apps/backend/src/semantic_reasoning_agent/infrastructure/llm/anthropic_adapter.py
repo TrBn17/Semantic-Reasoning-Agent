@@ -64,23 +64,37 @@ class AnthropicAdapter(ProviderAdapter):
         model: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        workspace_id: str | None = None,
+        model_config_service: Any | None = None,
     ) -> LLMResponse:
-        wire_messages = _to_anthropic_messages(messages)
+        api_key = self._api_key
+        base_url = self._base_url
+
+        if workspace_id and model_config_service:
+            creds = model_config_service.get_provider_credentials(workspace_id)
+            p_creds = creds.get(self.provider)
+            if p_creds:
+                api_key = p_creds.get("api_key") or api_key
+                base_url = p_creds.get("base_url") or base_url
+
+        wire_messages, wire_system = _to_anthropic_messages(messages, system=system)
         wire_tools = [spec.to_anthropic_tool() for spec in tools]
 
         kwargs: dict[str, Any] = {
             "model": model,
+            "messages": wire_messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "messages": wire_messages,
         }
-        if system:
-            kwargs["system"] = system
+        if wire_system:
+            kwargs["system"] = wire_system
         if wire_tools:
             kwargs["tools"] = wire_tools
             kwargs["tool_choice"] = _to_anthropic_tool_choice(tool_choice)
 
-        response = self._get_client().messages.create(**kwargs)
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
+        response = client.messages.create(**kwargs)
         return _parse_anthropic_response(response, model=model, provider=self.provider)
 
 

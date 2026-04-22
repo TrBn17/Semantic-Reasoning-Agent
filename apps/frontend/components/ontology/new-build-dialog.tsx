@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { listDocuments } from "@/lib/api/documents";
 import { createBuild } from "@/lib/api/ontology";
+import { listSettingsModels } from "@/lib/api/settings";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 
@@ -27,20 +28,30 @@ export function NewBuildDialog() {
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const [open, setOpen] = useState(false);
   const [documentIds, setDocumentIds] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
 
   const { data: documents } = useQuery({
     queryKey: queryKeys.documents.list(),
     queryFn: listDocuments,
   });
+  const { data: models = [] } = useQuery({
+    queryKey: queryKeys.settings.models(workspaceId),
+    queryFn: () => listSettingsModels(workspaceId),
+  });
 
   const mutation = useMutation({
     mutationFn: async () => {
       if (documentIds.length === 0) throw new Error("Pick at least one document");
+      if (!selectedModel) throw new Error("Pick an ontology model");
+      const [provider, model] = selectedModel.split("::");
+      if (!provider || !model) throw new Error("Invalid ontology model selection");
       const queued = await Promise.allSettled(
         documentIds.map((documentId) =>
           createBuild({
             document_id: documentId,
             workspace_id: workspaceId ?? undefined,
+            extraction_provider: provider,
+            extraction_model: model,
           }),
         ),
       );
@@ -76,11 +87,24 @@ export function NewBuildDialog() {
       }
 
       setDocumentIds([]);
+      setSelectedModel("");
     },
     onError: (err) => toast.error(`Build failed: ${(err as Error).message}`),
   });
 
   const indexed = (documents ?? []).filter((d) => d.status === "indexed");
+  const ontologyModels = models
+    .filter(
+      (model) =>
+        model.ready &&
+        model.supports_structured_output,
+    );
+
+  useEffect(() => {
+    if (selectedModel || ontologyModels.length === 0) return;
+    const first = ontologyModels[0];
+    setSelectedModel(`${first.provider}::${first.model}`);
+  }, [ontologyModels, selectedModel]);
   const toggleSelection = (documentId: string) => {
     setDocumentIds((current) =>
       current.includes(documentId)
@@ -105,6 +129,32 @@ export function NewBuildDialog() {
             and relations, then they land in the review queue.
           </DialogDescription>
         </DialogHeader>
+        <div className="space-y-2">
+          <Label htmlFor="ontology-model">Ontology model</Label>
+          <select
+            id="ontology-model"
+            className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+            value={selectedModel}
+            onChange={(event) => setSelectedModel(event.target.value)}
+          >
+            <option value="">Select an ontology model</option>
+            {ontologyModels.map((model) => (
+              <option key={`${model.provider}::${model.model}`} value={`${model.provider}::${model.model}`}>
+                {model.label} · {model.provider}
+              </option>
+            ))}
+          </select>
+          {selectedModel && (
+            <p className="text-xs text-muted-foreground">
+              This selection applies only to the builds queued from this dialog.
+            </p>
+          )}
+          {ontologyModels.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              No ready structured-output models are available. Configure one in Settings first.
+            </p>
+          )}
+        </div>
         <div className="space-y-2">
           <Label>Documents</Label>
           <ScrollArea className="h-56 rounded-md border">
@@ -150,7 +200,7 @@ export function NewBuildDialog() {
           </DialogClose>
           <Button
             onClick={() => mutation.mutate()}
-            disabled={documentIds.length === 0 || mutation.isPending}
+            disabled={documentIds.length === 0 || !selectedModel || mutation.isPending}
           >
             {mutation.isPending ? "Queueing..." : "Start selected builds"}
           </Button>

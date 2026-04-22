@@ -7,8 +7,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from semantic_reasoning_agent.entrypoints.dependencies import get_provider_models_service
-from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
+from semantic_reasoning_agent.entrypoints.dependencies import get_model_config_service
+from semantic_reasoning_agent.services.model_config_service import ModelConfigService
+
+from .route_metadata import INTERNAL_ROUTE
 
 
 class DynamicModelResponse(BaseModel):
@@ -33,10 +35,16 @@ class ProviderModelsResponse(BaseModel):
 router = APIRouter(tags=["providers"])
 
 
-@router.get("/providers/{provider}/models")
+@router.get(
+    "/providers/{provider}/models",
+    summary="Provider discovery by upstream provider",
+    description="Advanced discovery/debug endpoint. Standard frontend flows should use `/api/v1/settings/models` instead.",
+    openapi_extra=INTERNAL_ROUTE,
+)
 async def list_provider_models(
     provider: str,
-    service: ProviderModelsService = Depends(get_provider_models_service),
+    workspace_id: str | None = Query(default=None),
+    model_config_service: ModelConfigService = Depends(get_model_config_service),
 ) -> ProviderModelsResponse:
     """
     Fetch available models directly from a provider's API.
@@ -73,7 +81,7 @@ async def list_provider_models(
     ```
     """
     try:
-        models = await service.get_provider_models(provider.lower())
+        models = await model_config_service.list_provider_models(provider.lower(), workspace_id)
         return ProviderModelsResponse(
             provider=provider,
             models=[
@@ -94,10 +102,16 @@ async def list_provider_models(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/providers/models")
+@router.get(
+    "/providers/models",
+    summary="Provider discovery across providers",
+    description="Advanced discovery/debug endpoint. Standard frontend flows should use `/api/v1/settings` or `/api/v1/settings/models` instead.",
+    openapi_extra=INTERNAL_ROUTE,
+)
 async def list_all_provider_models(
     provider: str | None = Query(None),
-    service: ProviderModelsService = Depends(get_provider_models_service),
+    workspace_id: str | None = Query(default=None),
+    model_config_service: ModelConfigService = Depends(get_model_config_service),
 ) -> dict[str, ProviderModelsResponse]:
     """
     Fetch available models from all or specific provider(s).
@@ -130,7 +144,7 @@ async def list_all_provider_models(
     """
     try:
         if provider:
-            models = await service.get_provider_models(provider.lower())
+            models = await model_config_service.list_provider_models(provider.lower(), workspace_id)
             return {
                 provider: ProviderModelsResponse(
                     provider=provider,
@@ -148,7 +162,7 @@ async def list_all_provider_models(
                 )
             }
         else:
-            all_models = await service.get_all_provider_models()
+            all_models = await model_config_service.list_all_provider_models(workspace_id)
             return {
                 prov: ProviderModelsResponse(
                     provider=prov,

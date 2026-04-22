@@ -7,9 +7,7 @@ from semantic_reasoning_agent.documents.errors import UnsupportedDocumentTypeErr
 from semantic_reasoning_agent.documents.models import DocumentIngestionOptions, ParsedDocument
 from semantic_reasoning_agent.documents.parsers.base import DocumentParser
 from semantic_reasoning_agent.documents.parsers.csv_parser import CsvParser
-from semantic_reasoning_agent.documents.parsers.docx_parser import DocxParser
-from semantic_reasoning_agent.documents.parsers.pdf_marker_parser import PdfMarkerParser
-from semantic_reasoning_agent.documents.parsers.xlsx_parser import XlsxParser
+from semantic_reasoning_agent.documents.parsers.marker_document_parser import MarkerDocumentParser
 
 
 class DocumentParserRegistry:
@@ -33,21 +31,30 @@ class DocumentParserRegistry:
         parser = self._parser_map.get(document_type)
         if parser is None:
             raise UnsupportedDocumentTypeError(
-                f"Unsupported document type '{document_type}'. Supported types: pdf, docx, xlsx, csv."
+                f"Unsupported document type '{document_type}'. Supported types: pdf, docx, xlsx, pptx, html, epub, image, csv."
             )
         return parser.parse(filename, content, title, options=options)
 
     def supports(self, filename: str) -> bool:
         return Path(filename).suffix.lower().lstrip(".") in self._parser_map
 
+    def get_parser(self, filename: str) -> DocumentParser:
+        document_type = Path(filename).suffix.lower().lstrip(".")
+        parser = self._parser_map.get(document_type)
+        if parser is None:
+            raise UnsupportedDocumentTypeError(
+                f"Unsupported document type '{document_type}'. Supported types: pdf, docx, xlsx, pptx, html, epub, image, csv."
+            )
+        return parser
+
+    def supported_types(self) -> tuple[str, ...]:
+        return tuple(sorted(self._parser_map.keys()))
+
 
 def build_document_parser(settings: Settings) -> DocumentParserRegistry:
-    del settings
     return DocumentParserRegistry(
         [
-            PdfMarkerParser(),
-            DocxParser(),
-            XlsxParser(),
+            MarkerDocumentParser(settings),
             CsvParser(),
         ]
     )

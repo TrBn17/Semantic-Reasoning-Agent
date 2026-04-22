@@ -1,7 +1,18 @@
-from .agent_profiles import AgentProfileORM, AgentProfileTaskModelORM
+from .agent_profiles import (
+    AgentProfileORM,
+    AgentProfileTaskModelORM,
+    KnowledgePackDocumentORM,
+    KnowledgePackORM,
+)
 from .base import Base, utc_now
 from .conversations import ConversationORM, MessageORM
-from .documents import DocumentChunkORM, DocumentJobORM, DocumentORM
+from .documents import (
+    DocumentArtifactORM,
+    DocumentChunkORM,
+    DocumentExtractionRunORM,
+    DocumentJobORM,
+    DocumentORM,
+)
 from .ontology import (
     OntologyBuildORM,
     OntologyBuildStepORM,
@@ -9,6 +20,7 @@ from .ontology import (
     OntologyCandidateRelationORM,
     OntologyEntityORM,
     OntologyEntityTypeDefinitionORM,
+    OntologyGraphDraftORM,
     OntologyRelationORM,
     OntologyRelationTypeDefinitionORM,
     OntologyVersionORM,
@@ -20,17 +32,22 @@ __all__ = [
     "utc_now",
     "AgentProfileORM",
     "AgentProfileTaskModelORM",
+    "KnowledgePackORM",
+    "KnowledgePackDocumentORM",
     "ConversationORM",
     "MessageORM",
     "DocumentORM",
     "DocumentJobORM",
     "DocumentChunkORM",
+    "DocumentArtifactORM",
+    "DocumentExtractionRunORM",
     "OntologyBuildORM",
     "OntologyBuildStepORM",
     "OntologyCandidateEntityORM",
     "OntologyCandidateRelationORM",
     "OntologyEntityORM",
     "OntologyEntityTypeDefinitionORM",
+    "OntologyGraphDraftORM",
     "OntologyRelationORM",
     "OntologyRelationTypeDefinitionORM",
     "OntologyVersionORM",

@@ -1,9 +1,12 @@
 from semantic_reasoning_agent.core.container import get_app_container
 from semantic_reasoning_agent.documents.service import DocumentService
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
+from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService
 from semantic_reasoning_agent.services.conversation_service import ConversationService
+from semantic_reasoning_agent.services.agent_capability_service import AgentCapabilityService
 from semantic_reasoning_agent.services.agent_profile_service import AgentProfileService
+from semantic_reasoning_agent.services.knowledge_pack_service import KnowledgePackService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
@@ -15,12 +18,24 @@ from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
 from semantic_reasoning_agent.services.workflow_registry_service import WorkflowRegistryService
 
 
+def get_database_manager() -> DatabaseManager:
+    return get_app_container().database_manager
+
+
 def get_conversation_service() -> ConversationService:
     return get_app_container().conversation_service
 
 
 def get_agent_profile_service() -> AgentProfileService:
     return get_app_container().agent_profile_service
+
+
+def get_knowledge_pack_service() -> KnowledgePackService:
+    return get_app_container().knowledge_pack_service
+
+
+def get_agent_capability_service() -> AgentCapabilityService:
+    return get_app_container().agent_capability_service
 
 
 def get_model_config_service() -> ModelConfigService:

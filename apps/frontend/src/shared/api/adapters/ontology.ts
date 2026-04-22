@@ -45,8 +45,10 @@ export function entityToNode(e: OntologyEntityResponse): GraphNodeViewModel {
     id: e.id,
     name: e.name,
     entityType: e.entity_type,
+    resolutionKey: e.resolution_key,
     aliases: e.aliases,
     sourceDocumentId: e.source_document_id,
+    sourceBuildId: e.source_build_id,
   };
 }
 
@@ -58,5 +60,7 @@ export function relationToEdge(r: OntologyRelationResponse): GraphEdgeViewModel 
     relationType: r.relation_type,
     confidence: r.confidence,
     evidenceText: r.evidence_text,
+    sourceBuildId: r.source_build_id,
+    sourceDocumentId: r.source_document_id,
   };
 }

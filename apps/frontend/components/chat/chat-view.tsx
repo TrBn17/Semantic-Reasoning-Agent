@@ -13,7 +13,7 @@ import { MessageThread } from "@/components/chat/message-thread";
 import { Skeleton } from "@/components/ui/skeleton";
 import { sendMessage } from "@/lib/api/chat";
 import { getConversation } from "@/lib/api/conversations";
-import { listModels } from "@/lib/api/models";
+import { listSettingsModels } from "@/lib/api/settings";
 import { queryKeys } from "@/lib/query/keys";
 import { useWorkspaceStore } from "@/lib/state/workspace-store";
 import type { Citation } from "@/lib/api/types";
@@ -37,8 +37,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   });
 
   const { data: models = [] } = useQuery({
-    queryKey: [...queryKeys.models, workspaceId ?? null],
-    queryFn: () => listModels(workspaceId),
+    queryKey: queryKeys.settings.models(workspaceId),
+    queryFn: () => listSettingsModels(workspaceId),
   });
 
   const mutation = useMutation({
