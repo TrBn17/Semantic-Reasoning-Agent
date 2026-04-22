@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from semantic_reasoning_agent.core.config import get_settings
 from semantic_reasoning_agent.entrypoints.dependencies import get_database_manager

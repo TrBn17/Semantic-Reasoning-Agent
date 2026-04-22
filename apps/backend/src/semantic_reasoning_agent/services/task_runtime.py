@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import uuid4
 
 from semantic_reasoning_agent.core.config import Settings
@@ -30,6 +30,7 @@ class TaskRuntimeResult:
     citations: list[Citation]
     evidence: list[EvidenceSchema]
     next_action_hints: list[str]
+    tool_calls: list[dict[str, str | int | None]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

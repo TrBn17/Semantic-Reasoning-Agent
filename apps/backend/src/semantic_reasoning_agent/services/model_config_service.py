@@ -60,18 +60,6 @@ class ProviderSpec:
     fields: tuple[ProviderFieldSpec, ...]
 
 
-@dataclass(frozen=True)
-class ModelSpec:
-    provider: str
-    model: str
-    label: str
-    description: str
-    context_window: int | None
-    supports_streaming: bool
-    supports_structured_output: bool
-    recommended_for: tuple[TaskType, ...]
-
-
 TASK_DEFINITIONS: tuple[TaskDefinition, ...] = (
     TaskDefinition(
         task_type="chat",
@@ -203,7 +191,6 @@ PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ),
 )
 
-MODEL_SPECS: tuple[ModelSpec, ...] = ()  # Legacy: now using ProviderModelsService for dynamic models
 USE_CASE_BY_TASK_TYPE: dict[TaskType, str] = {
     "chat": "chat_default",
     "retrieval": "retrieval_answer_default",
@@ -695,46 +682,6 @@ class ModelConfigService:
             required_env_fields=[],
             missing_env_fields=[],
             reason="Ready to use." if supports_runtime else "Echo adapter is not available.",
-        )
-
-    def _build_model_option(
-        self,
-        spec: ModelSpec,
-        provider_configs: dict[str, ProviderConfigORM],
-        workspace_id: str,
-    ) -> ModelOption:
-        provider_spec = next(item for item in PROVIDER_SPECS if item.provider == spec.provider)
-        provider_config = provider_configs.get(spec.provider)
-        enabled = provider_config.enabled if provider_config is not None else True
-        missing_env_fields = self._missing_env_fields(provider_spec, provider_config, workspace_id)
-        supports_runtime = self._adapter_registry.get(spec.provider) is not None
-        if not enabled:
-            ready = False
-            reason = "Provider đang bị tắt trong agent settings."
-        elif missing_env_fields:
-            ready = False
-            reason = f"Thiếu cấu hình: {', '.join(missing_env_fields)}."
-        elif not supports_runtime:
-            ready = False
-            reason = "Đã có cấu hình nhưng adapter runtime chưa được implement trong backend."
-        else:
-            ready = True
-            reason = "Sẵn sàng sử dụng."
-        return ModelOption(
-            provider=spec.provider,
-            model=spec.model,
-            label=spec.label,
-            description=spec.description,
-            ready=ready,
-            enabled=enabled,
-            supports_runtime=supports_runtime,
-            supports_streaming=spec.supports_streaming,
-            supports_structured_output=spec.supports_structured_output,
-            context_window=spec.context_window,
-            recommended_for=list(spec.recommended_for),
-            required_env_fields=[field.key for field in provider_spec.fields],
-            missing_env_fields=missing_env_fields,
-            reason=reason,
         )
 
     def _build_provider_response(
