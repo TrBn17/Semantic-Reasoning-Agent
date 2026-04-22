@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { MessageSquare, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { formatPresetLabel, summarizeKnowledgeScope } from "@/components/agents/model-picker";
 import {
   Select,
   SelectContent,
@@ -68,7 +69,7 @@ export default function ChatLandingPage() {
             <SelectItem value="__default__">Workspace default</SelectItem>
             {(profiles ?? []).map((profile) => (
               <SelectItem key={profile.id} value={profile.id}>
-                {profile.name}
+                {`${profile.name} · ${formatPresetLabel(profile.capability_preset)} · ${summarizeKnowledgeScope(profile.knowledge_pack_ids.length)}`}
               </SelectItem>
             ))}
           </SelectContent>

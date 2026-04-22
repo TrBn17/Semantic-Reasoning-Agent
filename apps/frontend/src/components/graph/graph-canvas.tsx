@@ -20,10 +20,14 @@ export function GraphCanvas({
   nodes,
   edges,
   onSelect,
+  onNodeRename,
+  onEdgeRename,
 }: {
   nodes: GraphNodeViewModel[];
   edges: GraphEdgeViewModel[];
   onSelect?: (selection: Selection) => void;
+  onNodeRename?: (node: GraphNodeViewModel) => void;
+  onEdgeRename?: (edge: GraphEdgeViewModel) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
@@ -128,13 +132,23 @@ export function GraphCanvas({
     cy.on("tap", (evt) => {
       if (evt.target === cy) onSelect?.(null);
     });
+    cy.on("dbltap", "node", (evt) => {
+      const node = evt.target as NodeSingular;
+      const ref = node.data("ref") as GraphNodeViewModel;
+      onNodeRename?.(ref);
+    });
+    cy.on("dbltap", "edge", (evt) => {
+      const edge = evt.target as EdgeSingular;
+      const ref = edge.data("ref") as GraphEdgeViewModel;
+      onEdgeRename?.(ref);
+    });
 
     cyRef.current = cy;
     return () => {
       cy.destroy();
       cyRef.current = null;
     };
-  }, [nodes, edges, onSelect]);
+  }, [nodes, edges, onEdgeRename, onNodeRename, onSelect]);
 
   return <div ref={hostRef} className="h-full min-h-[400px] w-full" />;
 }

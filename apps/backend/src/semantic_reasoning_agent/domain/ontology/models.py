@@ -38,6 +38,12 @@ class ExtractionResult:
 
 
 @dataclass(slots=True)
+class OntologyNarrative:
+    title: str
+    summary: str
+
+
+@dataclass(slots=True)
 class OntologySourceChunk:
     chunk_id: str
     text: str

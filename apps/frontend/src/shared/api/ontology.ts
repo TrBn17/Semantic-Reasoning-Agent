@@ -3,7 +3,9 @@ import type {
   OntologyBuildCreateRequest,
   OntologyBuildResponse,
   OntologyCandidateEntityResponse,
+  OntologyCandidateEntityUpdateRequest,
   OntologyCandidateRelationResponse,
+  OntologyCandidateRelationUpdateRequest,
   OntologyGraphResponse,
   OntologyPublishResponse,
   OntologyReviewRequest,
@@ -72,6 +74,26 @@ export function reviewEntity(
 ): Promise<OntologyCandidateEntityResponse> {
   return apiFetch<OntologyCandidateEntityResponse>(`/ontology/entities/${entityId}/review`, {
     method: "POST",
+    body,
+  });
+}
+
+export function updateEntity(
+  entityId: string,
+  body: OntologyCandidateEntityUpdateRequest,
+): Promise<OntologyCandidateEntityResponse> {
+  return apiFetch<OntologyCandidateEntityResponse>(`/ontology/entities/${entityId}`, {
+    method: "PATCH",
+    body,
+  });
+}
+
+export function updateRelation(
+  relationId: string,
+  body: OntologyCandidateRelationUpdateRequest,
+): Promise<OntologyCandidateRelationResponse> {
+  return apiFetch<OntologyCandidateRelationResponse>(`/ontology/relations/${relationId}`, {
+    method: "PATCH",
     body,
   });
 }

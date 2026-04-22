@@ -229,6 +229,49 @@ export interface AgentProfileToolAssignment {
   enabled: boolean;
 }
 
+export interface ToolPolicySchema {
+  mode: string;
+  allowed_tools: string[];
+  blocked_tools: string[];
+}
+
+export interface EvidencePolicySchema {
+  allowed_sources: string[];
+  allow_model_only_fallback: boolean;
+}
+
+export interface AgentCapabilityConfigSchema {
+  capability_preset: string;
+  tool_policy: ToolPolicySchema;
+  knowledge_pack_ids: string[];
+  evidence_policy: EvidencePolicySchema;
+}
+
+export interface AgentCapabilityPresetSchema {
+  preset: string;
+  label: string;
+  description: string;
+  allowed_tool_families: string[];
+  default_tool_order: string[];
+  ontology_enabled: boolean;
+  graph_enabled: boolean;
+  external_tools_allowed: boolean;
+}
+
+export interface AgentCapabilityCatalogResponse {
+  presets: AgentCapabilityPresetSchema[];
+  tool_families: Record<string, Array<Record<string, string>>>;
+}
+
+export interface AgentCapabilityToolSchema {
+  tool_name: string;
+  label: string;
+  family: string;
+  description: string;
+  risk_level: string;
+  requires_confirmation: boolean;
+}
+
 export interface AgentProfileResponse {
   id: string;
   workspace_id: string;
@@ -239,6 +282,10 @@ export interface AgentProfileResponse {
   is_default: boolean;
   status: string;
   policy_config: Record<string, unknown>;
+  capability_preset: string;
+  tool_policy: ToolPolicySchema;
+  knowledge_pack_ids: string[];
+  evidence_policy: EvidencePolicySchema;
   task_models: AgentProfileTaskModelAssignment[];
   tool_assignments: AgentProfileToolAssignment[];
   created_at: string;
@@ -254,6 +301,10 @@ export interface AgentProfileCreateRequest {
   is_default?: boolean;
   status?: string;
   policy_config?: Record<string, unknown>;
+  capability_preset?: string;
+  tool_policy?: ToolPolicySchema;
+  knowledge_pack_ids?: string[];
+  evidence_policy?: EvidencePolicySchema;
   task_models?: AgentProfileTaskModelAssignment[];
   tool_assignments?: AgentProfileToolAssignment[];
 }
@@ -265,8 +316,111 @@ export interface AgentProfileUpdateRequest {
   allow_chat_model_override?: boolean;
   status?: string;
   policy_config?: Record<string, unknown>;
+  capability_preset?: string;
+  tool_policy?: ToolPolicySchema;
+  knowledge_pack_ids?: string[];
+  evidence_policy?: EvidencePolicySchema;
   task_models?: AgentProfileTaskModelAssignment[];
   tool_assignments?: AgentProfileToolAssignment[];
+}
+
+export interface SettingsModelOption {
+  provider: string;
+  model: string;
+  label: string;
+  description: string;
+  ready: boolean;
+  reason: string;
+  supports_streaming: boolean;
+  supports_structured_output: boolean;
+  context_window?: number | null;
+}
+
+export interface SettingsProviderFieldValue {
+  key: string;
+  configured: boolean;
+  source: "database" | "runtime" | "missing";
+  display_value: string;
+}
+
+export interface SettingsProviderResponse {
+  provider: string;
+  label: string;
+  enabled: boolean;
+  ready: boolean;
+  status_text: string;
+  fields: ProviderFieldDefinition[];
+  values: SettingsProviderFieldValue[];
+}
+
+export type SettingsUseCase =
+  | "chat_default"
+  | "retrieval_answer_default"
+  | "ontology_extraction_default"
+  | "narrative_default"
+  | "dashboard_default";
+
+export interface SettingsTaskDefaultResponse {
+  use_case: SettingsUseCase;
+  task_type: string;
+  label: string;
+  description: string;
+  provider: string;
+  model: string;
+  ready: boolean;
+  reason: string;
+}
+
+export interface SettingsTaskDefaultUpdate {
+  use_case: SettingsUseCase;
+  provider: string;
+  model: string;
+}
+
+export interface SettingsProviderUpdate {
+  provider: string;
+  enabled: boolean;
+  values: Record<string, string>;
+}
+
+export interface SettingsResponse {
+  workspace: WorkspaceSummary;
+  providers: SettingsProviderResponse[];
+  model_catalog: SettingsModelOption[];
+  task_defaults: SettingsTaskDefaultResponse[];
+  preferred_default_chat_model?: SettingsModelOption | null;
+}
+
+export interface SettingsUpdateRequest {
+  workspace_id: string;
+  providers: SettingsProviderUpdate[];
+  task_defaults: SettingsTaskDefaultUpdate[];
+}
+
+export interface KnowledgePackResponse {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string;
+  document_ids: string[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgePackCreateRequest {
+  workspace_id: string;
+  name: string;
+  description?: string;
+  document_ids?: string[];
+  status?: string;
+}
+
+export interface KnowledgePackUpdateRequest {
+  name?: string;
+  description?: string;
+  document_ids?: string[];
+  status?: string;
 }
 
 export interface DocumentResponse {
@@ -308,6 +462,31 @@ export interface DocumentUploadFailure {
 export interface DocumentBatchUploadResponse {
   uploaded: DocumentResponse[];
   failed: DocumentUploadFailure[];
+}
+
+export interface DocumentOptionChoice {
+  value: string;
+  label: string;
+  description?: string | null;
+}
+
+export interface DocumentIngestionOptionsResponse {
+  pdf_mode: string;
+  output_format: string;
+  use_llm: boolean;
+  force_ocr: boolean;
+  strip_existing_ocr: boolean;
+  extract_images: boolean;
+}
+
+export interface DocumentIngestionCapabilitiesResponse {
+  supported_types: string[];
+  marker_supported_types: string[];
+  csv_supported_types: string[];
+  default_options: DocumentIngestionOptionsResponse;
+  pdf_mode_options: DocumentOptionChoice[];
+  output_format_options: DocumentOptionChoice[];
+  supports_extract_images: boolean;
 }
 
 export interface RetrievalResult {
@@ -401,6 +580,7 @@ export interface OntologyBuildResponse {
   workspace_id: string;
   status: OntologyBuildStatus;
   domain?: string | null;
+  ontology_title?: string | null;
   provider?: string | null;
   model?: string | null;
   created_at: string;
@@ -418,6 +598,28 @@ export interface OntologyBuildResponse {
 
 export interface OntologyReviewRequest {
   action: OntologyReviewAction;
+}
+
+export interface OntologyCandidateEntityUpdateRequest {
+  name?: string | null;
+  canonical_name?: string | null;
+  resolution_key?: string | null;
+  entity_type?: string | null;
+  aliases?: string[] | null;
+  evidence_text?: string | null;
+  confidence?: number | null;
+  status?: OntologyReviewStatus | null;
+}
+
+export interface OntologyCandidateRelationUpdateRequest {
+  source_entity_id?: string | null;
+  target_entity_id?: string | null;
+  source_name?: string | null;
+  target_name?: string | null;
+  relation_type?: string | null;
+  evidence_text?: string | null;
+  confidence?: number | null;
+  status?: OntologyReviewStatus | null;
 }
 
 export interface OntologyVersionResponse {

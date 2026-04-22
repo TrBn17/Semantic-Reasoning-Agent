@@ -37,6 +37,23 @@ export const queryKeys = {
     list: () => ["workflows", "list"] as const,
     runs: () => ["workflows", "runs"] as const,
   },
+  settings: {
+    all: ["settings"] as const,
+    bootstrap: (workspaceId?: string | null) =>
+      ["settings", "bootstrap", workspaceId ?? null] as const,
+    models: (workspaceId?: string | null) =>
+      ["settings", "models", workspaceId ?? null] as const,
+  },
+  knowledgePacks: {
+    all: ["knowledge-packs"] as const,
+    list: (workspaceId?: string | null) =>
+      ["knowledge-packs", "list", workspaceId ?? null] as const,
+  },
+  capabilities: {
+    all: ["agent-capabilities"] as const,
+    catalog: () => ["agent-capabilities", "catalog"] as const,
+    tools: () => ["agent-capabilities", "tools"] as const,
+  },
   ontology: {
     all: ["ontology"] as const,
     graph: (workspaceId?: string) => ["ontology", "graph", workspaceId ?? null] as const,

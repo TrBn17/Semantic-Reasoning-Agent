@@ -10,11 +10,18 @@ from semantic_reasoning_agent.schemas.retrieval import (
 )
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 
+from .route_metadata import INTERNAL_ROUTE, PUBLIC_ROUTE
+
 
 router = APIRouter()
 
 
-@router.post("/search", response_model=RetrievalSearchResponse)
+@router.post(
+    "/search",
+    response_model=RetrievalSearchResponse,
+    summary="Search indexed workspace documents",
+    openapi_extra=PUBLIC_ROUTE,
+)
 def search_documents(
     payload: RetrievalSearchRequest,
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
@@ -27,7 +34,16 @@ def search_documents(
     )
 
 
-@router.post("/reindex", response_model=RetrievalReindexResponse)
+@router.post(
+    "/reindex",
+    response_model=RetrievalReindexResponse,
+    summary="Bulk retrieval index refresh",
+    description=(
+        "Internal/admin endpoint for bulk retrieval refresh. Use document-specific "
+        "`/api/v1/documents/{id}/reprocess` for normal frontend reruns of the document pipeline."
+    ),
+    openapi_extra=INTERNAL_ROUTE,
+)
 def reindex_documents(
     payload: RetrievalReindexRequest,
     document_service: DocumentService = Depends(get_document_service),

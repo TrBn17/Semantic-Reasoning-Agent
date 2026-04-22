@@ -19,8 +19,11 @@ class OntologyBuildORM(Base):
     workspace_id: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
     domain: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ontology_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ontology_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    merge_mode: Mapped[str] = mapped_column(String(32), default="append")
+    extraction_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    extraction_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -125,6 +128,8 @@ class OntologyVersionORM(Base):
     workspace_id: Mapped[str] = mapped_column(String(64), index=True)
     version_number: Mapped[int] = mapped_column(Integer)
     source_build_id: Mapped[str] = mapped_column(String(64), index=True)
+    ontology_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ontology_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     entities: Mapped[list["OntologyEntityORM"]] = relationship(
@@ -229,3 +234,18 @@ class OntologyRelationORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     version: Mapped[OntologyVersionORM] = relationship(back_populates="relations")
+
+
+class OntologyGraphDraftORM(Base):
+    __tablename__ = "ontology_graph_drafts"
+
+    workspace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    based_on_version_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ontology_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ontology_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    node_patches: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    relation_patches: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    entity_type_patches: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    relation_type_patches: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

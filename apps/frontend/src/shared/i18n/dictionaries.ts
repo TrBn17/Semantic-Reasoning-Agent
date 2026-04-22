@@ -8,6 +8,26 @@ export type Dictionary = {
     vietnamese: string;
   };
   workspaceControlPlane: string;
+  common: {
+    cancel: string;
+    save: string;
+    close: string;
+    delete: string;
+    edit: string;
+    create: string;
+    upload: string;
+    loading: string;
+    error: string;
+    success: string;
+    warning: string;
+    entities: string;
+    relations: string;
+    published: string;
+    search: string;
+    results: string;
+    result: string;
+    noMatches: string;
+  };
   nav: {
     work: string;
     knowledge: string;
@@ -55,6 +75,76 @@ export type Dictionary = {
       description: string;
     };
   };
+  workspaceSwitcher: {
+    label: string;
+    switchWorkspace: string;
+    createWorkspace: string;
+    createTitle: string;
+    createDescription: string;
+    workspaceIdLabel: string;
+    workspaceIdPlaceholder: string;
+    workspaceIdHint: string;
+    createAndSwitch: string;
+    toasts: {
+      idRequired: string;
+      switchedTo: string;
+    };
+  };
+  documents: {
+    uploadTitle: string;
+    uploadDescription: string;
+    fileLabel: string;
+    pdfModeLabel: string;
+    pdfModeFast: string;
+    pdfModeAccurate: string;
+    outputFormatLabel: string;
+    outputFormatMarkdown: string;
+    outputFormatHtml: string;
+    outputFormatJson: string;
+    outputFormatChunks: string;
+    outputFormatHint: string;
+    extractImagesLabel: string;
+    extractImagesHint: string;
+    tagsLabel: string;
+    tagsPlaceholder: string;
+    uploading: string;
+    uploadSelected: string;
+    selectedFiles: string;
+    emptyTable: string;
+    loadError: string;
+    table: {
+      title: string;
+      type: string;
+      status: string;
+      chunks: string;
+      updated: string;
+    };
+    toasts: {
+      selectFile: string;
+      uploadSuccess: string;
+      uploadPartial: string;
+      uploadFailed: string;
+    };
+  };
+  chat: {
+    useRetrieval: string;
+    topK: string;
+    documentIds: string;
+    documentIdsPlaceholder: string;
+    messagePlaceholder: string;
+    send: string;
+  };
+  retrieval: {
+    title: string;
+    description: string;
+    queryLabel: string;
+    queryPlaceholder: string;
+    topKLabel: string;
+    docIdsLabel: string;
+    docIdsPlaceholder: string;
+    searchFailed: string;
+    noMatches: string;
+  };
   settingsPage: {
     title: string;
     description: string;
@@ -101,6 +191,14 @@ export type Dictionary = {
       missing: string;
       currentPrefix: string;
       anthropicCatalogHint: string;
+      addProvider: string;
+      editProvider: string;
+      activeProviders: string;
+      configured: string;
+      notConfigured: string;
+      allActive: string;
+      noActive: string;
+      toggleHint: string;
     };
     profiles: {
       title: string;
@@ -118,6 +216,8 @@ export type Dictionary = {
       systemPromptLabel: string;
       systemPromptPlaceholder: string;
       allowChatOverride: string;
+      noOverrides: string;
+      allTasksOverridden: string;
     };
     taskRouting: {
       title: string;
@@ -131,6 +231,13 @@ export type Dictionary = {
       noStreaming: string;
       noModelSelected: string;
       na: string;
+      providerOff: string;
+      missingFieldsPrefix: string;
+      notSupportedByProvider: string;
+      readyToUse: string;
+      notSupportedByModel: string;
+      allTasksConfigured: string;
+      noGlobalRouting: string;
     };
     modelCatalog: {
       title: string;
@@ -169,6 +276,26 @@ export const dictionaries: Record<Language, Dictionary> = {
       vietnamese: "Vietnamese",
     },
     workspaceControlPlane: "Workspace control plane",
+    common: {
+      cancel: "Cancel",
+      save: "Save",
+      close: "Close",
+      delete: "Delete",
+      edit: "Edit",
+      create: "Create",
+      upload: "Upload",
+      loading: "Loading",
+      error: "Error",
+      success: "Success",
+      warning: "Warning",
+      entities: "entities",
+      relations: "relations",
+      published: "published",
+      search: "Search",
+      results: "results",
+      result: "result",
+      noMatches: "No matches.",
+    },
     nav: {
       work: "Work",
       knowledge: "Knowledge",
@@ -229,6 +356,76 @@ export const dictionaries: Record<Language, Dictionary> = {
           "Task runtime, workflow catalog, and artifact generation will surface here once the backend control plane exposes them.",
       },
     },
+    workspaceSwitcher: {
+      label: "Workspace",
+      switchWorkspace: "Switch Workspace",
+      createWorkspace: "Create Workspace",
+      createTitle: "Create New Workspace",
+      createDescription: "Each workspace has its own independent ontology, documents, and settings.",
+      workspaceIdLabel: "Workspace ID (slug)",
+      workspaceIdPlaceholder: "e.g. project-x, financial-analysis",
+      workspaceIdHint: "Lowercase, no spaces. This will be used in Neo4j and SQL.",
+      createAndSwitch: "Create & Switch",
+      toasts: {
+        idRequired: "Workspace ID is required",
+        switchedTo: "Switched to workspace:",
+      },
+    },
+    documents: {
+      uploadTitle: "Upload a document",
+      uploadDescription: "PDF, DOCX, XLSX, or CSV. Parsed and indexed by the ingestion worker.",
+      fileLabel: "File",
+      pdfModeLabel: "PDF mode",
+      pdfModeFast: "Fast",
+      pdfModeAccurate: "Accurate",
+      outputFormatLabel: "Output format",
+      outputFormatMarkdown: "Markdown",
+      outputFormatHtml: "HTML",
+      outputFormatJson: "JSON",
+      outputFormatChunks: "Chunks",
+      outputFormatHint: "Choose how Marker should render the source before chunking and artifact export.",
+      extractImagesLabel: "Extract embedded images",
+      extractImagesHint: "Store image artifacts when Marker detects figures or inline visuals.",
+      tagsLabel: "Tags (comma separated)",
+      tagsPlaceholder: "e.g. policy,2025",
+      uploading: "Uploading...",
+      uploadSelected: "Upload selected",
+      selectedFiles: "Selected {count} file(s)",
+      emptyTable: "No documents yet. Upload a PDF, DOCX, or XLSX to start.",
+      loadError: "Failed to load documents.",
+      table: {
+        title: "Title",
+        type: "Type",
+        status: "Status",
+        chunks: "Chunks",
+        updated: "Updated",
+      },
+      toasts: {
+        selectFile: "Select at least one file to upload",
+        uploadSuccess: "Uploaded {count} file(s)",
+        uploadPartial: "Uploaded {uploaded} file(s), failed {failed}: {filenames}",
+        uploadFailed: "Upload failed: {reason}",
+      },
+    },
+    chat: {
+      useRetrieval: "Use retrieval (RAG)",
+      topK: "top_k",
+      documentIds: "document_ids (comma sep)",
+      documentIdsPlaceholder: "optional",
+      messagePlaceholder: "Type a message. Shift+Enter for newline.",
+      send: "Send",
+    },
+    retrieval: {
+      title: "Retrieval playground",
+      description: "Search across indexed document chunks. Useful for validating that ingestion parsed the document the way you expected.",
+      queryLabel: "Query",
+      queryPlaceholder: "Ask a question or paste keywords",
+      topKLabel: "top_k",
+      docIdsLabel: "document_ids (comma sep)",
+      docIdsPlaceholder: "optional",
+      searchFailed: "Search failed: {reason}",
+      noMatches: "No matches. Try a different query or upload more documents.",
+    },
     settingsPage: {
       title: "Settings & Agent Profiles",
       description:
@@ -280,6 +477,14 @@ export const dictionaries: Record<Language, Dictionary> = {
         currentPrefix: "Saved:",
         anthropicCatalogHint:
           "If live model sync is unavailable, Claude models are shown from a curated fallback list.",
+        addProvider: "Add Provider",
+        editProvider: "Edit Setup",
+        activeProviders: "Active Providers",
+        configured: "Configured",
+        notConfigured: "Needs Setup",
+        allActive: "All providers active",
+        noActive: "No active providers. Click the plus button to add one.",
+        toggleHint: "Toggle this provider on or off",
       },
       profiles: {
         title: "Agent Profiles",
@@ -298,6 +503,8 @@ export const dictionaries: Record<Language, Dictionary> = {
         systemPromptLabel: "System Prompt",
         systemPromptPlaceholder: "You are an analyst agent...",
         allowChatOverride: "Allow chat model override",
+        noOverrides: "No task overrides defined. This profile will use system defaults.",
+        allTasksOverridden: "All tasks overridden",
       },
       taskRouting: {
         title: "Task Routing",
@@ -312,6 +519,13 @@ export const dictionaries: Record<Language, Dictionary> = {
         noStreaming: "No streaming",
         noModelSelected: "No model selected for this task yet.",
         na: "n/a",
+        providerOff: "Provider is disabled.",
+        missingFieldsPrefix: "Missing required fields:",
+        notSupportedByProvider: "Models from this provider are currently unavailable for tasks.",
+        readyToUse: "Ready to use.",
+        notSupportedByModel: "This model is currently unavailable for tasks.",
+        allTasksConfigured: "All tasks configured",
+        noGlobalRouting: "No global task routing defined. Click the plus button to configure a task.",
       },
       modelCatalog: {
         title: "Model Catalog",
@@ -349,6 +563,26 @@ export const dictionaries: Record<Language, Dictionary> = {
       vietnamese: "Tiếng Việt",
     },
     workspaceControlPlane: "Bảng điều khiển workspace",
+    common: {
+      cancel: "Hủy",
+      save: "Lưu",
+      close: "Đóng",
+      delete: "Xóa",
+      edit: "Sửa",
+      create: "Tạo",
+      upload: "Tải lên",
+      loading: "Đang tải",
+      error: "Lỗi",
+      success: "Thành công",
+      warning: "Cảnh báo",
+      entities: "thực thể",
+      relations: "quan hệ",
+      published: "đã xuất bản",
+      search: "Tìm kiếm",
+      results: "kết quả",
+      result: "kết quả",
+      noMatches: "Không tìm thấy kết quả.",
+    },
     nav: {
       work: "Công việc",
       knowledge: "Tri thức",
@@ -409,6 +643,76 @@ export const dictionaries: Record<Language, Dictionary> = {
           "Khu chạy tác vụ, danh mục workflow và tạo artifact sẽ xuất hiện ở đây khi control plane backend mở ra.",
       },
     },
+    workspaceSwitcher: {
+      label: "Không gian làm việc",
+      switchWorkspace: "Chuyển Workspace",
+      createWorkspace: "Tạo Workspace",
+      createTitle: "Tạo Workspace Mới",
+      createDescription: "Mỗi workspace có ontology, tài liệu và cài đặt độc lập riêng.",
+      workspaceIdLabel: "Workspace ID (slug)",
+      workspaceIdPlaceholder: "ví dụ: project-x, phan-tich-tai-chinh",
+      workspaceIdHint: "Viết thường, không dấu, không khoảng cách. Dùng cho Neo4j và SQL.",
+      createAndSwitch: "Tạo & Chuyển",
+      toasts: {
+        idRequired: "Yêu cầu nhập Workspace ID",
+        switchedTo: "Đã chuyển sang workspace:",
+      },
+    },
+    documents: {
+      uploadTitle: "Tải tài liệu lên",
+      uploadDescription: "Hỗ trợ PDF, DOCX, XLSX, hoặc CSV. Tài liệu sẽ được xử lý bởi worker.",
+      fileLabel: "Tệp tin",
+      pdfModeLabel: "Chế độ PDF",
+      pdfModeFast: "Nhanh",
+      pdfModeAccurate: "Chính xác",
+      outputFormatLabel: "Định dạng đầu ra",
+      outputFormatMarkdown: "Markdown",
+      outputFormatHtml: "HTML",
+      outputFormatJson: "JSON",
+      outputFormatChunks: "Chunks",
+      outputFormatHint: "Chọn cách Marker render tài liệu trước khi chunk và xuất artifact.",
+      extractImagesLabel: "Trích xuất ảnh nhúng",
+      extractImagesHint: "Lưu artifact ảnh khi Marker phát hiện hình hoặc nội dung trực quan trong tài liệu.",
+      tagsLabel: "Thẻ (cách nhau bởi dấu phẩy)",
+      tagsPlaceholder: "ví dụ: chính sách, 2025",
+      uploading: "Đang tải lên...",
+      uploadSelected: "Tải lên tệp đã chọn",
+      selectedFiles: "Đã chọn {count} tệp",
+      emptyTable: "Chưa có tài liệu nào. Hãy tải lên PDF, DOCX, hoặc XLSX để bắt đầu.",
+      loadError: "Không thể tải danh sách tài liệu.",
+      table: {
+        title: "Tiêu đề",
+        type: "Loại",
+        status: "Trạng thái",
+        chunks: "Đoạn",
+        updated: "Cập nhật",
+      },
+      toasts: {
+        selectFile: "Vui lòng chọn ít nhất một tệp để tải lên",
+        uploadSuccess: "Đã tải lên {count} tệp",
+        uploadPartial: "Đã tải lên {uploaded} tệp, thất bại {failed}: {filenames}",
+        uploadFailed: "Tải lên thất bại: {reason}",
+      },
+    },
+    chat: {
+      useRetrieval: "Sử dụng truy xuất (RAG)",
+      topK: "top_k",
+      documentIds: "ID tài liệu (cách nhau bởi dấu phẩy)",
+      documentIdsPlaceholder: "không bắt buộc",
+      messagePlaceholder: "Nhập tin nhắn. Shift+Enter để xuống dòng.",
+      send: "Gửi",
+    },
+    retrieval: {
+      title: "Sân chơi truy xuất",
+      description: "Tìm kiếm trên các đoạn tài liệu đã được lập chỉ mục. Hữu ích để kiểm tra xem việc nạp tài liệu có đúng như bạn mong đợi hay không.",
+      queryLabel: "Truy vấn",
+      queryPlaceholder: "Đặt câu hỏi hoặc dán từ khóa",
+      topKLabel: "top_k",
+      docIdsLabel: "ID tài liệu (cách nhau bởi dấu phẩy)",
+      docIdsPlaceholder: "không bắt buộc",
+      searchFailed: "Tìm kiếm thất bại: {reason}",
+      noMatches: "Không tìm thấy kết quả. Hãy thử truy vấn khác hoặc tải lên thêm tài liệu.",
+    },
     settingsPage: {
       title: "Cài đặt & Hồ sơ Agent",
       description:
@@ -460,6 +764,14 @@ export const dictionaries: Record<Language, Dictionary> = {
         currentPrefix: "Đã lưu:",
         anthropicCatalogHint:
           "Nếu không đồng bộ được danh sách model trực tiếp, hệ thống sẽ hiển thị danh sách Claude dự phòng.",
+        addProvider: "Thêm Provider",
+        editProvider: "Sửa cấu hình",
+        activeProviders: "Provider đang hoạt động",
+        configured: "Đã cấu hình",
+        notConfigured: "Cần thiết lập",
+        allActive: "Tất cả provider đã hoạt động",
+        noActive: "Chưa có provider hoạt động. Nhấn dấu cộng để thêm.",
+        toggleHint: "Bật hoặc tắt provider này",
       },
       profiles: {
         title: "Hồ Sơ Agent",
@@ -478,6 +790,8 @@ export const dictionaries: Record<Language, Dictionary> = {
         systemPromptLabel: "System Prompt",
         systemPromptPlaceholder: "Bạn là một agent phân tích...",
         allowChatOverride: "Cho phép chat override model",
+        noOverrides: "Không có cấu hình đè cho tác vụ. Hồ sơ này sẽ dùng mặc định hệ thống.",
+        allTasksOverridden: "Tất cả tác vụ đã được cấu hình đè",
       },
       taskRouting: {
         title: "Task Routing",
@@ -492,6 +806,13 @@ export const dictionaries: Record<Language, Dictionary> = {
         noStreaming: "Không streaming",
         noModelSelected: "Chưa chọn model cho tác vụ này.",
         na: "n/a",
+        providerOff: "Provider đang tắt.",
+        missingFieldsPrefix: "Thiếu trường bắt buộc:",
+        notSupportedByProvider: "Model từ provider này hiện chưa dùng được cho tác vụ.",
+        readyToUse: "Sẵn sàng sử dụng.",
+        notSupportedByModel: "Model này hiện chưa dùng được cho tác vụ.",
+        allTasksConfigured: "Tất cả tác vụ đã được cấu hình",
+        noGlobalRouting: "Chưa có routing tác vụ toàn cục. Nhấn dấu cộng để cấu hình.",
       },
       modelCatalog: {
         title: "Model Catalog",

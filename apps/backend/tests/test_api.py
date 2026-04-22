@@ -1,7 +1,11 @@
 from fastapi.testclient import TestClient
 
 from semantic_reasoning_agent.main import app
-from semantic_reasoning_agent.services.provider_models_service import AnthropicModelsClient
+from semantic_reasoning_agent.services.provider_models_service import (
+    AnthropicModelsClient,
+    OpenAIModelsClient,
+    OpenRouterModelsClient,
+)
 
 
 client = TestClient(app)
@@ -23,16 +27,88 @@ def test_auth_me_contract() -> None:
 
 
 def test_model_catalog_includes_local_echo() -> None:
-    response = client.get("/api/v1/models")
+    response = client.get("/api/v1/settings/models")
     assert response.status_code == 200
 
     models = response.json()
     assert any(item["provider"] == "echo" and item["ready"] is True for item in models)
 
 
-def test_agent_settings_can_persist_provider_and_task_assignments() -> None:
-    update_response = client.put(
+def test_public_settings_bootstrap_exposes_business_first_contract() -> None:
+    response = client.get("/api/v1/settings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["workspace"]["id"] == "workspace-demo"
+    assert payload["workspace"]["name"] == "Demo Workspace"
+    assert "model_catalog" in payload
+    assert "task_defaults" in payload
+    assert "models" not in payload
+    assert any(item["use_case"] == "chat_default" for item in payload["task_defaults"])
+    assert any(item["provider"] == "echo" for item in payload["model_catalog"])
+
+
+def test_removed_compatibility_aliases_return_not_found() -> None:
+    canonical = client.get("/api/v1/settings/models")
+    alias_models = client.get("/api/v1/models")
+    alias_catalog = client.get("/api/v1/agents/catalog")
+    alias_settings_get = client.get("/api/v1/agents/settings")
+    alias_settings_put = client.put(
         "/api/v1/agents/settings",
+        json={"workspace_id": "workspace-demo", "providers": [], "task_assignments": []},
+    )
+
+    assert canonical.status_code == 200
+    assert alias_models.status_code == 404
+    assert alias_catalog.status_code == 404
+    assert alias_settings_get.status_code == 404
+    assert alias_settings_put.status_code == 404
+
+
+def test_public_settings_update_round_trips_with_canonical_contract(monkeypatch) -> None:
+    async def _raise_runtime_error(self):
+        raise RuntimeError("upstream list-models unavailable")
+
+    monkeypatch.setattr(OpenRouterModelsClient, "get_models", _raise_runtime_error)
+    update_response = client.put(
+        "/api/v1/settings",
+        json={
+            "workspace_id": "workspace-settings",
+            "providers": [
+                {
+                    "provider": "openrouter",
+                    "enabled": True,
+                    "values": {"OPENROUTER_API_KEY": "demo-openrouter-key"},
+                }
+            ],
+            "task_defaults": [
+                {
+                    "use_case": "chat_default",
+                    "provider": "openrouter",
+                    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+                }
+            ],
+        },
+    )
+
+    assert update_response.status_code == 200
+    payload = update_response.json()
+    assert payload["workspace"]["id"] == "workspace-settings"
+    assert payload["preferred_default_chat_model"]["provider"] == "openrouter"
+
+    settings_response = client.get("/api/v1/settings", params={"workspace_id": "workspace-settings"})
+    assert settings_response.status_code == 200
+    assert settings_response.json()["workspace"]["id"] == "workspace-settings"
+    chat_assignment = next(
+        item for item in settings_response.json()["task_defaults"] if item["task_type"] == "chat"
+    )
+    assert chat_assignment["provider"] == "openrouter"
+    assert chat_assignment["model"] == "nvidia/nemotron-3-super-120b-a12b:free"
+
+
+def test_settings_can_persist_provider_and_task_assignments() -> None:
+    update_response = client.put(
+        "/api/v1/settings",
         json={
             "workspace_id": "workspace-demo",
             "providers": [
@@ -42,9 +118,9 @@ def test_agent_settings_can_persist_provider_and_task_assignments() -> None:
                     "values": {"OPENAI_API_KEY": "demo-openai-key"},
                 }
             ],
-            "task_assignments": [
+            "task_defaults": [
                 {
-                    "task_type": "chat",
+                    "use_case": "chat_default",
                     "provider": "openai",
                     "model": "gpt-5-mini",
                 }
@@ -57,18 +133,18 @@ def test_agent_settings_can_persist_provider_and_task_assignments() -> None:
     openai_provider = next(item for item in payload["providers"] if item["provider"] == "openai")
     assert openai_provider["values"][0]["configured"] is True
     assert openai_provider["values"][0]["source"] == "database"
-    assert "demo-openai-key" not in openai_provider["values"][0]["masked_value"]
+    assert "demo-openai-key" not in openai_provider["values"][0]["display_value"]
 
-    chat_assignment = next(item for item in payload["task_assignments"] if item["task_type"] == "chat")
+    chat_assignment = next(item for item in payload["task_defaults"] if item["task_type"] == "chat")
     assert chat_assignment["provider"] == "openai"
     assert chat_assignment["model"] == "gpt-5-mini"
     assert chat_assignment["ready"] is False
-    assert "adapter runtime" in chat_assignment["reason"]
+    assert "runtime" in chat_assignment["reason"].lower()
 
 
 def test_model_catalog_uses_workspace_specific_provider_config() -> None:
     client.put(
-        "/api/v1/agents/settings",
+        "/api/v1/settings",
         json={
             "workspace_id": "workspace-openai",
             "providers": [
@@ -78,16 +154,47 @@ def test_model_catalog_uses_workspace_specific_provider_config() -> None:
                     "values": {"OPENAI_API_KEY": "demo-openai-key"},
                 }
             ],
-            "task_assignments": [],
+            "task_defaults": [],
         },
     )
 
-    response = client.get("/api/v1/models", params={"workspace_id": "workspace-openai"})
+    response = client.get("/api/v1/settings", params={"workspace_id": "workspace-openai"})
     assert response.status_code == 200
-    models = response.json()
-    openai = next(item for item in models if item["provider"] == "openai")
-    assert openai["missing_env_fields"] == []
+    payload = response.json()
+    openai = next(item for item in payload["providers"] if item["provider"] == "openai")
+    assert openai["enabled"] is True
     assert openai["ready"] is False
+
+
+def test_provider_models_endpoint_uses_workspace_specific_provider_config(monkeypatch) -> None:
+    async def _raise_runtime_error(self):
+        raise RuntimeError("upstream list-models unavailable")
+
+    monkeypatch.setattr(OpenAIModelsClient, "get_models", _raise_runtime_error)
+
+    client.put(
+        "/api/v1/settings",
+        json={
+            "workspace_id": "workspace-openai-provider-endpoint",
+            "providers": [
+                {
+                    "provider": "openai",
+                    "enabled": True,
+                    "values": {"OPENAI_API_KEY": "demo-openai-key"},
+                }
+            ],
+            "task_defaults": [],
+        },
+    )
+
+    response = client.get(
+        "/api/v1/providers/openai/models",
+        params={"workspace_id": "workspace-openai-provider-endpoint"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "openai"
+    assert any(item["id"] == "gpt-5-mini" for item in payload["models"])
 
 
 def test_model_catalog_falls_back_to_maintained_anthropic_catalog(monkeypatch) -> None:
@@ -97,7 +204,7 @@ def test_model_catalog_falls_back_to_maintained_anthropic_catalog(monkeypatch) -
     monkeypatch.setattr(AnthropicModelsClient, "get_models", _raise_runtime_error)
 
     update_response = client.put(
-        "/api/v1/agents/settings",
+        "/api/v1/settings",
         json={
             "workspace_id": "workspace-anthropic",
             "providers": [
@@ -110,12 +217,12 @@ def test_model_catalog_falls_back_to_maintained_anthropic_catalog(monkeypatch) -
                     },
                 }
             ],
-            "task_assignments": [],
+            "task_defaults": [],
         },
     )
     assert update_response.status_code == 200
 
-    response = client.get("/api/v1/models", params={"workspace_id": "workspace-anthropic"})
+    response = client.get("/api/v1/settings/models", params={"workspace_id": "workspace-anthropic"})
     assert response.status_code == 200
     models = response.json()
 

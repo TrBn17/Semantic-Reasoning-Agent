@@ -7,6 +7,7 @@ class TaskResolveRequest(BaseModel):
     content: str
     workspace_id: str | None = None
     conversation_id: str | None = None
+    agent_profile_id: str | None = None
     provider: str | None = None
     model: str | None = None
     use_retrieval: bool = False

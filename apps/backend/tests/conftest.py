@@ -12,6 +12,8 @@ os.environ.setdefault("CELERY_RESULT_BACKEND", "cache+memory://")
 os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "true")
 os.environ.setdefault("CELERY_TASK_EAGER_PROPAGATES", "true")
 os.environ.setdefault("NEO4J_ENABLED", "false")
+os.environ.setdefault("OBJECT_STORE_BACKEND", "postgres")
+os.environ.setdefault("MARKER_MODEL_CACHE_DIR", ".cache/datalab-test/models")
 
 
 BACKEND_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -27,6 +29,7 @@ from semantic_reasoning_agent.domain.ontology.models import (  # noqa: E402
     ExtractedEntity,
     ExtractedRelation,
     ExtractionResult,
+    OntologyNarrative,
 )
 
 
@@ -44,13 +47,21 @@ class _StubOntologyExtractor:
     def classify_document_domain(self, chunks) -> str:  # noqa: ANN001
         return "test_domain"
 
-    def extract_ontology_candidates(self, chunks, workspace_id=None) -> ExtractionResult:  # noqa: ANN001
+    def extract_ontology_candidates(  # noqa: ANN001
+        self,
+        chunks,
+        workspace_id=None,
+        provider=None,
+        model=None,
+    ) -> ExtractionResult:
         first_chunk_id = chunks[0].chunk_id if chunks else None
         provenance = {
             "extractor": "test_stub",
             "prompt_version": "v1",
             "run_id": "test-run",
             "source_chunk_id": first_chunk_id,
+            "provider": provider,
+            "model": model,
         }
         entities = [
             _stub_entity("Alpha Initiative", "alpha-initiative", first_chunk_id, provenance),
@@ -80,6 +91,20 @@ class _StubOntologyExtractor:
             ),
         ]
         return ExtractionResult(domain="test_domain", entities=entities, relations=relations)
+
+    def summarize_ontology(  # noqa: ANN001
+        self,
+        chunks,
+        *,
+        workspace_id=None,
+        provider=None,
+        model=None,
+        domain=None,
+    ) -> OntologyNarrative:
+        return OntologyNarrative(
+            title="Delivery Dependencies",
+            summary="Ontology for the delivery plan and service dependency chain.",
+        )
 
 
 def _stub_entity(name: str, resolution_key: str, source_chunk_id, provenance: dict) -> ExtractedEntity:

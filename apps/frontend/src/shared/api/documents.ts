@@ -1,6 +1,7 @@
 import { apiFetch } from "@/shared/api/client";
 import type {
   DocumentBatchUploadResponse,
+  DocumentIngestionCapabilitiesResponse,
   DocumentJobResponse,
   DocumentReprocessResponse,
   DocumentResponse,
@@ -9,6 +10,12 @@ import type {
 
 export function listDocuments(): Promise<DocumentResponse[]> {
   return apiFetch<DocumentResponse[]>("/documents", { method: "GET" });
+}
+
+export function getDocumentIngestionCapabilities(): Promise<DocumentIngestionCapabilitiesResponse> {
+  return apiFetch<DocumentIngestionCapabilitiesResponse>("/documents/options", {
+    method: "GET",
+  });
 }
 
 export function getDocument(id: string): Promise<DocumentResponse> {
@@ -31,6 +38,8 @@ export interface UploadDocumentInput {
   workspaceId?: string;
   tags?: string[];
   pdfMode?: "fast" | "accurate";
+  outputFormat?: "markdown" | "html" | "json" | "chunks";
+  extractImages?: boolean;
 }
 
 export function uploadDocument(input: UploadDocumentInput): Promise<DocumentResponse> {
@@ -42,6 +51,10 @@ export function uploadDocument(input: UploadDocumentInput): Promise<DocumentResp
     form.append("tags", input.tags.join(","));
   }
   if (input.pdfMode) form.append("pdf_mode", input.pdfMode);
+  if (input.outputFormat) form.append("output_format", input.outputFormat);
+  if (typeof input.extractImages === "boolean") {
+    form.append("extract_images", String(input.extractImages));
+  }
   return apiFetch<DocumentResponse>("/documents/upload", {
     method: "POST",
     body: form,
@@ -53,6 +66,8 @@ export interface UploadDocumentsInput {
   workspaceId?: string;
   tags?: string[];
   pdfMode?: "fast" | "accurate";
+  outputFormat?: "markdown" | "html" | "json" | "chunks";
+  extractImages?: boolean;
 }
 
 export function uploadDocuments(input: UploadDocumentsInput): Promise<DocumentBatchUploadResponse> {
@@ -63,6 +78,8 @@ export function uploadDocuments(input: UploadDocumentsInput): Promise<DocumentBa
         workspaceId: input.workspaceId,
         tags: input.tags,
         pdfMode: input.pdfMode,
+        outputFormat: input.outputFormat,
+        extractImages: input.extractImages,
       }),
     ),
   ).then((results) => {

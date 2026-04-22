@@ -21,6 +21,8 @@ from semantic_reasoning_agent.schemas.tools import (
 from semantic_reasoning_agent.services.tool_registry import ToolRegistry
 from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
 
+from .route_metadata import INTERNAL_ROUTE
+
 router = APIRouter()
 
 ToolFamilyQuery = Literal[
@@ -36,7 +38,13 @@ ToolFamilyQuery = Literal[
 RiskLevelQuery = Literal["low", "medium", "high"]
 
 
-@router.get("", response_model=list[ToolSpecSchema])
+@router.get(
+    "",
+    response_model=list[ToolSpecSchema],
+    summary="List registered tools",
+    description="Internal/admin control-plane endpoint for tool registry inspection.",
+    openapi_extra=INTERNAL_ROUTE,
+)
 def list_tools(
     family: ToolFamilyQuery | None = Query(default=None),
     max_risk: RiskLevelQuery | None = Query(default=None),
@@ -46,7 +54,13 @@ def list_tools(
     return [_spec_to_schema(spec) for spec in specs]
 
 
-@router.post("/{tool_name}/invoke", response_model=StandardToolOutputSchema)
+@router.post(
+    "/{tool_name}/invoke",
+    response_model=StandardToolOutputSchema,
+    summary="Invoke a tool directly",
+    description="Internal/admin control-plane endpoint for direct tool execution.",
+    openapi_extra=INTERNAL_ROUTE,
+)
 def invoke_tool(
     tool_name: str,
     payload: StandardToolInputSchema,

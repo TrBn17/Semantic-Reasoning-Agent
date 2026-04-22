@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { BuildTable } from "@/components/ontology/build-table";
 import { GraphStats } from "@/components/ontology/graph-stats";
 import { NewBuildDialog } from "@/components/ontology/new-build-dialog";
+import { Button } from "@/components/ui/button";
 
 export default function OntologyPage() {
   return (
@@ -12,7 +14,12 @@ export default function OntologyPage() {
             Move from indexed documents to extracted candidates, review, and published graph versions.
           </p>
         </div>
-        <NewBuildDialog />
+        <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <Link href="/graph">Open Graph Editor</Link>
+          </Button>
+          <NewBuildDialog />
+        </div>
       </div>
       <GraphStats />
       <div>

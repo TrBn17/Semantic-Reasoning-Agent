@@ -1,6 +1,4 @@
-"use client";
-
-import { AgentSettingsView } from "@/components/agents/agent-settings-view";
+import { AgentManagementView } from "@/components/agents/agent-management-view";
 
 export default function AgentsPage() {
   return (
@@ -8,10 +6,10 @@ export default function AgentsPage() {
       <div>
         <h1 className="text-2xl font-semibold">Agents</h1>
         <p className="text-sm text-muted-foreground">
-          Manage operator-facing profiles, prompts, task model routing, and explicit tool binding.
+          Manage agent profiles, capability presets, tool policy, knowledge packs, and evidence scope.
         </p>
       </div>
-      <AgentSettingsView />
+      <AgentManagementView />
     </div>
   );
 }

@@ -17,6 +17,19 @@ def test_list_workflows_includes_task_resolve_chat() -> None:
     assert any(item["workflow_id"] == "task.resolve.chat" for item in workflows)
 
 
+def test_openapi_marks_task_resolve_public_and_workflow_run_internal() -> None:
+    openapi = app.openapi()
+
+    task_resolve = openapi["paths"]["/api/v1/tasks/resolve"]["post"]
+    workflow_run = openapi["paths"]["/api/v1/workflows/{workflow_id}/run"]["post"]
+
+    assert task_resolve["x-api-audience"] == "public"
+    assert task_resolve["x-api-primary"] is True
+    assert workflow_run["x-api-audience"] == "internal/admin"
+    assert workflow_run["x-api-primary"] is False
+    assert "tasks/resolve" in workflow_run["description"]
+
+
 def test_resolve_task_returns_retrieval_context_and_evidence() -> None:
     upload_response = client.post(
         "/api/v1/documents/upload",

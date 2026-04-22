@@ -167,7 +167,7 @@ export function HomeView() {
                 <div className="min-w-0">
                   <div className="truncate font-medium">{b.id.slice(0, 8)}</div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {b.entity_count} entities | {b.relation_count} relations |{" "}
+                    {b.entity_count} {t.common.entities} · {b.relation_count} {t.common.relations} ·{" "}
                     {formatDateTime(b.updated_at)}
                   </div>
                 </div>
@@ -192,8 +192,8 @@ export function HomeView() {
                   v{graph.data.version.version_number}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {graph.data.version.entity_count} entities |{" "}
-                  {graph.data.version.relation_count} relations | published{" "}
+                  {graph.data.version.entity_count} {t.common.entities} ·{" "}
+                  {graph.data.version.relation_count} {t.common.relations} · {t.common.published}{" "}
                   {formatDateTime(graph.data.version.created_at)}
                 </div>
                 <Link

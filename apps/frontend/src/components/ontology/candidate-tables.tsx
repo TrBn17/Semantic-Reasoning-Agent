@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ReviewActions } from "@/components/ontology/review-actions";
 import { ReviewStatusBadge } from "@/components/ontology/status-badges";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -18,6 +19,8 @@ import {
   listBuildRelations,
   reviewEntity,
   reviewRelation,
+  updateEntity,
+  updateRelation,
 } from "@/shared/api/ontology";
 import { queryKeys } from "@/shared/query/keys";
 import type { OntologyReviewAction, OntologyReviewStatus } from "@/shared/api/types";
@@ -49,6 +52,16 @@ export function CandidateEntitiesTable({
     onSuccess: () => {
       invalidate();
       toast.success("Review saved");
+    },
+    onError: (err) => toast.error(`Failed: ${(err as Error).message}`),
+  });
+
+  const editMutation = useMutation({
+    mutationFn: async (input: { id: string; name: string; canonical_name: string; entity_type: string }) =>
+      updateEntity(input.id, input),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Candidate updated");
     },
     onError: (err) => toast.error(`Failed: ${(err as Error).message}`),
   });
@@ -100,6 +113,24 @@ export function CandidateEntitiesTable({
                 </p>
               </TableCell>
               <TableCell className="text-right">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const name = window.prompt("Entity name", e.name);
+                    if (!name) return;
+                    const canonicalName = window.prompt("Canonical name", e.canonical_name) ?? e.canonical_name;
+                    const entityType = window.prompt("Entity type", e.entity_type) ?? e.entity_type;
+                    editMutation.mutate({
+                      id: e.id,
+                      name,
+                      canonical_name: canonicalName,
+                      entity_type: entityType,
+                    });
+                  }}
+                >
+                  Edit
+                </Button>
                 <ReviewActions
                   status={e.status}
                   pending={mutate.isPending}
@@ -150,6 +181,16 @@ export function CandidateRelationsTable({
     onError: (err) => toast.error(`Failed: ${(err as Error).message}`),
   });
 
+  const editMutation = useMutation({
+    mutationFn: async (input: { id: string; source_name: string; target_name: string; relation_type: string }) =>
+      updateRelation(input.id, input),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Candidate updated");
+    },
+    onError: (err) => toast.error(`Failed: ${(err as Error).message}`),
+  });
+
   if (isLoading) return <Skeleton className="h-40 w-full" />;
   const rows = data ?? [];
   if (rows.length === 0)
@@ -193,6 +234,24 @@ export function CandidateRelationsTable({
                 </p>
               </TableCell>
               <TableCell className="text-right">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const sourceName = window.prompt("Source name", r.source_name);
+                    if (!sourceName) return;
+                    const targetName = window.prompt("Target name", r.target_name) ?? r.target_name;
+                    const relationType = window.prompt("Relation type", r.relation_type) ?? r.relation_type;
+                    editMutation.mutate({
+                      id: r.id,
+                      source_name: sourceName,
+                      target_name: targetName,
+                      relation_type: relationType,
+                    });
+                  }}
+                >
+                  Edit
+                </Button>
                 <ReviewActions
                   status={r.status}
                   pending={mutate.isPending}

@@ -35,11 +35,17 @@ class OntologyReviewAction(str, Enum):
     reject = "reject"
 
 
+class OntologyMergeMode(str, Enum):
+    append = "append"
+    replace = "replace"
+
+
 class OntologyBuildCreateRequest(BaseModel):
     document_id: str
     workspace_id: str | None = None
-    provider: str | None = None
-    model: str | None = None
+    extraction_provider: str | None = None
+    extraction_model: str | None = None
+    merge_mode: OntologyMergeMode = OntologyMergeMode.append
 
 
 class OntologyBuildStepResponse(BaseModel):
@@ -129,8 +135,11 @@ class OntologyBuildResponse(BaseModel):
     workspace_id: str
     status: OntologyBuildStatus
     domain: str | None = None
-    provider: str | None = None
-    model: str | None = None
+    ontology_title: str | None = None
+    ontology_summary: str | None = None
+    merge_mode: OntologyMergeMode = OntologyMergeMode.append
+    extraction_provider: str | None = None
+    extraction_model: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -150,11 +159,35 @@ class OntologyReviewRequest(BaseModel):
     action: OntologyReviewAction
 
 
+class OntologyCandidateEntityUpdateRequest(BaseModel):
+    name: str | None = None
+    canonical_name: str | None = None
+    resolution_key: str | None = None
+    entity_type: str | None = None
+    aliases: list[str] | None = None
+    evidence_text: str | None = None
+    confidence: float | None = None
+    status: OntologyReviewStatus | None = None
+
+
+class OntologyCandidateRelationUpdateRequest(BaseModel):
+    source_entity_id: str | None = None
+    target_entity_id: str | None = None
+    source_name: str | None = None
+    target_name: str | None = None
+    relation_type: str | None = None
+    evidence_text: str | None = None
+    confidence: float | None = None
+    status: OntologyReviewStatus | None = None
+
+
 class OntologyVersionResponse(BaseModel):
     id: str
     workspace_id: str
     version_number: int
     source_build_id: str
+    ontology_title: str | None = None
+    ontology_summary: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
     entity_type_count: int = 0
     relation_type_count: int = 0
@@ -195,10 +228,112 @@ class OntologyPublishResponse(BaseModel):
     version: OntologyVersionResponse
 
 
-class OntologyGraphResponse(BaseModel):
+class OntologyGraphDraftSummaryResponse(BaseModel):
+    based_on_version_id: str | None = None
+    has_changes: bool = False
+    node_patch_count: int = 0
+    relation_patch_count: int = 0
+    entity_type_patch_count: int = 0
+    relation_type_patch_count: int = 0
+    updated_at: datetime | None = None
+
+
+class OntologyGraphDraftNodeRequest(BaseModel):
+    id: str | None = None
+    name: str
+    entity_type: str
+    resolution_key: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    source_document_id: str | None = None
+    source_build_id: str | None = None
+
+
+class OntologyGraphDraftNodeUpdateRequest(BaseModel):
+    name: str | None = None
+    entity_type: str | None = None
+    resolution_key: str | None = None
+    aliases: list[str] | None = None
+    source_document_id: str | None = None
+    source_build_id: str | None = None
+
+
+class OntologyGraphDraftRelationRequest(BaseModel):
+    id: str | None = None
+    source_entity_id: str
+    target_entity_id: str
+    relation_type: str
+    confidence: float = 1.0
+    evidence_text: str = ""
+    source_document_id: str | None = None
+    source_build_id: str | None = None
+
+
+class OntologyGraphDraftRelationUpdateRequest(BaseModel):
+    source_entity_id: str | None = None
+    target_entity_id: str | None = None
+    relation_type: str | None = None
+    confidence: float | None = None
+    evidence_text: str | None = None
+    source_document_id: str | None = None
+    source_build_id: str | None = None
+
+
+class OntologyEntityTypeDefinitionUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    attributes: list[OntologyAttributeDefinitionResponse] | None = None
+    examples: list[str] | None = None
+    deleted: bool | None = None
+
+
+class OntologyRelationTypeDefinitionUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    attributes: list[OntologyAttributeDefinitionResponse] | None = None
+    allowed_source_targets: list[OntologySourceTargetDefinitionResponse] | None = None
+    deleted: bool | None = None
+
+
+class OntologyDraftPublishRequest(BaseModel):
+    workspace_id: str | None = None
+    build_id: str | None = None
+
+
+class OntologyPublishPreviewResponse(BaseModel):
     workspace_id: str
-    version: OntologyVersionResponse | None = None
+    build: OntologyBuildResponse | None = None
+    version: OntologyVersionResponse
     entity_type_definitions: list[OntologyEntityTypeDefinitionResponse] = Field(default_factory=list)
     relation_type_definitions: list[OntologyRelationTypeDefinitionResponse] = Field(default_factory=list)
     entities: list[OntologyEntityResponse] = Field(default_factory=list)
     relations: list[OntologyRelationResponse] = Field(default_factory=list)
+    diff_summary: dict[str, int] = Field(default_factory=dict)
+
+
+class OntologyGraphDraftResponse(BaseModel):
+    workspace_id: str
+    version: OntologyVersionResponse | None = None
+    ontology_title: str | None = None
+    ontology_summary: str | None = None
+    has_changes: bool = False
+    entity_type_definitions: list[OntologyEntityTypeDefinitionResponse] = Field(default_factory=list)
+    relation_type_definitions: list[OntologyRelationTypeDefinitionResponse] = Field(default_factory=list)
+    entities: list[OntologyEntityResponse] = Field(default_factory=list)
+    relations: list[OntologyRelationResponse] = Field(default_factory=list)
+    draft_summary: OntologyGraphDraftSummaryResponse = Field(
+        default_factory=OntologyGraphDraftSummaryResponse
+    )
+
+
+class OntologyGraphResponse(BaseModel):
+    workspace_id: str
+    version: OntologyVersionResponse | None = None
+    ontology_title: str | None = None
+    ontology_summary: str | None = None
+    entity_type_definitions: list[OntologyEntityTypeDefinitionResponse] = Field(default_factory=list)
+    relation_type_definitions: list[OntologyRelationTypeDefinitionResponse] = Field(default_factory=list)
+    entities: list[OntologyEntityResponse] = Field(default_factory=list)
+    relations: list[OntologyRelationResponse] = Field(default_factory=list)
+    draft_summary: OntologyGraphDraftSummaryResponse = Field(
+        default_factory=OntologyGraphDraftSummaryResponse
+    )

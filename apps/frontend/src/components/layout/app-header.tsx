@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { WorkspaceBadge } from "@/components/layout/workspace-badge";
+import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { useI18n } from "@/shared/i18n/use-language";
 
@@ -27,7 +27,7 @@ export function AppHeader({ title }: { title?: string }) {
       </div>
       <div className="flex items-center gap-3">
         <LanguageSwitcher />
-        <WorkspaceBadge />
+        <WorkspaceSwitcher />
       </div>
     </header>
   );

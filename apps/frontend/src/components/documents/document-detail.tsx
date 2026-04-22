@@ -95,6 +95,8 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
     doc.document_type === "pdf"
       ? String(doc.ingestion_options?.pdf_mode ?? "fast")
       : null;
+  const outputFormat = String(doc.ingestion_options?.output_format ?? "markdown");
+  const extractImages = Boolean(doc.ingestion_options?.extract_images ?? true);
 
   return (
     <div className="space-y-6">
@@ -111,6 +113,11 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
           {pdfMode && (
             <p className="mt-1 text-xs text-muted-foreground">
               PDF mode: {pdfMode}
+            </p>
+          )}
+          {doc.document_type !== "csv" && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Output: {outputFormat} · Extract images: {extractImages ? "on" : "off"}
             </p>
           )}
           <p className="mt-1 text-xs text-muted-foreground">
