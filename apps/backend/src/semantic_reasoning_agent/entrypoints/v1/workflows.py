@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from semantic_reasoning_agent.core.runtime_constants import WORKFLOW_TASK_RESOLVE_CHAT
 from semantic_reasoning_agent.entrypoints.dependencies import get_task_runtime_service, get_workflow_registry_service
 from semantic_reasoning_agent.schemas.tasks import TaskResolveRequest, TaskResolveResponse
 from semantic_reasoning_agent.schemas.workflows import WorkflowSpecResponse
@@ -44,7 +45,7 @@ def run_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workflow '{workflow_id}' is not registered.",
         )
-    if workflow_id != "task.resolve.chat":
+    if workflow_id != WORKFLOW_TASK_RESOLVE_CHAT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Workflow '{workflow_id}' is not directly runnable via this endpoint yet.",

@@ -1,0 +1,20 @@
+{
+  "work": "Work",
+  "knowledge": "Knowledge",
+  "automation": "Automation",
+  "outputs": "Outputs",
+  "admin": "Admin",
+  "home": "Home",
+  "ask": "Ask",
+  "documents": "Documents",
+  "evidence": "Evidence",
+  "ontology": "Ontology",
+  "graph": "Graph",
+  "tasks": "Tasks",
+  "workflows": "Workflows",
+  "connectors": "Connectors",
+  "artifacts": "Artifacts",
+  "agents": "Agents",
+  "settings": "Settings",
+  "tools": "Tools"
+}

@@ -13,7 +13,7 @@ from semantic_reasoning_agent.persistence.models import (
     ProviderConfigORM,
     TaskModelConfigORM,
 )
-from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
+from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry, build_adapter_registry
 from semantic_reasoning_agent.schemas.agents import (
     AgentSettingsResponse,
     AgentSettingsUpdateRequest,
@@ -32,7 +32,6 @@ from semantic_reasoning_agent.schemas.settings import (
     SettingsModelOption,
     SettingsProviderFieldValue,
     SettingsProviderResponse,
-    TaskDefaultResponse,
 )
 from semantic_reasoning_agent.services.secret_service import SecretService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService, ProviderModel
@@ -89,12 +88,6 @@ TASK_DEFINITIONS: tuple[TaskDefinition, ...] = (
 )
 
 PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
-    ProviderSpec(
-        provider="echo",
-        label="Local Echo",
-        description="Local deterministic adapter for tests and offline smoke flows.",
-        fields=(),
-    ),
     ProviderSpec(
         provider="openai",
         label="OpenAI",
@@ -191,18 +184,6 @@ PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
     ),
 )
 
-USE_CASE_BY_TASK_TYPE: dict[TaskType, str] = {
-    "chat": "chat_default",
-    "retrieval": "retrieval_answer_default",
-    "ontology_extraction": "ontology_extraction_default",
-    "narrative_generation": "narrative_default",
-    "dashboard_generation": "dashboard_default",
-}
-TASK_TYPE_BY_USE_CASE: dict[str, TaskType] = {
-    use_case: task_type for task_type, use_case in USE_CASE_BY_TASK_TYPE.items()
-}
-
-
 class ModelConfigService:
     def __init__(
         self,
@@ -220,22 +201,21 @@ class ModelConfigService:
 
     async def list_models(self, workspace_id: str | None = None) -> list[ModelOption]:
         """
-        List all available models from configured providers.
-        Fetches models dynamically from provider APIs instead of hardcoded list.
+        List available models from providers explicitly enabled in workspace settings.
+        Fetches models dynamically from provider APIs.
         """
         workspace_id = workspace_id or self._settings.default_workspace_id
         provider_configs = self._load_provider_configs(workspace_id)
         credentials = self._provider_credentials(workspace_id, provider_configs)
-        
-        # Fetch models from all providers
+
         all_models: list[ModelOption] = []
         provider_models = await self._provider_models_service.get_all_provider_models(credentials)
-        
+
         for provider, provider_models_list in provider_models.items():
             provider_spec = next((spec for spec in PROVIDER_SPECS if spec.provider == provider), None)
             if not provider_spec:
                 continue
-                
+
             for model in provider_models_list:
                 model_option = self._provider_model_to_option(
                     provider,
@@ -245,7 +225,6 @@ class ModelConfigService:
                     workspace_id,
                 )
                 all_models.append(model_option)
-        all_models.append(self._echo_model_option())
         return sorted(all_models, key=lambda x: (x.provider, x.model))
 
     async def list_provider_models(
@@ -271,6 +250,14 @@ class ModelConfigService:
         provider_configs = self._load_provider_configs(workspace_id)
         credentials = self._provider_credentials(workspace_id, provider_configs)
         return await self._provider_models_service.get_all_provider_models(credentials)
+
+    def get_provider_credentials(
+        self,
+        workspace_id: str | None = None,
+    ) -> dict[str, dict[str, str | None]]:
+        workspace_id = workspace_id or self._settings.default_workspace_id
+        provider_configs = self._load_provider_configs(workspace_id)
+        return self._provider_credentials(workspace_id, provider_configs)
 
     def _resolve_provider_field_value(
         self,
@@ -394,7 +381,14 @@ class ModelConfigService:
         return [self._to_public_model_option(model) for model in await self.list_models(workspace_id)]
 
     async def get_public_settings(self, workspace_id: str | None = None) -> PublicSettingsResponse:
-        return self._to_public_settings(await self.get_agent_settings(workspace_id))
+        settings = await self.get_agent_settings(workspace_id)
+        return PublicSettingsResponse(
+            workspace=WorkspaceSummary(
+                id=settings.workspace_id,
+                name=self._workspace_name(settings.workspace_id),
+            ),
+            providers=[self._to_public_provider(provider) for provider in settings.providers],
+        )
 
     async def update_agent_settings(self, payload: AgentSettingsUpdateRequest) -> AgentSettingsResponse:
         provider_specs = {spec.provider: spec for spec in PROVIDER_SPECS}
@@ -465,6 +459,7 @@ class ModelConfigService:
                     existing_assignment.provider = assignment.provider
                     existing_assignment.model = assignment.model
                     existing_assignment.updated_at = utc_now()
+        self._refresh_adapter_registry(payload.workspace_id)
         return await self.get_agent_settings(payload.workspace_id)
 
     async def update_public_settings(
@@ -475,17 +470,16 @@ class ModelConfigService:
             AgentSettingsUpdateRequest(
                 workspace_id=payload.workspace_id,
                 providers=payload.providers,
-                task_assignments=[
-                    {
-                        "task_type": TASK_TYPE_BY_USE_CASE[item.use_case],
-                        "provider": item.provider,
-                        "model": item.model,
-                    }
-                    for item in payload.task_defaults
-                ],
+                task_assignments=[],
             )
         )
-        return self._to_public_settings(updated)
+        return PublicSettingsResponse(
+            workspace=WorkspaceSummary(
+                id=updated.workspace_id,
+                name=self._workspace_name(updated.workspace_id),
+            ),
+            providers=[self._to_public_provider(provider) for provider in updated.providers],
+        )
 
     def is_ready(self, provider: str, model: str, workspace_id: str | None = None) -> bool:
         """
@@ -494,8 +488,6 @@ class ModelConfigService:
         Returns True if provider is enabled, configured, and has an adapter.
         """
         workspace_id = workspace_id or self._settings.default_workspace_id
-        if provider == "echo":
-            return self._adapter_registry.get("echo") is not None and model == "local-echo"
         provider_configs = self._load_provider_configs(workspace_id)
         provider_spec = next((spec for spec in PROVIDER_SPECS if spec.provider == provider), None)
         
@@ -506,7 +498,7 @@ class ModelConfigService:
             return False
 
         provider_config = provider_configs.get(provider)
-        enabled = provider_config.enabled if provider_config is not None else True
+        enabled = provider_config.enabled if provider_config is not None else False
         
         if not enabled:
             return False
@@ -517,6 +509,14 @@ class ModelConfigService:
             
         supports_runtime = self._adapter_registry.get(provider) is not None
         return supports_runtime
+
+    def _refresh_adapter_registry(self, workspace_id: str) -> None:
+        refreshed = build_adapter_registry(
+            self._settings,
+            model_config_service=self,
+            workspace_id=workspace_id,
+        )
+        self._adapter_registry.refresh(refreshed.adapters)
 
     def resolve_task_model(
         self,
@@ -563,7 +563,6 @@ class ModelConfigService:
             add_candidate(saved.provider, saved.model)
 
         add_candidate(*self._default_assignment(task_type))
-        add_candidate("echo", "local-echo")
 
         for provider, model in candidates:
             if self.is_ready(provider, model, workspace_id):
@@ -631,7 +630,7 @@ class ModelConfigService:
     ) -> ModelOption:
         """Convert a ProviderModel to ModelOption with readiness checks."""
         provider_config = provider_configs.get(provider)
-        enabled = provider_config.enabled if provider_config is not None else True
+        enabled = provider_config.enabled if provider_config is not None else False
         missing_env_fields = self._missing_env_fields(provider_spec, provider_config, workspace_id)
         supports_runtime = self._adapter_registry.get(provider) is not None
         
@@ -665,25 +664,6 @@ class ModelConfigService:
             reason=reason,
         )
 
-    def _echo_model_option(self) -> ModelOption:
-        supports_runtime = self._adapter_registry.get("echo") is not None
-        return ModelOption(
-            provider="echo",
-            model="local-echo",
-            label="Local Echo",
-            description="Local deterministic adapter for tests and offline fallback paths.",
-            ready=supports_runtime,
-            enabled=True,
-            supports_runtime=supports_runtime,
-            supports_streaming=False,
-            supports_structured_output=False,
-            context_window=None,
-            recommended_for=["chat"],
-            required_env_fields=[],
-            missing_env_fields=[],
-            reason="Ready to use." if supports_runtime else "Echo adapter is not available.",
-        )
-
     def _build_provider_response(
         self,
         spec: ProviderSpec,
@@ -691,7 +671,7 @@ class ModelConfigService:
         workspace_id: str,
     ) -> ProviderConfigResponse:
         provider_config = provider_configs.get(spec.provider)
-        enabled = provider_config.enabled if provider_config is not None else True
+        enabled = provider_config.enabled if provider_config is not None else False
         supports_runtime = self._adapter_registry.get(spec.provider) is not None
         missing_env_fields = self._missing_env_fields(spec, provider_config, workspace_id)
         if not enabled:
@@ -790,44 +770,6 @@ class ModelConfigService:
                 )
             )
         return assignments
-
-    def _to_public_settings(self, settings: AgentSettingsResponse) -> PublicSettingsResponse:
-        task_definitions = {task.task_type: task for task in settings.tasks}
-        task_defaults = [
-            TaskDefaultResponse(
-                use_case=USE_CASE_BY_TASK_TYPE[assignment.task_type],
-                task_type=assignment.task_type,
-                label=task_definitions[assignment.task_type].label,
-                description=task_definitions[assignment.task_type].description,
-                provider=assignment.provider,
-                model=assignment.model,
-                ready=assignment.ready,
-                reason=self._translate_reason(assignment.reason),
-            )
-            for assignment in settings.task_assignments
-        ]
-        public_models = [self._to_public_model_option(model) for model in settings.models]
-        preferred_chat_model = next(
-            (
-                model
-                for model in public_models
-                for default in task_defaults
-                if default.use_case == "chat_default"
-                and default.provider == model.provider
-                and default.model == model.model
-            ),
-            None,
-        )
-        return PublicSettingsResponse(
-            workspace=WorkspaceSummary(
-                id=settings.workspace_id,
-                name=self._workspace_name(settings.workspace_id),
-            ),
-            providers=[self._to_public_provider(provider) for provider in settings.providers],
-            model_catalog=public_models,
-            task_defaults=task_defaults,
-            preferred_default_chat_model=preferred_chat_model,
-        )
 
     def _to_public_model_option(self, model: ModelOption) -> SettingsModelOption:
         return SettingsModelOption(

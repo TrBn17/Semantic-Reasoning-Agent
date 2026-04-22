@@ -4,6 +4,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { IdlePrefetcher } from "@/components/layout/idle-prefetcher";
 import { Providers } from "@/providers";
+import { CommandPalette } from "@/shared/layout/command-palette";
 import "../globals.css";
 
 export const metadata: Metadata = {
@@ -39,6 +40,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
           <IdlePrefetcher />
+          <CommandPalette />
         </Providers>
       </body>
     </html>

@@ -22,6 +22,7 @@ from semantic_reasoning_agent.services.model_config_service import ModelConfigSe
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
+from semantic_reasoning_agent.services.runtime_audit_service import RuntimeAuditService
 from semantic_reasoning_agent.services.secret_service import DatabaseSecretRepository, SecretService
 from semantic_reasoning_agent.services.task_runtime import TaskRuntimeService
 from semantic_reasoning_agent.services.tool_registry import ToolRegistry, build_tool_registry
@@ -53,13 +54,14 @@ class AppContainer:
     task_runtime_service: TaskRuntimeService
     workflow_registry_service: WorkflowRegistryService
     chat_stream_service: ChatStreamService
+    runtime_audit_service: RuntimeAuditService
 
 
 @lru_cache
 def get_app_container() -> AppContainer:
     settings = get_settings()
     database_manager = get_database_manager()
-    adapter_registry = build_adapter_registry()
+    adapter_registry = AdapterRegistry()
     secret_service = SecretService(DatabaseSecretRepository(database_manager))
     agent_profile_service = AgentProfileService(database_manager, settings)
     knowledge_pack_service = KnowledgePackService(database_manager)
@@ -71,7 +73,19 @@ def get_app_container() -> AppContainer:
         provider_models_service=provider_models_service,
         settings=settings,
     )
+    try:
+        adapter_registry.refresh(
+            build_adapter_registry(
+                settings,
+                model_config_service=model_config_service,
+                workspace_id=settings.default_workspace_id,
+            ).adapters
+        )
+    except Exception:
+        # During cold-start test bootstrap, schema may not exist yet.
+        adapter_registry.refresh(build_adapter_registry(settings).adapters)
     graphiti_gateway = build_graphiti_gateway(settings)
+    runtime_audit_service = RuntimeAuditService(database_manager)
     parser_registry = build_document_parser(settings)
     object_store = build_object_store(settings)
     retrieval_service = RetrievalService(settings, database_manager)
@@ -119,6 +133,7 @@ def get_app_container() -> AppContainer:
         conversation_service=conversation_service,
         agent_profile_service=agent_profile_service,
         knowledge_pack_service=knowledge_pack_service,
+        runtime_audit_service=runtime_audit_service,
     )
     workflow_registry_service = WorkflowRegistryService()
     chat_stream_service = ChatStreamService(
@@ -147,4 +162,5 @@ def get_app_container() -> AppContainer:
         task_runtime_service=task_runtime_service,
         workflow_registry_service=workflow_registry_service,
         chat_stream_service=chat_stream_service,
+        runtime_audit_service=runtime_audit_service,
     )

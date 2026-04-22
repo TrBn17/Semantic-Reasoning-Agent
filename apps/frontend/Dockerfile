@@ -1,15 +1,9 @@
 FROM node:20-alpine
 
-WORKDIR /app
+WORKDIR /workspace/apps/frontend
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Copy only frontend package files
-COPY apps/frontend/package*.json ./
-
-# Install dependencies
-RUN npm install
-
-# Copy frontend source code  
-COPY apps/frontend/ ./
-
-# Dev mode sẽ chạy từ docker-compose command
+# Minimal dev image.
+# Source code and node_modules are mounted by docker-compose, and dependencies
+# are installed by the container command at runtime.
+RUN apk add --no-cache libc6-compat

@@ -1,6 +1,5 @@
 export const queryKeys = {
   me: ["me"] as const,
-  models: ["models"] as const,
   agents: {
     settings: (workspaceId?: string | null) =>
       ["agents", "settings", workspaceId ?? null] as const,

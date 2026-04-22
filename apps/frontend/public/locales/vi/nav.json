@@ -1,0 +1,20 @@
+{
+  "work": "Công việc",
+  "knowledge": "Tri thức",
+  "automation": "Tự động hóa",
+  "outputs": "Đầu ra",
+  "admin": "Quản trị",
+  "home": "Trang chủ",
+  "ask": "Hỏi đáp",
+  "documents": "Tài liệu",
+  "evidence": "Bằng chứng",
+  "ontology": "Ontology",
+  "graph": "Đồ thị",
+  "tasks": "Tác vụ",
+  "workflows": "Luồng công việc",
+  "connectors": "Kết nối",
+  "artifacts": "Tài sản",
+  "agents": "Agents",
+  "settings": "Cài đặt",
+  "tools": "Công cụ"
+}

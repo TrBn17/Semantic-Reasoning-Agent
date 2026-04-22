@@ -21,7 +21,10 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    existing_columns = {column["name"] for column in inspect(bind).get_columns("conversations")}
+    inspector = inspect(bind)
+    if not inspector.has_table("conversations"):
+        return
+    existing_columns = {column["name"] for column in inspector.get_columns("conversations")}
 
     if "workspace_id" not in existing_columns:
         op.add_column(
@@ -64,7 +67,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    existing_columns = {column["name"] for column in inspect(bind).get_columns("conversations")}
+    inspector = inspect(bind)
+    if not inspector.has_table("conversations"):
+        return
+    existing_columns = {column["name"] for column in inspector.get_columns("conversations")}
 
     if "uses_model_override" in existing_columns:
         op.drop_column("conversations", "uses_model_override")

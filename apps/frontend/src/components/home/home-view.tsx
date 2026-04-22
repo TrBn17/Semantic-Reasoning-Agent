@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -12,12 +13,13 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonList } from "@/components/ui/skeleton-list";
 import { listConversations } from "@/shared/api/conversations";
 import { listDocuments } from "@/shared/api/documents";
 import { getGraph, listBuilds } from "@/shared/api/ontology";
 import { queryKeys } from "@/shared/query/keys";
-import { formatDateTime } from "@/shared/utils";
+import { runStatusBadgeVariant } from "@/shared/badges/run-status";
+import { Time } from "@/shared/components/time";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { useCapabilities } from "@/shared/capabilities/useCapabilities";
 import { useI18n } from "@/shared/i18n/use-language";
@@ -25,24 +27,29 @@ import { useI18n } from "@/shared/i18n/use-language";
 type QuickAction = {
   href: string;
   icon: typeof MessageSquare;
+  key: "ask" | "documents" | "evidence" | "ontology";
 };
 
 const quickActions: QuickAction[] = [
   {
     href: "/ask",
     icon: MessageSquare,
+    key: "ask",
   },
   {
     href: "/documents",
     icon: FileText,
+    key: "documents",
   },
   {
     href: "/evidence",
     icon: Search,
+    key: "evidence",
   },
   {
     href: "/ontology/builds",
     icon: Network,
+    key: "ontology",
   },
 ];
 
@@ -50,6 +57,11 @@ export function HomeView() {
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const caps = useCapabilities();
   const { t } = useI18n();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const documents = useQuery({
     queryKey: queryKeys.documents.list(),
@@ -89,19 +101,19 @@ export function HomeView() {
       </header>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {quickActions.map(({ href, icon: Icon }) => (
+        {quickActions.map(({ href, icon: Icon, key }) => (
           <Link key={href} href={href} className="group">
             <Card className="h-full transition-colors group-hover:border-primary/50">
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Icon className="h-4 w-4 text-muted-foreground" />
-                  {translateQuickActionTitle(href, t)}
+                  {t.home.quickActions[key].title}
                 </CardTitle>
                 <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground">
-                  {translateQuickActionDescription(href, t)}
+                  {t.home.quickActions[key].description}
                 </p>
               </CardContent>
             </Card>
@@ -121,7 +133,7 @@ export function HomeView() {
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
-            {documents.isLoading && <Skeletons count={3} />}
+            {documents.isLoading && <SkeletonList count={3} />}
             {!documents.isLoading && recentDocuments.length === 0 && (
               <EmptyState text={t.home.empty.documents} />
             )}
@@ -134,10 +146,10 @@ export function HomeView() {
                 <div className="min-w-0">
                   <div className="truncate font-medium">{d.title}</div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {d.document_type} | {formatDateTime(d.updated_at)}
+                    {d.document_type} | <Time value={d.updated_at} className="inline" />
                   </div>
                 </div>
-                <Badge variant={badgeVariant(d.status)}>{d.status}</Badge>
+                <Badge variant={runStatusBadgeVariant(d.status)}>{d.status}</Badge>
               </Link>
             ))}
           </CardContent>
@@ -154,7 +166,7 @@ export function HomeView() {
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
-            {builds.isLoading && <Skeletons count={3} />}
+            {builds.isLoading && <SkeletonList count={3} />}
             {!builds.isLoading && activeBuilds.length === 0 && (
               <EmptyState text={t.home.empty.builds} />
             )}
@@ -168,10 +180,10 @@ export function HomeView() {
                   <div className="truncate font-medium">{b.id.slice(0, 8)}</div>
                   <div className="truncate text-xs text-muted-foreground">
                     {b.entity_count} {t.common.entities} · {b.relation_count} {t.common.relations} ·{" "}
-                    {formatDateTime(b.updated_at)}
+                    <Time value={b.updated_at} className="inline" />
                   </div>
                 </div>
-                <Badge variant={badgeVariant(b.status)}>{b.status}</Badge>
+                <Badge variant={runStatusBadgeVariant(b.status)}>{b.status}</Badge>
               </Link>
             ))}
           </CardContent>
@@ -182,7 +194,7 @@ export function HomeView() {
             <CardTitle className="text-sm">{t.home.sections.publishedGraph}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {graph.isLoading && <Skeletons count={2} />}
+            {graph.isLoading && <SkeletonList count={2} />}
             {!graph.isLoading && !graph.data?.version && (
               <EmptyState text={t.home.empty.graph} />
             )}
@@ -194,7 +206,7 @@ export function HomeView() {
                 <div className="text-xs text-muted-foreground">
                   {graph.data.version.entity_count} {t.common.entities} ·{" "}
                   {graph.data.version.relation_count} {t.common.relations} · {t.common.published}{" "}
-                  {formatDateTime(graph.data.version.created_at)}
+                  <Time value={graph.data.version.created_at} className="inline" />
                 </div>
                 <Link
                   href="/graph"
@@ -218,7 +230,7 @@ export function HomeView() {
             </Link>
           </CardHeader>
           <CardContent className="space-y-2">
-            {conversations.isLoading && <Skeletons count={3} />}
+            {conversations.isLoading && <SkeletonList count={3} />}
             {!conversations.isLoading && recentConversations.length === 0 && (
               <EmptyState text={t.home.empty.conversations} />
             )}
@@ -230,7 +242,7 @@ export function HomeView() {
               >
                 <div className="truncate font-medium">{c.title}</div>
                 <div className="truncate text-xs text-muted-foreground">
-                  {c.provider} | {c.model} | {formatDateTime(c.updated_at)}
+                  {c.provider} | {c.model} | <Time value={c.updated_at} className="inline" />
                 </div>
               </Link>
             ))}
@@ -238,7 +250,7 @@ export function HomeView() {
         </Card>
       </section>
 
-      {!caps.tasksAvailable && (
+      {mounted && !caps.tasksAvailable && (
         <section>
           <Card className="border-dashed">
             <CardHeader className="flex flex-row items-center gap-2 space-y-0 pb-2">
@@ -264,63 +276,7 @@ function sortByUpdatedAtDesc<T extends WithUpdated>(a: T, b: T) {
   return b.updated_at.localeCompare(a.updated_at);
 }
 
-function badgeVariant(
-  status: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  if (status === "failed") return "destructive";
-  if (
-    status === "indexed" ||
-    status === "completed" ||
-    status === "published"
-  ) {
-    return "default";
-  }
-  return "secondary";
-}
-
 function EmptyState({ text }: { text: string }) {
   return <p className="px-2 py-3 text-xs text-muted-foreground">{text}</p>;
 }
 
-function translateQuickActionTitle(href: string, t: ReturnType<typeof useI18n>["t"]) {
-  switch (href) {
-    case "/ask":
-      return t.home.quickActions.ask.title;
-    case "/documents":
-      return t.home.quickActions.documents.title;
-    case "/evidence":
-      return t.home.quickActions.evidence.title;
-    case "/ontology/builds":
-      return t.home.quickActions.ontology.title;
-    default:
-      return href;
-  }
-}
-
-function translateQuickActionDescription(
-  href: string,
-  t: ReturnType<typeof useI18n>["t"],
-) {
-  switch (href) {
-    case "/ask":
-      return t.home.quickActions.ask.description;
-    case "/documents":
-      return t.home.quickActions.documents.description;
-    case "/evidence":
-      return t.home.quickActions.evidence.description;
-    case "/ontology/builds":
-      return t.home.quickActions.ontology.description;
-    default:
-      return href;
-  }
-}
-
-function Skeletons({ count }: { count: number }) {
-  return (
-    <>
-      {Array.from({ length: count }).map((_, i) => (
-        <Skeleton key={i} className="h-12 w-full" />
-      ))}
-    </>
-  );
-}

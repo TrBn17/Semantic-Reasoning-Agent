@@ -1,15 +1,15 @@
 import { apiFetch } from "@/shared/api/client";
 import type {
-  TaskResolutionRequest,
-  TaskResolutionResponse,
+  TaskResolveRequest,
+  TaskResolveResponse,
   TaskRunRecord,
   ToolCallRecord,
 } from "@/shared/api/types";
 
 export function resolveTask(
-  payload: TaskResolutionRequest,
-): Promise<TaskResolutionResponse> {
-  return apiFetch<TaskResolutionResponse>("/tasks/resolve", {
+  payload: TaskResolveRequest,
+): Promise<TaskResolveResponse> {
+  return apiFetch<TaskResolveResponse>("/tasks/resolve", {
     method: "POST",
     body: payload,
   });

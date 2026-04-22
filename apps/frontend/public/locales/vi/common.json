@@ -1,0 +1,21 @@
+{
+  "appName": "Semantic Agent",
+  "loading": "Đang tải...",
+  "save": "Lưu",
+  "cancel": "Hủy",
+  "close": "Đóng",
+  "create": "Tạo",
+  "delete": "Xóa",
+  "edit": "Sửa",
+  "search": "Tìm kiếm",
+  "refresh": "Làm mới",
+  "language": "Ngôn ngữ",
+  "english": "Tiếng Anh",
+  "vietnamese": "Tiếng Việt",
+  "theme": "Giao diện",
+  "light": "Sáng",
+  "dark": "Tối",
+  "system": "Hệ thống",
+  "workspace": "Không gian làm việc",
+  "unknownError": "Lỗi không xác định"
+}

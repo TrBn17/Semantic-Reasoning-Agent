@@ -6,15 +6,14 @@ Each client calls the provider's live list endpoint:
   - Gemini:    client.aio.models.list()          -> ListModels RPC
   - Ollama:    GET /api/tags                     -> local daemon catalog
 
-Maintained fallbacks are kept for providers where the live list endpoint is
-unavailable or unreliable from development/test environments.
+No provider-specific hardcoded model catalogs are used; all models are fetched
+live from provider APIs.
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any
 
 import aiohttp
 import openai
@@ -22,35 +21,6 @@ from anthropic import Anthropic
 from google import genai
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
-
-CHAT_MODEL_PREFIXES: tuple[str, ...] = ("gpt-", "chatgpt-", "o1", "o3", "o4")
-NON_CHAT_MODEL_MARKERS: tuple[str, ...] = (
-    "embedding",
-    "whisper",
-    "dall-e",
-    "tts",
-    "audio",
-    "moderation",
-    "image",
-    "realtime",
-    "transcribe",
-)
-ANTHROPIC_MAINTAINED_MODELS: tuple[tuple[str, str, int], ...] = (
-    ("claude-opus-4-0", "Claude Opus 4.0", 200_000),
-    ("claude-sonnet-4-5", "Claude Sonnet 4.5", 200_000),
-)
-OPENAI_MAINTAINED_MODELS: tuple[tuple[str, str, int], ...] = (
-    ("gpt-5-mini", "GPT-5 Mini", 128_000),
-    ("gpt-4o-mini", "GPT-4o Mini", 128_000),
-)
-OPENROUTER_MAINTAINED_MODELS: tuple[tuple[str, str, int | None], ...] = (
-    (
-        "nvidia/nemotron-3-super-120b-a12b:free",
-        "NVIDIA Nemotron-3 Super 120B A12B",
-        None,
-    ),
-)
-
 
 @dataclass
 class ProviderModel:
@@ -65,7 +35,7 @@ class ProviderModel:
 
 
 class OpenAIModelsClient:
-    """Fetch chat-capable models from OpenAI's /v1/models."""
+    """Fetch models from OpenAI's /v1/models."""
 
     def __init__(self, api_key: str, base_url: str | None = None):
         kwargs: dict[str, str] = {"api_key": api_key}
@@ -81,22 +51,23 @@ class OpenAIModelsClient:
 
         result: list[ProviderModel] = []
         for model in page.data:
-            if not _is_openai_chat_model(model.id):
+            model_id = getattr(model, "id", None)
+            if not model_id:
                 continue
             result.append(
                 ProviderModel(
-                    id=model.id,
-                    name=model.id,
-                    context_window=_infer_openai_context_window(model.id),
+                    id=model_id,
+                    name=model_id,
+                    context_window=None,
                     supports_streaming=True,
-                    supports_structured_output=model.id.startswith(("gpt-4", "o1", "o3", "o4")),
+                    supports_structured_output=False,
                 )
             )
         return sorted(result, key=lambda m: m.id, reverse=True)
 
 
 class OpenRouterModelsClient:
-    """Fetch chat-capable models from OpenRouter's OpenAI-compatible /models endpoint."""
+    """Fetch models from OpenRouter's OpenAI-compatible /models endpoint."""
 
     def __init__(self, api_key: str, base_url: str):
         self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
@@ -110,7 +81,7 @@ class OpenRouterModelsClient:
         result: list[ProviderModel] = []
         for model in page.data:
             model_id = getattr(model, "id", "")
-            if not model_id or not _is_openrouter_chat_model(model_id):
+            if not model_id:
                 continue
             result.append(
                 ProviderModel(
@@ -118,7 +89,7 @@ class OpenRouterModelsClient:
                     name=getattr(model, "name", None) or model_id,
                     context_window=None,
                     supports_streaming=True,
-                    supports_structured_output=True,
+                    supports_structured_output=False,
                     description=getattr(model, "description", None),
                 )
             )
@@ -185,7 +156,7 @@ class GeminiModelsClient:
                     ProviderModel(
                         id=model_id,
                         name=getattr(model, "display_name", None) or model_id,
-                        context_window=_extract_gemini_context_window(model),
+                        context_window=None,
                         supports_streaming=True,
                         supports_structured_output=bool(
                             getattr(model, "supports_structured_output", False)
@@ -226,7 +197,7 @@ class OllamaModelsClient:
                 ProviderModel(
                     id=model_name,
                     name=model_name,
-                    context_window=_infer_ollama_context_window(model_name),
+                    context_window=None,
                     supports_streaming=True,
                     supports_structured_output=False,
                 )
@@ -259,34 +230,24 @@ class ProviderModelsService:
             resolved_base_url = base_url or self._settings.openai_base_url
             if not resolved_api_key:
                 raise ValueError("OpenAI API key not configured")
-            try:
-                return await OpenAIModelsClient(resolved_api_key, resolved_base_url).get_models()
-            except RuntimeError:
-                return _openai_maintained_catalog()
+            return await OpenAIModelsClient(resolved_api_key, resolved_base_url).get_models()
 
         if provider == "openrouter":
             resolved_api_key = api_key or self._settings.openrouter_api_key
             resolved_base_url = base_url or self._settings.openrouter_base_url
             if not resolved_api_key:
                 raise ValueError("OpenRouter API key not configured")
-            try:
-                return await OpenRouterModelsClient(resolved_api_key, resolved_base_url).get_models()
-            except RuntimeError:
-                return _openrouter_maintained_catalog()
+            return await OpenRouterModelsClient(resolved_api_key, resolved_base_url).get_models()
 
         if provider == "anthropic":
             resolved_api_key = api_key or self._settings.anthropic_api_key
             resolved_base_url = base_url or self._settings.anthropic_base_url
             if not resolved_api_key:
                 raise ValueError("Anthropic API key not configured")
-            try:
-                return await AnthropicModelsClient(
-                    resolved_api_key,
-                    resolved_base_url,
-                ).get_models()
-            except RuntimeError:
-                # Anthropic-compatible gateways often omit /v1/models.
-                return _anthropic_maintained_catalog()
+            return await AnthropicModelsClient(
+                resolved_api_key,
+                resolved_base_url,
+            ).get_models()
 
         if provider == "gemini":
             resolved_api_key = api_key or self._settings.google_api_key
@@ -332,105 +293,3 @@ class ProviderModelsService:
         return results
 
 
-def _is_openai_chat_model(model_id: str) -> bool:
-    lower = model_id.lower()
-    if any(marker in lower for marker in NON_CHAT_MODEL_MARKERS):
-        return False
-    return any(lower.startswith(prefix) for prefix in CHAT_MODEL_PREFIXES)
-
-
-def _infer_openai_context_window(model_id: str) -> int | None:
-    lower = model_id.lower()
-    mapping = (
-        ("o4", 200_000),
-        ("o3", 200_000),
-        ("o1", 128_000),
-        ("gpt-4.1", 1_000_000),
-        ("gpt-4o", 128_000),
-        ("gpt-4-turbo", 128_000),
-        ("gpt-4", 8_192),
-        ("gpt-3.5", 16_384),
-    )
-    for key, window in mapping:
-        if key in lower:
-            return window
-    return None
-
-
-def _is_openrouter_chat_model(model_id: str) -> bool:
-    lower = model_id.lower()
-    return not any(marker in lower for marker in NON_CHAT_MODEL_MARKERS)
-
-
-def _extract_gemini_context_window(model: Any) -> int | None:
-    for attr in ("input_token_limit", "inputTokenLimit"):
-        value = getattr(model, attr, None)
-        if isinstance(value, int) and value > 0:
-            return value
-    name = (getattr(model, "name", "") or "").lower()
-    if "gemini-2" in name:
-        return 1_000_000
-    if "gemini-1.5-pro" in name:
-        return 2_000_000
-    if "gemini-1.5" in name:
-        return 1_000_000
-    return None
-
-
-def _infer_ollama_context_window(model_name: str) -> int | None:
-    mapping = {
-        "llama3.1": 128_000,
-        "llama3": 8_192,
-        "llama2": 4_096,
-        "mistral": 8_000,
-        "neural-chat": 4_096,
-        "openchat": 8_192,
-        "starling": 4_096,
-    }
-    lower = model_name.lower()
-    for key, size in mapping.items():
-        if key in lower:
-            return size
-    return 4_096
-
-
-def _anthropic_maintained_catalog() -> list[ProviderModel]:
-    return [
-        ProviderModel(
-            id=model_id,
-            name=label,
-            context_window=context_window,
-            supports_streaming=True,
-            supports_structured_output=True,
-            description="Maintained Anthropic model catalog fallback",
-        )
-        for model_id, label, context_window in ANTHROPIC_MAINTAINED_MODELS
-    ]
-
-
-def _openai_maintained_catalog() -> list[ProviderModel]:
-    return [
-        ProviderModel(
-            id=model_id,
-            name=label,
-            context_window=context_window,
-            supports_streaming=True,
-            supports_structured_output=True,
-            description="Maintained OpenAI model catalog fallback",
-        )
-        for model_id, label, context_window in OPENAI_MAINTAINED_MODELS
-    ]
-
-
-def _openrouter_maintained_catalog() -> list[ProviderModel]:
-    return [
-        ProviderModel(
-            id=model_id,
-            name=label,
-            context_window=context_window,
-            supports_streaming=True,
-            supports_structured_output=True,
-            description="Maintained OpenRouter model catalog fallback",
-        )
-        for model_id, label, context_window in OPENROUTER_MAINTAINED_MODELS
-    ]

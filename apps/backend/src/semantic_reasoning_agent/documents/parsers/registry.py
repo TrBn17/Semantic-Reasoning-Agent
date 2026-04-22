@@ -52,6 +52,8 @@ class DocumentParserRegistry:
 
 
 def build_document_parser(settings: Settings) -> DocumentParserRegistry:
+    # Current parser stack still routes through Marker for PDFs while retaining
+    # the backend setting for forward compatibility.
     return DocumentParserRegistry(
         [
             MarkerDocumentParser(settings),

@@ -66,6 +66,19 @@ def get_build(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
+@router.delete("/builds/{build_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_build(
+    build_id: str,
+    ontology_service: OntologyService = Depends(get_ontology_service),
+) -> None:
+    try:
+        ontology_service.delete_build(build_id)
+    except OntologyBuildNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except OntologyBuildError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.get("/builds/{build_id}/entities", response_model=list[OntologyCandidateEntityResponse])
 def list_build_entities(
     build_id: str,

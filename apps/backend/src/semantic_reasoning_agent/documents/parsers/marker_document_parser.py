@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import re
+from dataclasses import asdict
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -12,7 +14,6 @@ from typing import Any
 from PIL import Image
 from docx import Document as DocxDocument
 from openpyxl import load_workbook
-from pypdf import PdfReader
 
 from semantic_reasoning_agent.core.config import Settings
 from semantic_reasoning_agent.documents.errors import DocumentProcessingError
@@ -26,10 +27,11 @@ from semantic_reasoning_agent.documents.models import (
 
 
 PARSER_NAME = "marker"
-PARSER_VERSION = "marker-v1.10.2"
 _PAGE_MARKER_PATTERN = re.compile(r"^\d+$")
 _PAGE_DIVIDER_PATTERN = re.compile(r"^-{8,}$")
 _IMAGE_EXTENSIONS = ("png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff")
+_FALLBACK_TYPES = frozenset({"pdf", "docx", "xlsx"})
+_WHITESPACE_PATTERN = re.compile(r"\s+")
 
 
 class MarkerDocumentParser:
@@ -56,14 +58,22 @@ class MarkerDocumentParser:
     ) -> ParsedDocument:
         resolved_options = options or DocumentIngestionOptions()
         document_type = _document_type(filename)
+
         if self._settings.app_env == "test" and document_type in _FALLBACK_TYPES:
             return _parse_with_fallback(document_type, filename, content, title, resolved_options)
+
         try:
             return self._parse_with_marker(filename, content, title=title, options=resolved_options)
+        except ImportError as exc:
+            if _should_use_fallback(document_type, resolved_options):
+                return _parse_with_fallback(document_type, filename, content, title, resolved_options)
+            raise DocumentProcessingError(_marker_dependency_error()) from exc
+        except DocumentProcessingError as exc:
+            if _marker_runtime_unavailable(exc) and _should_use_fallback(document_type, resolved_options):
+                return _parse_with_fallback(document_type, filename, content, title, resolved_options)
+            raise
         except Exception as exc:
-            if document_type not in _FALLBACK_TYPES:
-                raise DocumentProcessingError(str(exc)) from exc
-            return _parse_with_fallback(document_type, filename, content, title, resolved_options)
+            raise DocumentProcessingError(str(exc)) from exc
 
     def extract_structured(
         self,
@@ -80,47 +90,48 @@ class MarkerDocumentParser:
             markdown = existing_markdown or content.decode("utf-8", errors="ignore")
             return StructuredExtractionResult(
                 parser_name=PARSER_NAME,
-                parser_version=PARSER_VERSION,
+                parser_version=_marker_version(),
                 result={
                     "schema": schema_json,
                     "items": [line.strip() for line in markdown.splitlines() if line.strip()][:5],
                 },
                 markdown=markdown,
             )
+
         self._configure_runtime()
         try:
             from marker.config.parser import ConfigParser
             from marker.converters.extraction import ExtractionConverter
         except ImportError as exc:
-            raise DocumentProcessingError("marker-pdf[full] is required for structured extraction.") from exc
+            raise DocumentProcessingError(_marker_dependency_error()) from exc
+
+        config = self._build_marker_config(
+            output_format="json",
+            use_llm=use_llm,
+            force_ocr=force_ocr,
+            strip_existing_ocr=strip_existing_ocr,
+            extract_images=False,
+            page_schema=schema_json,
+            existing_markdown=existing_markdown,
+        )
+        config_parser = ConfigParser(config)
+        converter = ExtractionConverter(
+            artifact_dict=_get_marker_models(),
+            config=config_parser.generate_config_dict(),
+            llm_service=self._resolve_llm_service(config_parser, use_llm),
+        )
 
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / filename
             path.write_bytes(content)
-            config_dict = {
-                "page_schema": schema_json,
-                "force_ocr": force_ocr,
-                "strip_existing_ocr": strip_existing_ocr,
-                "use_llm": use_llm,
-            }
-            if existing_markdown:
-                config_dict["existing_markdown"] = existing_markdown
-            config = ConfigParser(config_dict)
-            converter = ExtractionConverter(
-                config=config.generate_config_dict(),
-                artifact_dict=_get_marker_models(),
-                processor_list=config.get_processors(),
-                renderer=config.get_renderer(),
-                llm_service=config.get_llm_service(),
-                existing_markdown=existing_markdown,
-            )
             rendered = converter(str(path))
-            payload = rendered.model_dump()
+
+        payload = _safe_model_dump(rendered)
         return StructuredExtractionResult(
             parser_name=PARSER_NAME,
-            parser_version=PARSER_VERSION,
+            parser_version=_marker_version(),
             result=payload,
-            markdown=payload.get("markdown") or payload.get("original_markdown"),
+            markdown=payload.get("original_markdown") or payload.get("markdown"),
         )
 
     def _parse_with_marker(
@@ -131,97 +142,165 @@ class MarkerDocumentParser:
         title: str | None,
         options: DocumentIngestionOptions,
     ) -> ParsedDocument:
+        markdown_result = self._run_marker(filename, content, options=options, output_format="markdown")
+        if options.output_format == "chunks":
+            # Chunks are derived from markdown; no second Marker pass needed.
+            chunk_payload = [asdict(chunk) for chunk in _markdown_to_chunks(markdown_result["text"])]
+            requested_result = {
+                "text": json.dumps(chunk_payload),
+                "extension": "json",
+                "images": markdown_result["images"],
+                "payload": {"chunks": chunk_payload},
+                "metadata": markdown_result["metadata"],
+                "page_count": markdown_result["page_count"],
+                "warnings": markdown_result["warnings"],
+            }
+        else:
+            requested_result = (
+                markdown_result
+                if options.output_format == "markdown"
+                else self._run_marker(filename, content, options=options, output_format=options.output_format)
+            )
+
+        markdown = markdown_result["text"]
+        if not markdown.strip():
+            raise DocumentProcessingError(f"No extractable text was found in '{filename}'.")
+
+        metadata = markdown_result["metadata"]
+        page_count = _page_count_from(metadata) or markdown_result["page_count"]
+        quality_flags = _build_quality_flags(metadata, options)
+        warnings = tuple(markdown_result["warnings"])
+
+        artifacts = _build_artifacts(
+            markdown_result=markdown_result,
+            requested_result=requested_result,
+            requested_format=options.output_format,
+        )
+
+        requested_payload = requested_result["payload"]
+        return ParsedDocument(
+            document_type=_document_type(filename),
+            title=title or Path(filename).stem,
+            chunks=tuple(_markdown_to_chunks(markdown)),
+            parser_name=PARSER_NAME,
+            parser_version=_marker_version(),
+            markdown=markdown,
+            html=requested_result["text"] if options.output_format == "html" else None,
+            json_payload=requested_payload if isinstance(requested_payload, dict) else None,
+            metadata=metadata,
+            artifacts=tuple(artifacts),
+            page_count=page_count,
+            quality_flags=quality_flags,
+            warnings=warnings,
+            ocr_used="ocr_used" in quality_flags,
+        )
+
+    def _run_marker(
+        self,
+        filename: str,
+        content: bytes,
+        *,
+        options: DocumentIngestionOptions,
+        output_format: str,
+    ) -> dict[str, Any]:
         self._configure_runtime()
         try:
             from marker.config.parser import ConfigParser
-            from marker.converters.pdf import PdfConverter
             from marker.output import text_from_rendered
         except ImportError as exc:
-            raise DocumentProcessingError("marker-pdf[full] is required for document ingestion.") from exc
+            raise DocumentProcessingError(_marker_dependency_error()) from exc
+
+        config = self._build_marker_config(
+            output_format=output_format,
+            use_llm=options.use_llm or (
+                options.pdf_mode == "accurate" and self._settings.marker_use_llm_in_accurate
+            ),
+            force_ocr=options.force_ocr or options.pdf_mode == "accurate",
+            strip_existing_ocr=options.strip_existing_ocr,
+            extract_images=options.extract_images,
+        )
+        config_parser = ConfigParser(config)
+        converter_cls = config_parser.get_converter_cls()
+        converter = converter_cls(
+            config=config_parser.generate_config_dict(),
+            artifact_dict=_get_marker_models(),
+            processor_list=config_parser.get_processors(),
+            renderer=config_parser.get_renderer(),
+            llm_service=self._resolve_llm_service(config_parser, bool(config.get("use_llm"))),
+        )
 
         with TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / filename
             path.write_bytes(content)
-            config = ConfigParser(self._build_marker_config(options))
-            converter = PdfConverter(
-                config=config.generate_config_dict(),
-                artifact_dict=_get_marker_models(),
-                processor_list=config.get_processors(),
-                renderer=config.get_renderer(),
-                llm_service=config.get_llm_service(),
-            )
             rendered = converter(str(path))
-            text, metadata, images = text_from_rendered(rendered)
-            payload = rendered.model_dump()
 
-        markdown = _pick_markdown(text=text, payload=payload)
-        if not markdown.strip():
-            raise DocumentProcessingError(f"No extractable text was found in '{filename}'.")
-        chunks = tuple(_markdown_to_chunks(markdown))
-        artifacts = list(_build_image_artifacts(images))
-        artifacts.append(
-            ParsedArtifact(
-                artifact_type="markdown",
-                name="document.md",
-                content=markdown.encode("utf-8"),
-                content_type="text/markdown",
-            )
-        )
-        artifacts.append(
-            ParsedArtifact(
-                artifact_type="marker_json",
-                name="document.json",
-                content=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                content_type="application/json",
-            )
-        )
-        quality_flags = []
-        if options.force_ocr:
-            quality_flags.append("ocr_forced")
-        if metadata.get("page_stats"):
-            for page in metadata["page_stats"]:
-                method = page.get("text_extraction_method")
-                if method == "surya":
-                    quality_flags.append("ocr_used")
-                    break
-        return ParsedDocument(
-            document_type=_document_type(filename),
-            title=title or Path(filename).stem,
-            chunks=chunks,
-            parser_name=PARSER_NAME,
-            parser_version=PARSER_VERSION,
-            markdown=markdown,
-            json_payload=payload,
-            metadata=metadata or {},
-            artifacts=tuple(artifacts),
-            page_count=len(metadata.get("page_stats", []) or []) or None,
-            quality_flags=tuple(dict.fromkeys(quality_flags)),
-            warnings=(),
-            ocr_used="ocr_used" in quality_flags or options.force_ocr,
-        )
-
-    def _build_marker_config(self, options: DocumentIngestionOptions) -> dict[str, Any]:
-        config: dict[str, Any] = {
-            "output_format": options.output_format,
-            "paginate_output": True,
-            "disable_image_extraction": not options.extract_images,
-            "force_ocr": options.force_ocr or options.pdf_mode == "accurate",
-            "strip_existing_ocr": options.strip_existing_ocr,
-            "use_llm": options.use_llm or (
-                options.pdf_mode == "accurate" and self._settings.marker_use_llm_in_accurate
-            ),
+        text, extension, images = text_from_rendered(rendered)
+        payload = _safe_model_dump(rendered)
+        metadata = getattr(rendered, "metadata", None) or payload.get("metadata") or {}
+        return {
+            "text": text if isinstance(text, str) else "",
+            "extension": extension,
+            "images": images or {},
+            "payload": payload,
+            "metadata": metadata if isinstance(metadata, dict) else {},
+            "page_count": getattr(converter, "page_count", None),
+            "warnings": _marker_warnings(output_format, options.output_format),
         }
+
+    def _build_marker_config(
+        self,
+        *,
+        output_format: str,
+        use_llm: bool,
+        force_ocr: bool,
+        strip_existing_ocr: bool,
+        extract_images: bool,
+        page_schema: dict[str, Any] | None = None,
+        existing_markdown: str | None = None,
+    ) -> dict[str, Any]:
+        config: dict[str, Any] = {
+            "output_format": output_format,
+            "paginate_output": output_format == "markdown",
+            "disable_image_extraction": not extract_images,
+            "force_ocr": force_ocr,
+            "strip_existing_ocr": strip_existing_ocr,
+            "use_llm": use_llm,
+        }
+        if page_schema is not None:
+            config["page_schema"] = page_schema
+        if existing_markdown:
+            config["existing_markdown"] = existing_markdown
+        if self._settings.marker_max_pages_per_doc:
+            config["page_range"] = list(range(1, self._settings.marker_max_pages_per_doc + 1))
         if self._settings.marker_torch_device:
             config["TORCH_DEVICE"] = self._settings.marker_torch_device
+
+        llm_config = self._build_llm_config()
+        config.update(llm_config)
+        return config
+
+    def _build_llm_config(self) -> dict[str, Any]:
+        config: dict[str, Any] = {}
         if self._settings.google_api_key:
-            config["google_api_key"] = self._settings.google_api_key
+            config["gemini_api_key"] = self._settings.google_api_key
         if self._settings.openai_api_key:
             config["openai_api_key"] = self._settings.openai_api_key
-            if self._settings.openai_base_url:
-                config["openai_base_url"] = self._settings.openai_base_url
+        if self._settings.openai_base_url:
+            config["openai_base_url"] = self._settings.openai_base_url
         if self._settings.anthropic_api_key:
             config["claude_api_key"] = self._settings.anthropic_api_key
         return config
+
+    def _resolve_llm_service(self, config_parser: Any, use_llm: bool) -> str | None:
+        if not use_llm:
+            return None
+        if self._settings.google_api_key:
+            return "marker.services.gemini.GoogleGeminiService"
+        if self._settings.openai_api_key:
+            return "marker.services.openai.OpenAIService"
+        if self._settings.anthropic_api_key:
+            return "marker.services.claude.ClaudeService"
+        return config_parser.get_llm_service()
 
     def _configure_runtime(self) -> None:
         cache_dir = Path(self._settings.marker_model_cache_dir)
@@ -246,13 +325,117 @@ def _get_marker_models():
     return create_model_dict()
 
 
-def _pick_markdown(*, text: str, payload: dict[str, Any]) -> str:
-    markdown = payload.get("markdown")
-    if isinstance(markdown, str) and markdown.strip():
-        return markdown
-    if isinstance(text, str):
-        return text
-    return ""
+@lru_cache(maxsize=1)
+def _marker_version() -> str:
+    try:
+        return f"marker-v{version('marker-pdf')}"
+    except PackageNotFoundError:
+        return "marker-vunknown"
+
+
+def _marker_dependency_error() -> str:
+    return "marker-pdf[full] is required for Marker-based document ingestion."
+
+
+def _marker_runtime_unavailable(exc: DocumentProcessingError) -> bool:
+    return _marker_dependency_error() in str(exc)
+
+
+def _should_use_fallback(
+    document_type: str,
+    options: DocumentIngestionOptions,
+) -> bool:
+    if document_type not in _FALLBACK_TYPES:
+        return False
+    if document_type == "pdf" and options.pdf_mode == "accurate":
+        return False
+    return True
+
+
+def _marker_warnings(rendered_format: str, requested_format: str) -> tuple[str, ...]:
+    if rendered_format != requested_format:
+        return (f"marker_rendered_as_{rendered_format}_for_chunking",)
+    return ()
+
+
+def _safe_model_dump(rendered: Any) -> dict[str, Any]:
+    try:
+        return rendered.model_dump(mode="json")
+    except Exception:
+        return json.loads(rendered.model_dump_json())
+
+
+def _build_artifacts(
+    *,
+    markdown_result: dict[str, Any],
+    requested_result: dict[str, Any],
+    requested_format: str,
+) -> list[ParsedArtifact]:
+    artifacts = list(_build_image_artifacts(markdown_result["images"]))
+    artifacts.append(
+        ParsedArtifact(
+            artifact_type="markdown",
+            name="document.md",
+            content=markdown_result["text"].encode("utf-8"),
+            content_type="text/markdown",
+        )
+    )
+    artifacts.append(
+        ParsedArtifact(
+            artifact_type="marker_json",
+            name="document.json",
+            content=json.dumps(markdown_result["payload"], ensure_ascii=False).encode("utf-8"),
+            content_type="application/json",
+        )
+    )
+
+    if requested_format == "html":
+        artifacts.append(
+            ParsedArtifact(
+                artifact_type="html",
+                name="document.html",
+                content=requested_result["text"].encode("utf-8"),
+                content_type="text/html",
+            )
+        )
+    elif requested_format in {"json", "chunks"}:
+        artifacts.append(
+            ParsedArtifact(
+                artifact_type=requested_format,
+                name=f"document.{requested_result['extension']}",
+                content=requested_result["text"].encode("utf-8"),
+                content_type="application/json",
+            )
+        )
+
+    return artifacts
+
+
+def _page_count_from(metadata: dict[str, Any]) -> int | None:
+    page_stats = metadata.get("page_stats")
+    if isinstance(page_stats, list) and page_stats:
+        return len(page_stats)
+    return None
+
+
+def _build_quality_flags(
+    metadata: dict[str, Any],
+    options: DocumentIngestionOptions,
+) -> tuple[str, ...]:
+    quality_flags: list[str] = []
+    if options.force_ocr or options.pdf_mode == "accurate":
+        quality_flags.append("ocr_forced")
+
+    page_stats = metadata.get("page_stats")
+    if isinstance(page_stats, list):
+        for page in page_stats:
+            if not isinstance(page, dict):
+                continue
+            if page.get("text_extraction_method") == "surya":
+                quality_flags.append("ocr_used")
+                break
+
+    return tuple(dict.fromkeys(quality_flags))
 
 
 def _build_image_artifacts(images: dict[str, Image.Image]) -> list[ParsedArtifact]:
@@ -301,6 +484,7 @@ def _markdown_to_chunks(markdown: str) -> list[ParsedChunk]:
         line = lines[index].rstrip()
         stripped = line.strip()
         next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+
         if _PAGE_MARKER_PATTERN.match(stripped) and _PAGE_DIVIDER_PATTERN.match(next_line):
             flush()
             current_page = int(stripped) + 1
@@ -327,18 +511,11 @@ def _markdown_to_chunks(markdown: str) -> list[ParsedChunk]:
         index += 1
 
     flush()
-    return blocks or [
-        ParsedChunk(text=markdown.strip(), chunk_index=0, page_number=current_page)
-    ]
+    return blocks or [ParsedChunk(text=markdown.strip(), chunk_index=0, page_number=current_page)]
 
 
 def _document_type(filename: str) -> str:
     return Path(filename).suffix.lower().lstrip(".")
-
-
-_FALLBACK_TYPES = frozenset({"pdf", "docx", "xlsx"})
-_PDF_PAGE_MARKER_PATTERN = re.compile(r"\n\n(\d+)\n-{8,}\n\n")
-_WHITESPACE_PATTERN = re.compile(r"\s+")
 
 
 def _parse_with_fallback(
@@ -364,129 +541,40 @@ def _parse_pdf_fallback(
     options: DocumentIngestionOptions,
 ) -> ParsedDocument:
     try:
-        rendered = _render_pdf_with_marker(content, options)
-        pages = _extract_pdf_pages(rendered)
-        parser_name = "marker"
-        parser_version = "marker-v1"
-        ocr_used = options.pdf_mode == "accurate"
-        quality_flags = ("ocr_forced",) if options.pdf_mode == "accurate" else ()
-    except Exception:
-        if options.pdf_mode == "accurate":
-            raise
-        pages = _extract_pdf_pages_with_pypdf(content)
-        parser_name = "pypdf"
-        parser_version = "pypdf-fast-fallback-v1"
-        ocr_used = False
-        quality_flags = ("marker_unavailable",)
+        from pypdf import PdfReader
+    except Exception as exc:  # noqa: BLE001
+        raise DocumentProcessingError(_marker_dependency_error()) from exc
 
+    reader = PdfReader(BytesIO(content))
     chunks: list[ParsedChunk] = []
-    for page_number, page_blocks in pages:
-        for block in page_blocks:
-            text = _normalize_pdf_block(block)
-            if not text:
-                continue
-            section_title = text.splitlines()[0].strip() if text.splitlines() else None
-            chunks.append(
-                ParsedChunk(
-                    text=text,
-                    chunk_index=len(chunks),
-                    page_number=page_number,
-                    section_title=section_title,
-                )
+    markdown_lines: list[str] = []
+    for page_index, page in enumerate(reader.pages, start=1):
+        text = (page.extract_text() or "").strip()
+        if not text:
+            continue
+        markdown_lines.extend([str(page_index - 1), "--------", text, ""])
+        chunks.append(
+            ParsedChunk(
+                text=text,
+                chunk_index=len(chunks),
+                page_number=page_index,
+                section_title=f"Page {page_index}",
+                heading_path=f"Page {page_index}",
             )
-
+        )
     if not chunks:
         raise DocumentProcessingError(f"No extractable text was found in '{filename}'.")
-
+    markdown = "\n".join(markdown_lines).strip()
     return ParsedDocument(
         document_type="pdf",
         title=title or Path(filename).stem,
         chunks=tuple(chunks),
-        parser_name=parser_name,
-        parser_version=parser_version,
-        page_count=len(pages),
-        quality_flags=quality_flags,
-        ocr_used=ocr_used,
+        parser_name="pypdf",
+        parser_version="pypdf-fallback-v1",
+        markdown=markdown,
+        page_count=len(chunks),
+        warnings=("marker_runtime_unavailable",),
     )
-
-
-def _render_pdf_with_marker(content: bytes, options: DocumentIngestionOptions):
-    try:
-        from marker.converters.pdf import PdfConverter
-        from marker.models import create_model_dict
-        from marker.output import text_from_rendered
-    except ImportError as exc:
-        raise DocumentProcessingError(
-            "marker-pdf is required for PDF ingestion. Install project dependencies first."
-        ) from exc
-
-    with TemporaryDirectory() as tmpdir:
-        pdf_path = Path(tmpdir) / "document.pdf"
-        pdf_path.write_bytes(content)
-        config: dict[str, object] = {}
-        if options.pdf_mode == "accurate":
-            config["force_ocr"] = True
-        converter = PdfConverter(
-            artifact_dict=create_model_dict(),
-            config=config or None,
-        )
-        rendered = converter(str(pdf_path))
-        text, _, _ = text_from_rendered(rendered)
-    return rendered, text
-
-
-def _extract_pdf_pages(rendered_payload) -> list[tuple[int, list[str]]]:
-    rendered, text = rendered_payload
-    if hasattr(rendered, "children") and rendered.children:
-        pages: list[tuple[int, list[str]]] = []
-        for page_index, page in enumerate(rendered.children, start=1):
-            blocks: list[str] = []
-            for child in getattr(page, "children", []) or []:
-                candidate = (
-                    getattr(child, "markdown", None)
-                    or getattr(child, "html", None)
-                    or getattr(child, "text", None)
-                )
-                if candidate:
-                    blocks.append(str(candidate))
-            if blocks:
-                pages.append((page_index, blocks))
-        if pages:
-            return pages
-
-    split_pages = _split_paginated_pdf_text(text)
-    if split_pages:
-        return split_pages
-    return [(1, [text])]
-
-
-def _split_paginated_pdf_text(text: str) -> list[tuple[int, list[str]]]:
-    matches = list(_PDF_PAGE_MARKER_PATTERN.finditer(text))
-    if not matches:
-        return []
-    pages: list[tuple[int, list[str]]] = []
-    for index, match in enumerate(matches):
-        start = match.end()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        page_text = text[start:end].strip()
-        if page_text:
-            pages.append((int(match.group(1)) + 1, [page_text]))
-    return pages
-
-
-def _extract_pdf_pages_with_pypdf(content: bytes) -> list[tuple[int, list[str]]]:
-    reader = PdfReader(BytesIO(content))
-    pages: list[tuple[int, list[str]]] = []
-    for page_index, page in enumerate(reader.pages, start=1):
-        extracted = _normalize_pdf_block(page.extract_text() or "")
-        if extracted:
-            pages.append((page_index, [extracted]))
-    return pages
-
-
-def _normalize_pdf_block(value: str) -> str:
-    lines = [_WHITESPACE_PATTERN.sub(" ", line).strip() for line in str(value).splitlines()]
-    return "\n".join(line for line in lines if line)
 
 
 def _parse_docx_fallback(
@@ -557,18 +645,8 @@ def _parse_docx_fallback(
         chunks=tuple(chunks),
         parser_name="python-docx",
         parser_version="docx-structured-v2",
+        warnings=("marker_runtime_unavailable",),
     )
-
-
-def _normalize_inline_text(value: str) -> str:
-    return _WHITESPACE_PATTERN.sub(" ", value or "").strip()
-
-
-def _extract_heading_level(style_name: str) -> int:
-    match = re.search(r"(\d+)$", style_name)
-    if match:
-        return max(1, int(match.group(1)))
-    return 1
 
 
 def _parse_xlsx_fallback(
@@ -614,11 +692,7 @@ def _parse_xlsx_fallback(
             group = data_rows[offset : offset + 5]
             lines: list[str] = []
             for row_number, values in group:
-                pairs = [
-                    f"{header}: {value}"
-                    for header, value in zip(headers, values)
-                    if value
-                ]
+                pairs = [f"{header}: {value}" for header, value in zip(headers, values) if value]
                 if pairs:
                     lines.append(f"Row {row_number}: " + "; ".join(pairs))
             if not lines:
@@ -648,7 +722,17 @@ def _parse_xlsx_fallback(
         parser_name="openpyxl",
         parser_version="xlsx-structured-v2",
         sheet_names=tuple(sheet_names),
+        warnings=("marker_runtime_unavailable",),
     )
+def _normalize_inline_text(value: str) -> str:
+    return _WHITESPACE_PATTERN.sub(" ", value or "").strip()
+
+
+def _extract_heading_level(style_name: str) -> int:
+    match = re.search(r"(\d+)$", style_name)
+    if match:
+        return max(1, int(match.group(1)))
+    return 1
 
 
 def _stringify_cell(value: object) -> str:

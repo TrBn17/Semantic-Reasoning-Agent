@@ -2,6 +2,7 @@
 
 import { memo, startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { SettingsModelOption } from "@/shared/api/types";
+import { composeModelValue, parseModelValue } from "@/shared/utils/model-value";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -10,17 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-export function composeModelValue(provider: string, model: string) {
-  return `${provider}::${model}`;
-}
-
-export function parseModelValue(value?: string | null) {
-  if (!value) return null;
-  const [provider, model] = value.split("::");
-  if (!provider || !model) return null;
-  return { provider, model };
-}
 
 export function formatPresetLabel(preset: string) {
   return preset
@@ -39,13 +29,13 @@ type TaskModelPickerProps = {
   models: SettingsModelOption[];
   value?: string;
   onChange: (value: string) => void;
-  labels?: {
-    providerPlaceholder?: string;
-    allProviders?: string;
-    searchModelPlaceholder?: string;
-    selectModelPlaceholder?: string;
-    noModelMatch?: string;
-    assignmentUnavailable?: string;
+  labels: {
+    providerPlaceholder: string;
+    allProviders: string;
+    searchModelPlaceholder: string;
+    selectModelPlaceholder: string;
+    noModelMatch: string;
+    assignmentUnavailable: string;
   };
 };
 
@@ -101,10 +91,10 @@ export const TaskModelPicker = memo(function TaskModelPicker({
       <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)]">
         <Select value={providerFilter} onValueChange={setProviderFilter}>
           <SelectTrigger>
-            <SelectValue placeholder={labels?.providerPlaceholder ?? "Provider"} />
+            <SelectValue placeholder={labels.providerPlaceholder} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">{labels?.allProviders ?? "All providers"}</SelectItem>
+            <SelectItem value="all">{labels.allProviders}</SelectItem>
             {providers.map((provider) => (
               <SelectItem key={provider} value={provider}>
                 {provider}
@@ -119,13 +109,13 @@ export const TaskModelPicker = memo(function TaskModelPicker({
               setSearchText(event.target.value);
             })
           }
-          placeholder={labels?.searchModelPlaceholder ?? "Search model"}
+          placeholder={labels.searchModelPlaceholder}
         />
       </div>
 
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger>
-          <SelectValue placeholder={labels?.selectModelPlaceholder ?? "Select model"} />
+          <SelectValue placeholder={labels.selectModelPlaceholder} />
         </SelectTrigger>
         <SelectContent>
           {filteredModels.map((model) => (
@@ -141,12 +131,12 @@ export const TaskModelPicker = memo(function TaskModelPicker({
 
       {filteredModels.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          {labels?.noModelMatch ?? "No model matched the current filter."}
+          {labels.noModelMatch}
         </p>
       )}
       {value && !selected && (
         <p className="text-xs text-amber-700">
-          {labels?.assignmentUnavailable ?? "Current assignment is no longer available in the catalog."}
+          {labels.assignmentUnavailable}
         </p>
       )}
     </div>

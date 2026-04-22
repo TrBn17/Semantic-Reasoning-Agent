@@ -4,6 +4,18 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.core.runtime_constants import (
+    DEFAULT_TASK_TOP_K,
+    GRAPH_DOMAIN_WORKSPACE,
+    GRAPH_KEYWORDS,
+    NO_CONTEXT_MESSAGE,
+    ONTOLOGY_DOMAIN_WORKSPACE,
+    ONTOLOGY_KEYWORDS,
+    TOOL_GRAPHITI_SEARCH,
+    TOOL_ONTOLOGY_LOOKUP,
+    TOOL_RETRIEVAL_INTERNAL,
+    WORKFLOW_TASK_RESOLVE_CHAT,
+)
 from semantic_reasoning_agent.domain.contracts.llm import LLMMessage
 from semantic_reasoning_agent.domain.contracts.tool_envelope import OntologyContextRef, ToolConstraints, ToolEnvelope
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
@@ -11,16 +23,26 @@ from semantic_reasoning_agent.schemas.agent_profiles import AgentProfileResponse
 from semantic_reasoning_agent.schemas.chat import SendMessageRequest
 from semantic_reasoning_agent.schemas.retrieval import Citation
 from semantic_reasoning_agent.schemas.tasks import TaskResolveRequest, TaskResolveResponse
-from semantic_reasoning_agent.schemas.tools import CitationAnchorSchema, EvidenceSchema, ProvenanceSchema
+from semantic_reasoning_agent.schemas.tools import EvidenceSchema
+from semantic_reasoning_agent.services.agentic_loop_service import AgenticLoopService
 from semantic_reasoning_agent.services.agent_capability_service import (
     get_capability_preset,
     has_explicit_capability_config,
 )
 from semantic_reasoning_agent.services.agent_profile_service import AgentProfileService
+from semantic_reasoning_agent.services.conflict_engine import ConflictEngine
 from semantic_reasoning_agent.services.conversation_service import ConversationService
+from semantic_reasoning_agent.services.context_assembler_service import ContextAssemblerService
+from semantic_reasoning_agent.services.evidence_judge import EvidenceJudge
 from semantic_reasoning_agent.services.knowledge_pack_service import KnowledgePackService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
+from semantic_reasoning_agent.services.ontology_grounding_service import OntologyGroundingService
+from semantic_reasoning_agent.services.output_router import OutputRouter
+from semantic_reasoning_agent.services.runtime_audit_service import RuntimeAuditService
+from semantic_reasoning_agent.services.task_interpreter import TaskInterpreter
+from semantic_reasoning_agent.services.evidence_normalization import citation_from_evidence, evidence_to_schema
 from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
+from semantic_reasoning_agent.services.workflow_selector import WorkflowSelector
 
 
 @dataclass(frozen=True)
@@ -61,9 +83,10 @@ class TaskRuntimeService:
         model_config_service: ModelConfigService,
         adapter_registry: AdapterRegistry,
         tool_runtime: ToolRuntime,
-        conversation_service: ConversationService,
-        agent_profile_service: AgentProfileService,
-        knowledge_pack_service: KnowledgePackService,
+        conversation_service: ConversationService | None = None,
+        agent_profile_service: AgentProfileService | None = None,
+        knowledge_pack_service: KnowledgePackService | None = None,
+        runtime_audit_service: RuntimeAuditService | None = None,
     ) -> None:
         self._settings = settings
         self._model_config_service = model_config_service
@@ -72,6 +95,15 @@ class TaskRuntimeService:
         self._conversation_service = conversation_service
         self._agent_profile_service = agent_profile_service
         self._knowledge_pack_service = knowledge_pack_service
+        self._runtime_audit_service = runtime_audit_service
+        self._task_interpreter = TaskInterpreter()
+        self._grounding_service = OntologyGroundingService()
+        self._context_assembler = ContextAssemblerService()
+        self._evidence_judge = EvidenceJudge()
+        self._conflict_engine = ConflictEngine()
+        self._output_router = OutputRouter()
+        self._workflow_selector = WorkflowSelector()
+        self._agentic_loop = AgenticLoopService()
 
     def resolve_request(
         self,
@@ -88,12 +120,22 @@ class TaskRuntimeService:
             request_document_ids=request.document_ids,
         )
         task_id = str(uuid4())
-        workflow_id = "task.resolve.chat"
+        workflow_id = WORKFLOW_TASK_RESOLVE_CHAT
         evidence: list[EvidenceSchema] = []
         citations: list[Citation] = []
         next_action_hints: list[str] = []
         plan = self._build_tool_plan(request, scope=scope)
-        for step in plan:
+        interpretation = self._task_interpreter.interpret(request)
+        grounding = self._grounding_service.ground(request.content, interpretation)
+        selection = self._workflow_selector.select(interpretation=interpretation, grounding=grounding)
+        workflow_id = selection.workflow_id
+        trace: list[dict[str, str]] = [
+            {"stage": "interpret", "intent": interpretation.intent},
+            {"stage": "grounding", "status": grounding.grounding_status},
+            {"stage": "workflow", "workflow_id": workflow_id, "reason": selection.reason},
+        ]
+        validated_plan = self._agentic_loop.validate_plan(plan, scope)
+        for step in validated_plan[: self._agentic_loop.max_steps_for(request)]:
             if step.tool_name not in scope.allowed_tool_names:
                 if step.required:
                     next_action_hints.append(f"blocked:{step.tool_name}")
@@ -105,16 +147,29 @@ class TaskRuntimeService:
                 workflow_id=workflow_id,
                 request=request,
             )
+            trace.append(
+                {
+                    "stage": "tool_call",
+                    "tool_name": step.tool_name,
+                    "status": result.status,
+                }
+            )
             for item in result.evidence:
                 if item.source_type not in scope.evidence_sources:
                     continue
-                evidence.append(_to_evidence_schema(item))
+                evidence.append(evidence_to_schema(item))
                 if item.source_type == "internal_chunk":
-                    citations.append(_citation_from_evidence(item))
+                    citations.append(citation_from_evidence(item))
             next_action_hints.extend(result.next_action_hints)
 
-        content = self._compose_answer(request.content, citations=citations, evidence=evidence)
-        if not citations and not evidence and scope.allow_model_only_fallback:
+        bundle = self._context_assembler.assemble(citations=citations, evidence=evidence)
+        sufficiency = self._evidence_judge.evaluate(bundle)
+        conflict_report = self._conflict_engine.analyze(bundle)
+        route = self._output_router.route(sufficiency, conflict_report)
+        trace.append({"stage": "route", "output_type": route.output_type, "reason": route.reason})
+
+        content = self._compose_answer(request.content, citations=list(bundle.citations), evidence=list(bundle.evidence))
+        if route.output_type == "fallback_answer" and scope.allow_model_only_fallback:
             content = self._fallback_answer(
                 prompt=request.content,
                 workspace_id=workspace_id,
@@ -122,24 +177,52 @@ class TaskRuntimeService:
                 model=model,
                 system_prompt=system_prompt,
             )
+        elif route.output_type == "needs_review":
+            content = "Conflicting evidence detected. Review is required before final answer."
+
+        if self._runtime_audit_service is not None:
+            self._runtime_audit_service.record_task_run(
+                task_id=task_id,
+                workspace_id=workspace_id,
+                workflow_id=workflow_id,
+                output_type=route.output_type,
+                stop_reason=route.reason,
+                grounded=route.grounded,
+                content=content,
+                trace=trace,
+                tool_calls=[item for item in trace if item.get("stage") == "tool_call"],
+                conflict_details=[
+                    {"conflict_type": item.conflict_type, "severity": item.severity, "detail": item.detail}
+                    for item in conflict_report.conflicts
+                ],
+            )
 
         return TaskRuntimeResult(
             workflow_id=workflow_id,
             content=content,
-            citations=citations,
-            evidence=evidence,
-            next_action_hints=sorted(set(next_action_hints)),
+            citations=list(bundle.citations),
+            evidence=list(bundle.evidence),
+            next_action_hints=sorted(set(next_action_hints + list(bundle.trace_notes))),
+            tool_calls=[{"step": item.get("stage"), "tool_name": item.get("tool_name")} for item in trace if item.get("stage") == "tool_call"],
         )
 
     def resolve_api_request(self, request: TaskResolveRequest) -> TaskResolveResponse:
-        result = self.resolve_request(request)
+        result = self.resolve_request(
+            request,
+            provider=request.provider,
+            model=request.model,
+        )
         return TaskResolveResponse(
             task_id=str(uuid4()),
+            output_type="answer",
             workflow_id=result.workflow_id,
+            stop_reason="completed",
+            grounded=bool(result.citations or result.evidence),
             content=result.content,
             citations=result.citations,
-            evidence=result.evidence,
+            evidence=[item.model_dump(mode="json") for item in result.evidence],
             next_action_hints=result.next_action_hints,
+            trace=result.tool_calls,
         )
 
     def resolve_chat_request(
@@ -172,12 +255,14 @@ class TaskRuntimeService:
     ) -> tuple[str, AgentProfileResponse | None]:
         workspace_id = request.workspace_id or self._settings.default_workspace_id
         profile_id = request.agent_profile_id
-        if profile_id is None and request.conversation_id:
+        if profile_id is None and request.conversation_id and self._conversation_service is not None:
             conversation = self._conversation_service.get_conversation(request.conversation_id)
             workspace_id = request.workspace_id or conversation.workspace_id
             profile_id = conversation.agent_profile_id
-        if profile_id:
+        if profile_id and self._agent_profile_service is not None:
             return workspace_id, self._agent_profile_service.get_profile(profile_id)
+        if self._agent_profile_service is None:
+            return workspace_id, None
         return workspace_id, self._agent_profile_service.get_default_profile(workspace_id)
 
     def _build_execution_scope(
@@ -213,7 +298,7 @@ class TaskRuntimeService:
         pack_document_ids = self._knowledge_pack_service.resolve_document_scope(
             workspace_id,
             profile.knowledge_pack_ids,
-        )
+        ) if self._knowledge_pack_service is not None else []
         if capability_configured:
             allowed_document_ids = set(pack_document_ids)
             if request_document_ids:
@@ -244,14 +329,14 @@ class TaskRuntimeService:
     ) -> list[ToolPlanStep]:
         preset = get_capability_preset(scope.capability_preset)
         plan: list[ToolPlanStep] = []
-        retrieval_should_run = "retrieval.internal" in scope.allowed_tool_names and (
+        retrieval_should_run = TOOL_RETRIEVAL_INTERNAL in scope.allowed_tool_names and (
             bool(scope.derived_document_ids)
             or request.use_retrieval and not scope.capability_configured
         )
         if retrieval_should_run:
             plan.append(
                 ToolPlanStep(
-                    tool_name="retrieval.internal",
+                    tool_name=TOOL_RETRIEVAL_INTERNAL,
                     arguments={
                         "query": request.content,
                         "document_ids": list(scope.derived_document_ids),
@@ -262,18 +347,18 @@ class TaskRuntimeService:
                     can_fallback=True,
                 )
             )
-        if preset.ontology_enabled and "ontology.lookup" in scope.allowed_tool_names and _should_use_ontology(request.content):
+        if preset.ontology_enabled and TOOL_ONTOLOGY_LOOKUP in scope.allowed_tool_names and _should_use_ontology(request.content):
             plan.append(
                 ToolPlanStep(
-                    tool_name="ontology.lookup",
+                    tool_name=TOOL_ONTOLOGY_LOOKUP,
                     arguments={"mode": "entity_lookup", "query": request.content},
                     reason="Use ontology context for entity/type grounding.",
                 )
             )
-        if preset.graph_enabled and "graphiti.search" in scope.allowed_tool_names and _should_use_graph(request.content):
+        if preset.graph_enabled and TOOL_GRAPHITI_SEARCH in scope.allowed_tool_names and _should_use_graph(request.content):
             plan.append(
                 ToolPlanStep(
-                    tool_name="graphiti.search",
+                    tool_name=TOOL_GRAPHITI_SEARCH,
                     arguments={"query": request.content, "max_results": request.top_k},
                     reason="Use graph context for relationship-oriented questions.",
                 )
@@ -290,10 +375,10 @@ class TaskRuntimeService:
         request: TaskResolveRequest,
     ):
         ontology_context = None
-        if step.tool_name == "ontology.lookup":
-            ontology_context = OntologyContextRef(domain="workspace_ontology")
-        elif step.tool_name == "graphiti.search":
-            ontology_context = OntologyContextRef(domain="workspace_runtime_graph")
+        if step.tool_name == TOOL_ONTOLOGY_LOOKUP:
+            ontology_context = OntologyContextRef(domain=ONTOLOGY_DOMAIN_WORKSPACE)
+        elif step.tool_name == TOOL_GRAPHITI_SEARCH:
+            ontology_context = OntologyContextRef(domain=GRAPH_DOMAIN_WORKSPACE)
         return self._tool_runtime.invoke(
             ToolEnvelope(
                 call_id=uuid4(),
@@ -319,12 +404,12 @@ class TaskRuntimeService:
         system_prompt: str | None,
     ) -> str:
         if not provider or not model:
-            return "No indexed document or graph context matched that question."
+            return NO_CONTEXT_MESSAGE
         if not self._model_config_service.is_ready(provider, model, workspace_id):
-            return "No indexed document or graph context matched that question."
+            return NO_CONTEXT_MESSAGE
         adapter = self._adapter_registry.get(provider)
         if adapter is None:
-            return "No indexed document or graph context matched that question."
+            return NO_CONTEXT_MESSAGE
         response = adapter.run(
             messages=[LLMMessage(role="user", content=prompt)],
             tools=(),
@@ -362,89 +447,14 @@ class TaskRuntimeService:
             for item in graph_lines[:5]:
                 lines.append(f"- {item.title}: {item.content}")
             return "\n".join(lines)
-        return "No indexed document or graph context matched that question."
+        return NO_CONTEXT_MESSAGE
 
 
 def _should_use_ontology(prompt: str) -> bool:
     lowered = prompt.lower()
-    keywords = ("ontology", "entity", "entities", "type", "taxonomy", "schema")
-    return any(keyword in lowered for keyword in keywords)
+    return any(keyword in lowered for keyword in ONTOLOGY_KEYWORDS)
 
 
 def _should_use_graph(prompt: str) -> bool:
     lowered = prompt.lower()
-    keywords = ("graph", "relationship", "related", "connected", "dependency", "depends on")
-    return any(keyword in lowered for keyword in keywords)
-
-
-def _citation_from_evidence(evidence) -> Citation:  # noqa: ANN001
-    document_type = "document"
-    if evidence.page is not None:
-        document_type = "pdf"
-    elif evidence.sheet_name:
-        document_type = "xlsx"
-    elif evidence.row_range:
-        document_type = "csv"
-    elif evidence.section:
-        document_type = "docx"
-    row_start, row_end = _parse_row_range(evidence.row_range)
-    return Citation(
-        chunk_id=evidence.chunk_id or "",
-        document_id=evidence.document_id or "",
-        document_title=evidence.title,
-        document_type=document_type,
-        excerpt=evidence.content,
-        location_label=evidence.citation_anchor.label,
-        source_url=evidence.uri or "",
-        page_number=evidence.page,
-        heading_path=evidence.section,
-        sheet_name=evidence.sheet_name,
-        row_start=row_start,
-        row_end=row_end,
-    )
-
-
-def _parse_row_range(row_range: str | None) -> tuple[int | None, int | None]:
-    if not row_range or "-" not in row_range:
-        return None, None
-    start, end = row_range.split("-", 1)
-    try:
-        return int(start), int(end)
-    except ValueError:
-        return None, None
-
-
-def _to_evidence_schema(evidence) -> EvidenceSchema:  # noqa: ANN001
-    return EvidenceSchema(
-        evidence_id=evidence.evidence_id,
-        source_type=evidence.source_type,
-        title=evidence.title,
-        content=evidence.content,
-        citation_anchor=CitationAnchorSchema(
-            anchor_type=evidence.citation_anchor.anchor_type,
-            label=evidence.citation_anchor.label,
-            locator=evidence.citation_anchor.locator,
-        ),
-        provenance=ProvenanceSchema(
-            workspace_id=evidence.provenance.workspace_id,
-            captured_at=evidence.provenance.captured_at,
-            source_id=evidence.provenance.source_id,
-            tool_call_id=evidence.provenance.tool_call_id,
-            parser_version=evidence.provenance.parser_version,
-            extractor_version=evidence.provenance.extractor_version,
-            model=evidence.provenance.model,
-        ),
-        summary=evidence.summary,
-        uri=evidence.uri,
-        document_id=evidence.document_id,
-        chunk_id=evidence.chunk_id,
-        page=evidence.page,
-        section=evidence.section,
-        sheet_name=evidence.sheet_name,
-        row_range=evidence.row_range,
-        entity_ids=list(evidence.entity_ids),
-        relation_ids=list(evidence.relation_ids),
-        score=evidence.score,
-        trust_score=evidence.trust_score,
-        freshness_ts=evidence.freshness_ts,
-    )
+    return any(keyword in lowered for keyword in GRAPH_KEYWORDS)

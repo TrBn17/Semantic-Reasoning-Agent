@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import delete, select
 
 from semantic_reasoning_agent.core.config import Settings
+from semantic_reasoning_agent.core.runtime_constants import DEFAULT_TASK_TOP_K
+from semantic_reasoning_agent.core.time import utc_now
 from semantic_reasoning_agent.documents.models import IndexedChunk, ParsedDocument
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import DocumentChunkORM
@@ -11,9 +12,6 @@ from semantic_reasoning_agent.infrastructure.vector import TokenVectorBackend
 from semantic_reasoning_agent.ports.vector_backend import VectorBackendPort
 from semantic_reasoning_agent.schemas.documents import DocumentResponse
 from semantic_reasoning_agent.schemas.retrieval import Citation, RetrievalResult, RetrievalSearchResponse
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class RetrievalService:
@@ -98,7 +96,7 @@ class RetrievalService:
         query: str,
         workspace_id: str | None = None,
         document_ids: list[str] | None = None,
-        top_k: int = 3,
+        top_k: int = DEFAULT_TASK_TOP_K,
     ) -> RetrievalSearchResponse:
         resolved_workspace_id = workspace_id or self._settings.default_workspace_id
         with self._database_manager.session() as session:

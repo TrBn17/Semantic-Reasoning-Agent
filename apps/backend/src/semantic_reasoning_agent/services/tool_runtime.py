@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Sequence
 from uuid import uuid4
 
@@ -10,11 +10,8 @@ from semantic_reasoning_agent.domain.contracts.tool_envelope import (
     ToolMeta,
     ToolResult,
 )
+from semantic_reasoning_agent.core.time import utc_now
 from semantic_reasoning_agent.services.tool_registry import ToolRegistry
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class ToolRuntime:
@@ -37,6 +34,7 @@ class ToolRuntime:
 
     def __init__(self, registry: ToolRegistry) -> None:
         self._registry = registry
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="tool-runtime")
 
     def invoke(self, envelope: ToolEnvelope) -> ToolResult:
         spec = self._registry.spec(envelope.tool_name)
@@ -66,13 +64,12 @@ class ToolRuntime:
             )
 
         trace_id = str(uuid4())
-        started_at = _utc_now()
+        started_at = utc_now()
         timeout_s = max(spec.timeout_ms, envelope.constraints.timeout_ms) / 1000.0
 
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(tool.run, envelope)
-                result = future.result(timeout=timeout_s)
+            future = self._executor.submit(tool.run, envelope)
+            result = future.result(timeout=timeout_s)
         except concurrent.futures.TimeoutError:
             return self._failed(
                 envelope,
@@ -92,7 +89,7 @@ class ToolRuntime:
                 started_at=started_at,
             )
 
-        finished_at = _utc_now()
+        finished_at = utc_now()
         latency_ms = int((finished_at - started_at).total_seconds() * 1000)
 
         normalized_evidence = tuple(result.evidence)
@@ -129,8 +126,8 @@ class ToolRuntime:
         trace_id: str | None = None,
         started_at: datetime | None = None,
     ) -> ToolResult:
-        started = started_at or _utc_now()
-        finished = _utc_now()
+        started = started_at or utc_now()
+        finished = utc_now()
         latency_ms = int((finished - started).total_seconds() * 1000)
         return ToolResult(
             call_id=envelope.call_id,

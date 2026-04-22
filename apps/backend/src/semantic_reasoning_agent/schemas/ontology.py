@@ -337,3 +337,7 @@ class OntologyGraphResponse(BaseModel):
     draft_summary: OntologyGraphDraftSummaryResponse = Field(
         default_factory=OntologyGraphDraftSummaryResponse
     )
+    graphiti_indexed: bool = Field(
+        default=False,
+        description="True when the latest Graphiti sync for this workspace completed with data written.",
+    )

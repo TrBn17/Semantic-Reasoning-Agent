@@ -16,7 +16,7 @@ export type Capabilities = {
   mcpAvailable: boolean;
 };
 
-const DEFAULT_CAPABILITIES: Capabilities = {
+export const BASE_CAPABILITIES: Capabilities = {
   askAvailable: true,
   documentsAvailable: true,
   evidenceAvailable: true,
@@ -24,7 +24,7 @@ const DEFAULT_CAPABILITIES: Capabilities = {
   graphAvailable: true,
   settingsAvailable: true,
 
-  tasksAvailable: false,
+  tasksAvailable: true,
   workflowsAvailable: false,
   toolsAvailable: true,
   artifactsAvailable: false,
@@ -34,6 +34,9 @@ const DEFAULT_CAPABILITIES: Capabilities = {
   mcpAvailable: false,
 };
 
-export function getCapabilities(): Capabilities {
-  return DEFAULT_CAPABILITIES;
+export function mergeCapabilities(
+  base: Capabilities,
+  updates: Partial<Capabilities>,
+): Capabilities {
+  return { ...base, ...updates };
 }

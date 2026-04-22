@@ -33,7 +33,7 @@ import { listBuilds } from "@/shared/api/ontology";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { Badge } from "@/components/ui/badge";
-import { formatDateTime } from "@/shared/utils";
+import { Time } from "@/shared/components/time";
 
 export function DocumentDetail({ documentId }: { documentId: string }) {
   const queryClient = useQueryClient();
@@ -121,8 +121,8 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
             </p>
           )}
           <p className="mt-1 text-xs text-muted-foreground">
-            Created {formatDateTime(doc.created_at)} · Updated{" "}
-            {formatDateTime(doc.updated_at)}
+            Created <Time value={doc.created_at} className="inline" /> · Updated{" "}
+            <Time value={doc.updated_at} className="inline" />
           </p>
           {doc.tags.length > 0 && (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -172,10 +172,10 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
                     <JobStatusBadge status={job.status} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatDateTime(job.started_at)}
+                    <Time value={job.started_at} className="inline" />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatDateTime(job.finished_at)}
+                    <Time value={job.finished_at} className="inline" />
                   </TableCell>
                   <TableCell className="text-xs text-destructive">
                     {job.error_message ?? "—"}
@@ -223,7 +223,7 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
                 <div className="font-mono text-xs">{b.id.slice(0, 12)}</div>
                 <div className="truncate text-xs text-muted-foreground">
                   {b.entity_count} entities · {b.relation_count} relations ·{" "}
-                  {formatDateTime(b.updated_at)}
+                  <Time value={b.updated_at} className="inline" />
                 </div>
               </div>
               <Badge variant="outline">{b.status}</Badge>

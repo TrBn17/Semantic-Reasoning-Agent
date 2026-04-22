@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import type { DocumentResponse } from "@/shared/api/types";
+import { useI18n } from "@/shared/i18n/use-language";
 
 export interface ComposerSubmitPayload {
   content: string;
@@ -36,6 +37,7 @@ export function MessageComposer({
   documents?: DocumentResponse[];
   toolToggles?: ToolToggle[];
 }) {
+  const { t } = useI18n();
   const [useRetrieval, setUseRetrieval] = useState(false);
   const [topK, setTopK] = useState(3);
   const [content, setContent] = useState("");
@@ -85,10 +87,10 @@ export function MessageComposer({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant={useRetrieval ? "info" : "outline"}>
-              {useRetrieval ? "Retrieval on" : "Retrieval off"}
+              {useRetrieval ? t.chat.retrievalOn : t.chat.retrievalOff}
             </Badge>
             {documentIds.length > 0 && (
-              <Badge variant="outline">{documentIds.length} scoped docs</Badge>
+              <Badge variant="outline">{t.chat.scopedDocs.replace("{count}", String(documentIds.length))}</Badge>
             )}
             {toolToggles
               .filter((tool) => sessionTools[tool.tool_name] ?? tool.enabled)
@@ -106,7 +108,7 @@ export function MessageComposer({
             onClick={() => setAdvancedOpen((current) => !current)}
           >
             <SlidersHorizontal className="h-4 w-4" />
-            Advanced
+            {t.chat.advanced}
             <ChevronDown className={`h-4 w-4 transition ${advancedOpen ? "rotate-180" : ""}`} />
           </Button>
         </div>
@@ -121,12 +123,12 @@ export function MessageComposer({
                   checked={useRetrieval}
                   onChange={(event) => setUseRetrieval(event.target.checked)}
                 />
-                Use indexed document retrieval
+                {t.chat.useRetrieval}
               </label>
               {useRetrieval && (
                 <>
                   <div className="flex items-center gap-2">
-                    <Label htmlFor="top-k">Top K</Label>
+                    <Label htmlFor="top-k">{t.chat.topK}</Label>
                     <Input
                       id="top-k"
                       type="number"
@@ -138,7 +140,7 @@ export function MessageComposer({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Document scope</Label>
+                    <Label>{t.chat.documentIds}</Label>
                     <ScrollArea className="h-40 rounded-xl border bg-background">
                       <div className="space-y-1 p-2">
                         {indexedDocuments.map((document) => {
@@ -154,14 +156,14 @@ export function MessageComposer({
                             >
                               <span className="truncate">{document.title}</span>
                               <span className="text-[11px] text-muted-foreground">
-                                {selected ? "Scoped" : "All-workspace"}
+                                {selected ? t.chat.scoped : t.chat.allWorkspace}
                               </span>
                             </button>
                           );
                         })}
                         {indexedDocuments.length === 0 && (
                           <div className="px-3 py-5 text-sm text-muted-foreground">
-                            No indexed documents available yet.
+                            {t.chat.noIndexedDocuments}
                           </div>
                         )}
                       </div>
@@ -172,7 +174,7 @@ export function MessageComposer({
             </div>
 
             <div className="space-y-3">
-              <Label>Session tool visibility</Label>
+              <Label>{t.chat.sessionToolVisibility}</Label>
               <div className="space-y-2 rounded-xl border bg-background p-3">
                 {toolToggles.length === 0 && (
                   <p className="text-sm text-muted-foreground">
@@ -213,13 +215,13 @@ export function MessageComposer({
             value={content}
             onChange={(event) => setContent(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask a question. Enter sends, Shift+Enter adds a newline."
+            placeholder={t.chat.noContentHint}
             className="min-h-[92px] flex-1 rounded-2xl border-0 bg-muted/30 px-4 py-3 shadow-inner"
             disabled={disabled}
           />
           <Button type="submit" disabled={disabled || !content.trim()} size="lg" className="h-12 rounded-xl px-5">
             <Send className="h-4 w-4" />
-            Send
+            {t.chat.send}
           </Button>
         </div>
       </div>

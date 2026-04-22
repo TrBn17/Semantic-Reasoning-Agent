@@ -13,7 +13,19 @@
       "Bash(npm install *)",
       "Bash(python -c \"from apps.backend.src.semantic_reasoning_agent.services.provider_models_service import ProviderModelsService, ProviderModel; print\\('ok'\\)\")",
       "Bash(python -c ' *)",
-      "Bash(grep -E \"\\\\.py$\")"
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(git ls-tree *)",
+      "Bash(npx tsc *)",
+      "Bash(python -m py_compile apps/backend/src/semantic_reasoning_agent/core/container.py apps/backend/src/semantic_reasoning_agent/services/task_runtime.py apps/backend/src/semantic_reasoning_agent/services/ontology_service.py apps/backend/src/semantic_reasoning_agent/services/agent_profile_service.py apps/backend/src/semantic_reasoning_agent/infrastructure/ontology/llm_extractor.py apps/backend/src/semantic_reasoning_agent/persistence/models/ontology.py apps/backend/src/semantic_reasoning_agent/schemas/ontology.py)",
+      "Bash(git push *)",
+      "Bash(python -m pyflakes src)",
+      "Bash(python -c \"import ast, pathlib; [print\\(f\\) for f in pathlib.Path\\('src'\\).rglob\\('*.py'\\) if not ast.parse\\(open\\(f,encoding='utf8'\\).read\\(\\)\\)]\")",
+      "Bash(python -m pip install pyflakes -q)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(python *)",
+      "Bash(sed -i 's|`GET /api/v1/models`|`GET /api/v1/settings/models`|g' API_USAGE.md docs/api/phase-1-contract.md)",
+      "Bash(sed -i 's|GET /api/v1/models,|GET /api/v1/settings/models,|g' API_USAGE.md)",
+      "Bash(git check-ignore *)"
     ]
   }
 }

@@ -99,7 +99,7 @@ export function UploadDialog() {
           {t.common.upload}
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent closeLabel={t.common.accessibility.closeDialog}>
         <DialogHeader>
           <DialogTitle>{t.documents.uploadTitle}</DialogTitle>
           <DialogDescription>

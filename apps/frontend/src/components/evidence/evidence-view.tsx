@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { EvidenceDetailDrawer } from "@/components/evidence/evidence-detail-drawer";
@@ -11,39 +11,37 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { listBuildEntities, listBuildRelations, listBuilds } from "@/shared/api/ontology";
-import { searchRetrieval } from "@/shared/api/retrieval";
-import { queryKeys } from "@/shared/query/keys";
-import { useWorkspaceStore } from "@/shared/state/workspace-store";
-import type {
-  EvidenceItemViewModel,
-  EvidenceSourceType,
-} from "@/entities/evidence/types";
+import type { EvidenceSourceType, EvidenceItemViewModel } from "@/entities/evidence/types";
 import {
   candidateEntityToEvidence,
   candidateRelationToEvidence,
   retrievalResultToEvidence,
 } from "@/shared/api/adapters/evidence";
+import { listBuildEntities, listBuildRelations, listBuilds } from "@/shared/api/ontology";
+import { searchRetrieval } from "@/shared/api/retrieval";
 import { useCapabilities } from "@/shared/capabilities/useCapabilities";
+import { useI18n } from "@/shared/i18n/use-language";
+import { queryKeys } from "@/shared/query/keys";
+import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { track } from "@/shared/telemetry/track";
 
-const SOURCE_LABEL: Record<EvidenceSourceType, string> = {
-  retrieval_citation: "Retrieval",
-  document_chunk: "Document",
-  ontology_candidate_entity: "Ontology entity",
-  ontology_candidate_relation: "Ontology relation",
-};
-
 export function EvidenceView() {
+  const { t } = useI18n();
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const caps = useCapabilities();
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(5);
   const [selected, setSelected] = useState<EvidenceItemViewModel | null>(null);
   const [includeOntology, setIncludeOntology] = useState(true);
-  const [enabledSources, setEnabledSources] = useState<
-    Record<EvidenceSourceType, boolean>
-  >({
+  const [page, setPage] = useState(1);
+  const pageSize = 12;
+  const sourceLabels: Record<EvidenceSourceType, string> = {
+    retrieval_citation: t.evidenceUi.retrievalSource,
+    document_chunk: t.evidenceUi.documentSource,
+    ontology_candidate_entity: t.evidenceUi.ontologyEntitySource,
+    ontology_candidate_relation: t.evidenceUi.ontologyRelationSource,
+  };
+  const [enabledSources, setEnabledSources] = useState<Record<EvidenceSourceType, boolean>>({
     retrieval_citation: true,
     document_chunk: true,
     ontology_candidate_entity: true,
@@ -57,7 +55,7 @@ export function EvidenceView() {
         workspace_id: workspaceId ?? undefined,
         top_k: topK,
       }),
-    onError: (err) => toast.error(`Search failed: ${(err as Error).message}`),
+    onError: (err) => toast.error(`${t.evidenceUi.searchFailedPrefix} ${(err as Error).message}`),
   });
 
   const builds = useQuery({
@@ -85,21 +83,21 @@ export function EvidenceView() {
       }
     }
     if (includeOntology) {
-      for (const e of buildEntities.data ?? []) {
-        out.push(candidateEntityToEvidence(e));
-      }
-      for (const r of buildRelations.data ?? []) {
-        out.push(candidateRelationToEvidence(r));
-      }
+      for (const e of buildEntities.data ?? []) out.push(candidateEntityToEvidence(e));
+      for (const r of buildRelations.data ?? []) out.push(candidateRelationToEvidence(r));
     }
     return out.filter((i) => enabledSources[i.sourceType]);
-  }, [
-    searchMutation.data,
-    buildEntities.data,
-    buildRelations.data,
-    includeOntology,
-    enabledSources,
-  ]);
+  }, [buildEntities.data, buildRelations.data, enabledSources, includeOntology, searchMutation.data]);
+
+  const pagedItems = useMemo(
+    () => items.slice((page - 1) * pageSize, page * pageSize),
+    [items, page],
+  );
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
 
   const loading =
     searchMutation.isPending ||
@@ -115,18 +113,15 @@ export function EvidenceView() {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
       <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Evidence</h1>
-        <p className="text-sm text-muted-foreground">
-          Search retrieval citations and ontology candidate provenance side by
-          side.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t.evidenceUi.title}</h1>
+        <p className="text-sm text-muted-foreground">{t.evidenceUi.description}</p>
       </header>
 
       <form onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row">
         <div className="flex flex-1 items-center gap-2">
           <Search className="h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search indexed chunks..."
+            placeholder={t.evidenceUi.searchPlaceholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -145,24 +140,22 @@ export function EvidenceView() {
             className="h-9 w-20"
           />
           <Button type="submit" disabled={!query.trim() || loading}>
-            Search
+            {t.common.search}
           </Button>
         </div>
       </form>
 
       <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs">
-        <span className="text-muted-foreground">Sources</span>
-        {(Object.keys(SOURCE_LABEL) as EvidenceSourceType[]).map((key) => (
+        <span className="text-muted-foreground">{t.evidenceUi.sourcesLabel}</span>
+        {(Object.keys(sourceLabels) as EvidenceSourceType[]).map((key) => (
           <label key={key} className="flex items-center gap-1.5">
             <input
               type="checkbox"
               className="h-3.5 w-3.5 rounded border-input"
               checked={enabledSources[key]}
-              onChange={(e) =>
-                setEnabledSources((s) => ({ ...s, [key]: e.target.checked }))
-              }
+              onChange={(e) => setEnabledSources((s) => ({ ...s, [key]: e.target.checked }))}
             />
-            {SOURCE_LABEL[key]}
+            {sourceLabels[key]}
           </label>
         ))}
         <span className="ml-auto" />
@@ -173,29 +166,27 @@ export function EvidenceView() {
             checked={includeOntology}
             onChange={(e) => setIncludeOntology(e.target.checked)}
           />
-          Include ontology candidates (latest build)
+          {t.evidenceUi.includeOntology}
         </label>
         {!caps.evidencePromotionAvailable && (
           <Badge variant="secondary" className="ml-2">
-            promote: coming soon
+            {t.evidenceUi.promoteComingSoon}
           </Badge>
         )}
       </div>
 
       <section className="space-y-3">
         {loading &&
-          Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 w-full" />
-          ))}
+          Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
         {!loading && items.length === 0 && (
           <Card>
             <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              Run a search or enable ontology candidates to populate evidence.
+              {t.evidenceUi.emptyState}
             </CardContent>
           </Card>
         )}
         {!loading &&
-          items.map((item) => (
+          pagedItems.map((item) => (
             <Card
               key={item.id}
               className="cursor-pointer transition-colors hover:border-primary/40"
@@ -213,27 +204,46 @@ export function EvidenceView() {
                   {typeof item.score === "number" && (
                     <Badge variant="outline">{formatScore(item.score)}</Badge>
                   )}
-                  <Badge variant="secondary">{SOURCE_LABEL[item.sourceType]}</Badge>
+                  <Badge variant="secondary">{sourceLabels[item.sourceType]}</Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-1.5">
                 {item.contentSnippet && (
-                  <p className="line-clamp-3 text-xs text-muted-foreground">
-                    {item.contentSnippet}
-                  </p>
+                  <p className="line-clamp-3 text-xs text-muted-foreground">{item.contentSnippet}</p>
                 )}
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   {item.citationLabel && <span>{item.citationLabel}</span>}
                   {item.provenanceSummary && (
-                    <span className="text-muted-foreground/70">
-                      | {item.provenanceSummary}
-                    </span>
+                    <span className="text-muted-foreground/70">| {item.provenanceSummary}</span>
                   )}
                 </div>
               </CardContent>
             </Card>
           ))}
       </section>
+      {items.length > pageSize && (
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            {t.evidenceUi.previous}
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {page}/{pageCount}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= pageCount}
+            onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+          >
+            {t.evidenceUi.next}
+          </Button>
+        </div>
+      )}
 
       <EvidenceDetailDrawer item={selected} onClose={() => setSelected(null)} />
     </div>

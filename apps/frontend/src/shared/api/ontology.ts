@@ -42,6 +42,12 @@ export function getBuild(buildId: string): Promise<OntologyBuildResponse> {
   });
 }
 
+export function deleteBuild(buildId: string): Promise<void> {
+  return apiFetch<void>(`/ontology/builds/${buildId}`, {
+    method: "DELETE",
+  });
+}
+
 export function listBuildEntities(
   buildId: string,
   reviewStatus?: OntologyReviewStatus,

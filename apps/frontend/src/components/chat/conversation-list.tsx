@@ -8,19 +8,22 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn, formatDateTime } from "@/shared/utils";
+import { Time } from "@/shared/components/time";
+import { cn } from "@/shared/utils";
 import {
   createConversation,
   listConversations,
 } from "@/shared/api/conversations";
 import { listAgentProfiles } from "@/shared/api/agent-profiles";
 import { queryKeys } from "@/shared/query/keys";
+import { useI18n } from "@/shared/i18n/use-language";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 
 export function ConversationList() {
   const params = useParams<{ conversationId?: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const { workspaceId, preferredAgentProfileId } = useWorkspaceStore();
 
   const {
@@ -39,29 +42,29 @@ export function ConversationList() {
   const createMutation = useMutation({
     mutationFn: () =>
       createConversation({
-        title: "New conversation",
+        title: t.conversationList.newConversationTitle,
         workspace_id: workspaceId ?? undefined,
         agent_profile_id: preferredAgentProfileId ?? undefined,
       }),
     onSuccess: (conversation) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations.all });
       router.push(`/ask/${conversation.id}`);
-      toast.success("Conversation created");
+      toast.success(t.conversationList.created);
     },
-    onError: (err) => toast.error(`Failed to create: ${(err as Error).message}`),
+    onError: (err) => toast.error(`${t.conversationList.createFailedPrefix} ${(err as Error).message}`),
   });
 
   return (
     <div className="flex h-full w-72 shrink-0 flex-col border-r bg-muted/20">
       <div className="flex items-center justify-between border-b p-3">
-        <span className="text-sm font-semibold">Conversations</span>
+        <span className="text-sm font-semibold">{t.conversationList.title}</span>
         <Button
           size="sm"
           onClick={() => createMutation.mutate()}
           disabled={createMutation.isPending}
         >
           <Plus className="h-4 w-4" />
-          New
+          {t.conversationList.newConversation}
         </Button>
       </div>
       <ScrollArea className="flex-1">
@@ -72,12 +75,12 @@ export function ConversationList() {
             ))}
           {isError && (
             <p className="p-3 text-sm text-destructive">
-              Failed to load conversations.
+              {t.conversationList.loadFailed}
             </p>
           )}
           {conversations?.length === 0 && (
             <p className="p-3 text-sm text-muted-foreground">
-              No conversations yet. Click New to start.
+              {t.conversationList.empty}
             </p>
           )}
           {conversations?.map((c) => {
@@ -100,7 +103,7 @@ export function ConversationList() {
                     active ? "text-primary-foreground/70" : "text-muted-foreground",
                   )}
                 >
-                  {c.provider} · {c.model} · {formatDateTime(c.updated_at)}
+                  {c.provider} · {c.model} · <Time value={c.updated_at} className="inline" />
                 </div>
               </Link>
             );

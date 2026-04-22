@@ -1,15 +1,10 @@
-import { ProviderSettingsView } from "@/components/settings/provider-settings-view";
+import { Suspense } from "react";
+import { SettingsShell } from "@/components/settings/settings-shell";
 
 export default function SettingsPage() {
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Settings</h1>
-        <p className="text-sm text-muted-foreground">
-          Configure providers, provider readiness, and workspace-level model defaults.
-        </p>
-      </div>
-      <ProviderSettingsView />
-    </div>
+    <Suspense fallback={null}>
+      <SettingsShell />
+    </Suspense>
   );
 }

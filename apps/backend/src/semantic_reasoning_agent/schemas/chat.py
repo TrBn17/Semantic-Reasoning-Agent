@@ -1,13 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from semantic_reasoning_agent.core.runtime_constants import DEFAULT_TASK_TOP_K
+from semantic_reasoning_agent.core.time import utc_now
 from semantic_reasoning_agent.schemas.retrieval import Citation
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class Message(BaseModel):
@@ -60,7 +58,7 @@ class SendMessageRequest(BaseModel):
     use_retrieval: bool = False
     workspace_id: str | None = None
     document_ids: list[str] = Field(default_factory=list)
-    top_k: int = 3
+    top_k: int = DEFAULT_TASK_TOP_K
     enabled_tool_names: list[str] | None = None
 
 

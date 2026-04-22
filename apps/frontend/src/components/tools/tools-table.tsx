@@ -15,11 +15,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { listTools } from "@/shared/api/tools";
+import { useI18n } from "@/shared/i18n/use-language";
 import type { RiskLevel, ToolSpec } from "@/shared/api/types";
 import { queryKeys } from "@/shared/query/keys";
 import { ToolInvokeDialog } from "@/components/tools/tool-invoke-dialog";
 
 export function ToolsTable() {
+  const { t } = useI18n();
   const [familyFilter, setFamilyFilter] = useState<string>("all");
   const [riskFilter, setRiskFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -49,7 +51,7 @@ export function ToolsTable() {
   if (isError) {
     return (
       <p className="text-sm text-destructive">
-        Failed to load tools: {(error as Error)?.message ?? "unknown error"}.
+        {t.toolsUi.loadFailedPrefix} {(error as Error)?.message ?? t.toolInvoke.unknownError}.
       </p>
     );
   }
@@ -62,28 +64,28 @@ export function ToolsTable() {
         <Input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search tools, families, or capabilities"
+          placeholder={t.toolsUi.searchPlaceholder}
           className="max-w-sm"
         />
-        <FilterChips value={familyFilter} onChange={setFamilyFilter} options={["all", ...families]} />
-        <FilterChips value={riskFilter} onChange={setRiskFilter} options={["all", "low", "medium", "high"]} />
+        <FilterChips value={familyFilter} onChange={setFamilyFilter} options={[t.toolsUi.filters.all, ...families]} />
+        <FilterChips value={riskFilter} onChange={setRiskFilter} options={[t.toolsUi.filters.all, "low", "medium", "high"]} />
       </div>
 
       {rows.length === 0 ? (
         <p className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-          No tools matched the current filters.
+          {t.toolsUi.emptyState}
         </p>
       ) : (
         <div className="rounded-2xl border bg-background">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Tool</TableHead>
-                <TableHead>Family</TableHead>
-                <TableHead>Risk</TableHead>
-                <TableHead>Runtime traits</TableHead>
-                <TableHead>Capabilities</TableHead>
-                <TableHead className="text-right">Action</TableHead>
+                <TableHead>{t.toolsUi.table.tool}</TableHead>
+                <TableHead>{t.toolsUi.table.family}</TableHead>
+                <TableHead>{t.toolsUi.table.risk}</TableHead>
+                <TableHead>{t.toolsUi.table.runtimeTraits}</TableHead>
+                <TableHead>{t.toolsUi.table.capabilities}</TableHead>
+                <TableHead className="text-right">{t.toolsUi.table.action}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -125,6 +127,7 @@ function FilterChips({
 }
 
 function ToolRow({ tool }: { tool: ToolSpec }) {
+  const { t } = useI18n();
   return (
     <TableRow>
       <TableCell>
@@ -140,14 +143,14 @@ function ToolRow({ tool }: { tool: ToolSpec }) {
         <RiskBadge level={tool.risk_level} />
       </TableCell>
       <TableCell className="text-xs text-muted-foreground">
-        <div>{tool.supports_streaming ? "Streaming" : "Buffered"}</div>
+        <div>{tool.supports_streaming ? t.toolsUi.runtime.streaming : t.toolsUi.runtime.buffered}</div>
         <div>{tool.side_effect_level.replace("_", " ")}</div>
-        <div>{(tool.timeout_ms / 1000).toFixed(1)}s timeout</div>
+        <div>{`${(tool.timeout_ms / 1000).toFixed(1)}${t.toolsUi.runtime.timeoutSuffix}`}</div>
       </TableCell>
       <TableCell className="text-xs text-muted-foreground">
         <div className="flex flex-wrap gap-1">
           {tool.capabilities.length === 0 ? (
-            <span className="italic">none</span>
+            <span className="italic">{t.toolsUi.runtime.none}</span>
           ) : (
             tool.capabilities.map((capability) => (
               <span

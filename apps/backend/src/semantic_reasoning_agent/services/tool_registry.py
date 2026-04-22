@@ -105,7 +105,7 @@ def build_tool_registry(
 
         registry.register(
             InternalRetrievalTool.SPEC,
-            lambda svc=retrieval_service: InternalRetrievalTool(svc),
+            lambda svc=retrieval_service, gw=graphiti_gateway: InternalRetrievalTool(svc, gw),
         )
     if ontology_service is not None:
         from semantic_reasoning_agent.tools.ontology.ontology_lookup_tool import (

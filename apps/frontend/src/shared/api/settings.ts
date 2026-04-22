@@ -27,3 +27,13 @@ export function listSettingsModels(
     searchParams: { workspace_id: workspaceId ?? undefined },
   });
 }
+
+export function listSettingsModelsByProvider(
+  provider: string,
+  workspaceId?: string | null,
+): Promise<SettingsModelOption[]> {
+  return apiFetch<SettingsModelOption[]>(`/settings/providers/${provider}/models`, {
+    method: "GET",
+    searchParams: { workspace_id: workspaceId ?? undefined },
+  });
+}

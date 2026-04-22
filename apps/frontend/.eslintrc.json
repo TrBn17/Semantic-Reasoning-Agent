@@ -1,3 +1,26 @@
 {
-  "extends": "next/core-web-vitals"
+  "extends": [
+    "next/core-web-vitals",
+    "plugin:i18next/recommended"
+  ],
+  "rules": {
+    "i18next/no-literal-string": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/features/**/*.{ts,tsx}",
+        "src/app/**/*.{ts,tsx}",
+        "src/shared/layout/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "i18next/no-literal-string": [
+          "warn",
+          {
+            "markupOnly": true
+          }
+        ]
+      }
+    }
+  ]
 }

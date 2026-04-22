@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from semantic_reasoning_agent.core.runtime_constants import DEFAULT_TOOL_TIMEOUT_MS
 ToolFamilySchema = Literal[
     "document",
     "retrieval",
@@ -58,7 +59,7 @@ class ToolSpecSchema(BaseModel):
     supports_parallel: bool = True
     supports_streaming: bool = False
     requires_confirmation: bool = False
-    timeout_ms: int = 15000
+    timeout_ms: int = DEFAULT_TOOL_TIMEOUT_MS
     workspace_scope: WorkspaceScopeSchema = "workspace"
 
 
@@ -77,7 +78,7 @@ class ToolConstraintsSchema(BaseModel):
     web_enabled: bool = False
     freshness_required: bool = False
     max_results: int = 10
-    timeout_ms: int = 15000
+    timeout_ms: int = DEFAULT_TOOL_TIMEOUT_MS
 
 
 class StandardToolInputSchema(BaseModel):

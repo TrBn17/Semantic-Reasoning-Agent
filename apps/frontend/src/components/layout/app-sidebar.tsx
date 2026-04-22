@@ -21,101 +21,101 @@ import { cn } from "@/shared/utils";
 import { useCapabilities } from "@/shared/capabilities/useCapabilities";
 import { useI18n } from "@/shared/i18n/use-language";
 
-type NavItem = {
+export type NavItem = {
   href: string;
-  label: string;
+  label: keyof ReturnType<typeof useI18n>["t"]["nav"];
   icon: LucideIcon;
   available: boolean;
 };
 
-type NavGroup = {
-  label: string;
+export type NavGroup = {
+  label: "work" | "knowledge" | "automation" | "outputs" | "admin";
   items: NavItem[];
 };
 
-function buildGroups(caps: ReturnType<typeof useCapabilities>): NavGroup[] {
+export function getNavGroups(caps: ReturnType<typeof useCapabilities>): NavGroup[] {
   return [
     {
-      label: "Work",
+      label: "work",
       items: [
-        { href: "/", label: "Home", icon: Home, available: true },
+        { href: "/", label: "home", icon: Home, available: true },
         {
           href: "/ask",
-          label: "Ask",
+          label: "ask",
           icon: MessageSquare,
           available: caps.askAvailable,
         },
       ],
     },
     {
-      label: "Knowledge",
+      label: "knowledge",
       items: [
         {
           href: "/documents",
-          label: "Documents",
+          label: "documents",
           icon: FileText,
           available: caps.documentsAvailable,
         },
         {
           href: "/evidence",
-          label: "Evidence",
+          label: "evidence",
           icon: FileSearch,
           available: caps.evidenceAvailable,
         },
         {
           href: "/ontology/builds",
-          label: "Ontology",
+          label: "ontology",
           icon: Binary,
           available: caps.ontologyAvailable,
         },
         {
           href: "/graph",
-          label: "Graph",
+          label: "graph",
           icon: Network,
           available: caps.graphAvailable,
         },
       ],
     },
     {
-      label: "Automation",
+      label: "automation",
       items: [
         {
           href: "/workflows",
-          label: "Workflows",
+          label: "workflows",
           icon: Workflow,
           available: caps.workflowsAvailable,
         },
         {
           href: "/connectors",
-          label: "Connectors",
+          label: "connectors",
           icon: Plug,
           available: caps.connectorsAvailable,
         },
       ],
     },
     {
-      label: "Outputs",
+      label: "outputs",
       items: [
         {
           href: "/artifacts",
-          label: "Artifacts",
+          label: "artifacts",
           icon: Package,
           available: caps.artifactsAvailable,
         },
       ],
     },
     {
-      label: "Admin",
+      label: "admin",
       items: [
         {
           href: "/agents",
-          label: "Agents",
+          label: "agents",
           icon: Bot,
           available: caps.settingsAvailable,
         },
         {
           href: "/settings",
-          label: "Settings",
+          label: "settings",
           icon: Settings,
           available: caps.settingsAvailable,
         },
@@ -129,13 +129,13 @@ export function AppSidebar() {
   const router = useRouter();
   const caps = useCapabilities();
   const { t } = useI18n();
-  const groups = buildGroups(caps).map((g) => ({
+  const groups = getNavGroups(caps).map((g) => ({
     ...g,
     items: g.items.filter((i) => i.available),
   }));
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r bg-muted/30">
+    <aside className="hidden w-60 shrink-0 flex-col border-r bg-muted/30 lg:flex">
       <div className="flex h-14 items-center border-b px-4">
         <Link href="/" className="flex items-center gap-2 font-semibold">
           <div className="flex h-7 w-7 items-center justify-center rounded-md border bg-slate-100 shadow-sm dark:bg-slate-800/80">
@@ -157,14 +157,14 @@ export function AppSidebar() {
           .map((group) => (
             <div key={group.label} className="space-y-1">
               <div className="px-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {translateGroupLabel(group.label, t)}
+                {t.nav[group.label]}
               </div>
               {group.items.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(pathname, item.href);
                 return (
                   <Link
-                    key={`${group.label}:${item.href}:${item.label}`}
+                    key={`${group.label}:${item.href}:${String(item.label)}`}
                     href={item.href}
                     prefetch
                     onMouseEnter={() => router.prefetch(item.href)}
@@ -177,7 +177,7 @@ export function AppSidebar() {
                     )}
                   >
                     <Icon className="h-4 w-4" />
-                    {translateNavLabel(item.label, t)}
+                    {t.nav[item.label]}
                   </Link>
                 );
               })}
@@ -189,34 +189,6 @@ export function AppSidebar() {
       </div>
     </aside>
   );
-}
-
-function translateGroupLabel(label: string, t: ReturnType<typeof useI18n>["t"]) {
-  const map: Record<string, string> = {
-    Work: t.nav.work,
-    Knowledge: t.nav.knowledge,
-    Automation: t.nav.automation,
-    Outputs: t.nav.outputs,
-    Admin: t.nav.admin,
-  };
-  return map[label] ?? label;
-}
-
-function translateNavLabel(label: string, t: ReturnType<typeof useI18n>["t"]) {
-  const map: Record<string, string> = {
-    Home: t.nav.home,
-    Ask: t.nav.ask,
-    Documents: t.nav.documents,
-    Evidence: t.nav.evidence,
-    Ontology: t.nav.ontology,
-    Graph: t.nav.graph,
-    Agents: "Agents",
-    Workflows: t.nav.workflows,
-    Connectors: t.nav.connectors,
-    Artifacts: t.nav.artifacts,
-    Settings: t.nav.settings,
-  };
-  return map[label] ?? label;
 }
 
 function isActive(pathname: string, href: string): boolean {

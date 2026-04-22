@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { ensureI18n } from "@/shared/i18n/config";
 import { dictionaries, type Language } from "./dictionaries";
 
 type LanguageState = {
@@ -14,9 +15,16 @@ export const useLanguageStore = create<LanguageState>()(
   persist(
     (set) => ({
       language: "en",
-      setLanguage: (language) => set({ language }),
+      setLanguage: (language) => {
+        set({ language });
+        void ensureI18n().then((instance) => instance.changeLanguage(language));
+      },
       toggleLanguage: () =>
-        set((state) => ({ language: state.language === "en" ? "vi" : "en" })),
+        set((state) => {
+          const next = state.language === "en" ? "vi" : "en";
+          void ensureI18n().then((instance) => instance.changeLanguage(next));
+          return { language: next };
+        }),
     }),
     {
       name: "semantic-reasoning-language",

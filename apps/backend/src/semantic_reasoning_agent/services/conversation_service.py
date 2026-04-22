@@ -1,10 +1,13 @@
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
+from semantic_reasoning_agent.core.runtime_constants import (
+    TOOL_ONTOLOGY_LOOKUP,
+)
+from semantic_reasoning_agent.core.time import utc_now
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import AgentProfileORM, ConversationORM, MessageORM
 from semantic_reasoning_agent.schemas.chat import (
@@ -21,15 +24,10 @@ from semantic_reasoning_agent.services.agent_profile_service import (
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 
 DEFAULT_EFFECTIVE_TOOL_NAMES = [
-    "retrieval.internal",
-    "ontology.lookup",
+    TOOL_ONTOLOGY_LOOKUP,
     "graph.search",
     "graph.ingest",
 ]
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class ConversationNotFoundError(ValueError):
@@ -259,9 +257,9 @@ class ConversationService:
         if profile is None or not profile.tool_assignments:
             return DEFAULT_EFFECTIVE_TOOL_NAMES.copy()
         assignment_map = {
-            item.get("tool_name"): bool(item.get("enabled", True))
+            (item.get("tool_name") or item.get("toolName")): bool(item.get("enabled", item.get("is_enabled", True)))
             for item in (profile.tool_assignments or [])
-            if item.get("tool_name")
+            if (item.get("tool_name") or item.get("toolName"))
         }
         effective = [
             tool_name

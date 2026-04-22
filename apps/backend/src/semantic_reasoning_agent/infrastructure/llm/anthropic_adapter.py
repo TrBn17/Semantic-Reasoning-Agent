@@ -30,15 +30,15 @@ class AnthropicAdapter(ProviderAdapter):
     ``LLMMessage`` / ``LLMToolCall`` and Anthropic's content-block shapes.
     """
 
-    provider = "anthropic"
-
     def __init__(
         self,
         *,
+        provider: str = "anthropic",
         api_key: str,
         base_url: str | None = None,
         client: Any | None = None,
     ) -> None:
+        self.provider = provider
         self._api_key = api_key
         self._base_url = base_url
         self._client = client
@@ -92,8 +92,12 @@ class AnthropicAdapter(ProviderAdapter):
             kwargs["tools"] = wire_tools
             kwargs["tool_choice"] = _to_anthropic_tool_choice(tool_choice)
 
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
+        if api_key == self._api_key and base_url == self._base_url:
+            client = self._get_client()
+        else:
+            import anthropic
+
+            client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
         response = client.messages.create(**kwargs)
         return _parse_anthropic_response(response, model=model, provider=self.provider)
 
@@ -110,11 +114,18 @@ def _to_anthropic_tool_choice(choice: ToolChoice) -> dict[str, Any]:
     return {"type": "tool", "name": choice}
 
 
-def _to_anthropic_messages(messages: Sequence[LLMMessage]) -> list[dict[str, Any]]:
+def _to_anthropic_messages(
+    messages: Sequence[LLMMessage],
+    *,
+    system: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
     wire: list[dict[str, Any]] = []
+    resolved_system = system
     for message in messages:
         if message.role == "system":
             # System prompts flow via the top-level ``system`` argument.
+            if resolved_system is None and message.content:
+                resolved_system = message.content
             continue
         if message.role == "assistant":
             content_blocks: list[dict[str, Any]] = []
@@ -147,7 +158,7 @@ def _to_anthropic_messages(messages: Sequence[LLMMessage]) -> list[dict[str, Any
             continue
         # user
         wire.append({"role": "user", "content": message.content or ""})
-    return wire
+    return wire, resolved_system
 
 
 def _parse_anthropic_response(

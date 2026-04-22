@@ -61,6 +61,7 @@ from semantic_reasoning_agent.schemas.ontology import (
     OntologyVersionResponse,
 )
 from semantic_reasoning_agent.services.ontology_graph_publisher import (
+    GraphitiDocumentChunk,
     OntologyGraphPublisher,
     OntologyGraphPublisherError,
 )
@@ -169,6 +170,15 @@ class OntologyService:
             if build is None:
                 raise OntologyBuildNotFoundError(f"Ontology build '{build_id}' was not found.")
             return self._to_build_schemas(session, [build])[0]
+
+    def delete_build(self, build_id: str) -> None:
+        with self._database_manager.session() as session:
+            build = session.get(OntologyBuildORM, build_id)
+            if build is None:
+                raise OntologyBuildNotFoundError(f"Ontology build '{build_id}' was not found.")
+            if build.status != OntologyBuildStatus.failed.value:
+                raise OntologyBuildError("Only failed ontology builds can be deleted.")
+            session.delete(build)
 
     def list_build_entities(
         self,
@@ -342,8 +352,9 @@ class OntologyService:
             )
 
         snapshot, _ = self._build_publish_snapshot(build_id=build_id)
+        graphiti_chunks = self._load_graphiti_chunks_for_snapshot(snapshot)
         try:
-            self._graph_publisher.publish(snapshot)
+            self._graph_publisher.publish(snapshot, document_chunks=graphiti_chunks)
         except OntologyGraphPublisherError as exc:
             raise OntologyPublishError(str(exc)) from exc
 
@@ -527,8 +538,9 @@ class OntologyService:
     def publish_graph_draft(self, request: OntologyDraftPublishRequest) -> OntologyPublishResponse:
         workspace_id = request.workspace_id or self._settings.default_workspace_id
         snapshot, _ = self._build_publish_snapshot(build_id=request.build_id, workspace_id=workspace_id)
+        graphiti_chunks = self._load_graphiti_chunks_for_snapshot(snapshot)
         try:
-            self._graph_publisher.publish(snapshot)
+            self._graph_publisher.publish(snapshot, document_chunks=graphiti_chunks)
         except OntologyGraphPublisherError as exc:
             raise OntologyPublishError(str(exc)) from exc
         if request.build_id:
@@ -1297,6 +1309,28 @@ class OntologyService:
                 diff_summary,
             )
 
+    def _load_graphiti_chunks_for_snapshot(
+        self,
+        snapshot: PublishedOntologySnapshot,
+    ) -> list[GraphitiDocumentChunk]:
+        doc_ids = {e.source_document_id for e in snapshot.entities if e.source_document_id}
+        if not doc_ids:
+            return []
+        with self._database_manager.session() as session:
+            rows = session.scalars(
+                select(DocumentChunkORM).where(DocumentChunkORM.document_id.in_(doc_ids))
+            ).all()
+        return [
+            GraphitiDocumentChunk(
+                chunk_id=row.chunk_id,
+                document_id=row.document_id,
+                document_title=row.document_title,
+                text=row.text,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
     def _get_relational_graph(self, workspace_id: str) -> OntologyGraphResponse:
         snapshot, draft_summary = self._build_workspace_snapshot(
             workspace_id=workspace_id,
@@ -1312,6 +1346,7 @@ class OntologyService:
             entities=snapshot.entities,
             relations=snapshot.relations,
             draft_summary=draft_summary,
+            graphiti_indexed=self._graph_publisher.graphiti_indexed_for(workspace_id),
         )
 
     def _build_workspace_snapshot(

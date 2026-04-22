@@ -5,10 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Save, Shield } from "lucide-react";
 import { toast } from "sonner";
 import {
-  TaskModelPicker,
-  composeModelValue,
   formatPresetLabel,
-  parseModelValue,
   summarizeKnowledgeScope,
 } from "@/components/agents/model-picker";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +26,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { ToolDndBoard } from "@/components/agents/tool-dnd-board";
 import { getCapabilityCatalog, listCapabilityTools } from "@/shared/api/agent-capabilities";
 import {
   createAgentProfile,
@@ -38,29 +36,27 @@ import {
 } from "@/shared/api/agent-profiles";
 import { listDocuments } from "@/shared/api/documents";
 import { createKnowledgePack, listKnowledgePacks, updateKnowledgePack } from "@/shared/api/knowledge-packs";
-import { listSettingsModels } from "@/shared/api/settings";
+import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
+import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import type {
   AgentProfileResponse,
   EvidencePolicySchema,
   KnowledgePackResponse,
-  SettingsModelOption,
   ToolPolicySchema,
 } from "@/shared/api/types";
 
 type ProfileDraft = {
   description: string;
   systemPrompt: string;
-  allowChatOverride: boolean;
   capabilityPreset: string;
   toolPolicyMode: string;
-  allowedTools: string;
-  blockedTools: string;
+  allowedTools: string[];
+  blockedTools: string[];
   knowledgePackIds: string[];
   allowedSources: string[];
   allowModelOnlyFallback: boolean;
-  taskModels: Record<string, string>;
 };
 
 type KnowledgePackDraft = {
@@ -79,32 +75,17 @@ const DEFAULT_ALLOWED_SOURCES = [
   "generated_artifact",
 ];
 
-function toCsv(values: string[]) {
-  return values.join(", ");
-}
-
-function fromCsv(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function makeProfileDraft(profile: AgentProfileResponse): ProfileDraft {
   return {
     description: profile.description,
     systemPrompt: profile.system_prompt,
-    allowChatOverride: profile.allow_chat_model_override,
     capabilityPreset: profile.capability_preset,
     toolPolicyMode: profile.tool_policy.mode,
-    allowedTools: toCsv(profile.tool_policy.allowed_tools),
-    blockedTools: toCsv(profile.tool_policy.blocked_tools),
+    allowedTools: [...profile.tool_policy.allowed_tools],
+    blockedTools: [...profile.tool_policy.blocked_tools],
     knowledgePackIds: [...profile.knowledge_pack_ids],
     allowedSources: [...profile.evidence_policy.allowed_sources],
     allowModelOnlyFallback: profile.evidence_policy.allow_model_only_fallback,
-    taskModels: Object.fromEntries(
-      profile.task_models.map((item) => [item.task_type, composeModelValue(item.provider, item.model)]),
-    ),
   };
 }
 
@@ -120,8 +101,8 @@ function makeKnowledgePackDraft(pack?: KnowledgePackResponse | null): KnowledgeP
 function buildToolPolicy(draft: ProfileDraft): ToolPolicySchema {
   return {
     mode: draft.toolPolicyMode,
-    allowed_tools: fromCsv(draft.allowedTools),
-    blocked_tools: fromCsv(draft.blockedTools),
+    allowed_tools: [...draft.allowedTools],
+    blocked_tools: [...draft.blockedTools],
   };
 }
 
@@ -133,8 +114,9 @@ function buildEvidencePolicy(draft: ProfileDraft): EvidencePolicySchema {
 }
 
 export function AgentManagementView() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
-  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
+  const workspaceId = useActiveWorkspaceId();
   const preferredAgentProfileId = useWorkspaceStore((state) => state.preferredAgentProfileId);
   const setPreferredAgentProfileId = useWorkspaceStore((state) => state.setPreferredAgentProfileId);
   const { data: profiles, isLoading } = useQuery({
@@ -152,10 +134,6 @@ export function AgentManagementView() {
   const { data: knowledgePacks = [] } = useQuery({
     queryKey: queryKeys.knowledgePacks.list(workspaceId),
     queryFn: () => listKnowledgePacks(workspaceId),
-  });
-  const { data: models = [] } = useQuery({
-    queryKey: queryKeys.settings.models(workspaceId),
-    queryFn: () => listSettingsModels(workspaceId),
   });
   const { data: documents = [] } = useQuery({
     queryKey: queryKeys.documents.list(),
@@ -189,26 +167,18 @@ export function AgentManagementView() {
     () => capabilityCatalog?.presets.find((item) => item.preset === profileDraft?.capabilityPreset) ?? null,
     [capabilityCatalog?.presets, profileDraft?.capabilityPreset],
   );
-  const knowledgeById = useMemo(
-    () => Object.fromEntries(knowledgePacks.map((pack) => [pack.id, pack])),
-    [knowledgePacks],
-  );
   const profileToolSummary = useMemo(() => {
     if (!profileDraft || !selectedPreset) return [];
     return capabilityTools.filter((tool) => selectedPreset.allowed_tool_families.includes(tool.family));
   }, [capabilityTools, profileDraft, selectedPreset]);
-  const taskTypes = [
-    { task_type: "chat", label: "Chat" },
-    { task_type: "retrieval", label: "Retrieval QA" },
-    { task_type: "ontology_extraction", label: "Ontology Extraction" },
-    { task_type: "narrative_generation", label: "Narrative" },
-    { task_type: "dashboard_generation", label: "Dashboard" },
-  ] as const;
 
   const createProfileMutation = useMutation({
-    mutationFn: () =>
-      createAgentProfile({
-        workspace_id: workspaceId ?? "workspace-demo",
+    mutationFn: () => {
+      if (!workspaceId) {
+        throw new Error("Workspace is not resolved.");
+      }
+      return createAgentProfile({
+        workspace_id: workspaceId,
         name: newProfileName.trim(),
         description: "",
         system_prompt: "",
@@ -221,15 +191,16 @@ export function AgentManagementView() {
           allow_model_only_fallback: true,
         },
         task_models: [],
-      }),
+      });
+    },
     onSuccess: async (profile) => {
       setNewProfileName("");
       setSelectedProfileId(profile.id);
       setPreferredAgentProfileId(profile.id);
       await queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
-      toast.success("Agent profile created.");
+      toast.success(t.agentsSettings.toasts.agentProfileCreated);
     },
-    onError: (error) => toast.error(`Create failed: ${(error as Error).message}`),
+    onError: (error) => toast.error(`${t.agentsSettings.toasts.createFailedPrefix} ${(error as Error).message}`),
   });
 
   const saveProfileMutation = useMutation({
@@ -240,25 +211,19 @@ export function AgentManagementView() {
       return updateAgentProfile(selectedProfile.id, {
         description: profileDraft.description,
         system_prompt: profileDraft.systemPrompt,
-        allow_chat_model_override: profileDraft.allowChatOverride,
+        allow_chat_model_override: true,
         capability_preset: profileDraft.capabilityPreset,
         tool_policy: buildToolPolicy(profileDraft),
         knowledge_pack_ids: profileDraft.knowledgePackIds,
         evidence_policy: buildEvidencePolicy(profileDraft),
-        task_models: taskTypes
-          .map((task) => {
-            const parsed = parseModelValue(profileDraft.taskModels[task.task_type]);
-            if (!parsed) return null;
-            return { task_type: task.task_type, provider: parsed.provider, model: parsed.model };
-          })
-          .filter((item): item is NonNullable<typeof item> => Boolean(item)),
+        task_models: [],
       });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
-      toast.success("Profile saved.");
+      toast.success(t.agentsSettings.toasts.profileSaved);
     },
-    onError: (error) => toast.error(`Save failed: ${(error as Error).message}`),
+    onError: (error) => toast.error(`${t.agentsSettings.toasts.profileSaveFailedPrefix} ${(error as Error).message}`),
   });
 
   const setDefaultMutation = useMutation({
@@ -269,9 +234,9 @@ export function AgentManagementView() {
     onSuccess: async (profile) => {
       setPreferredAgentProfileId(profile.id);
       await queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
-      toast.success("Default profile updated.");
+      toast.success(t.agentsSettings.toasts.defaultProfileUpdated);
     },
-    onError: (error) => toast.error(`Default update failed: ${(error as Error).message}`),
+    onError: (error) => toast.error(`${t.agentsSettings.toasts.defaultUpdateFailedPrefix} ${(error as Error).message}`),
   });
 
   const saveKnowledgePackMutation = useMutation({
@@ -284,8 +249,11 @@ export function AgentManagementView() {
           document_ids: knowledgePackDraft.documentIds,
         });
       }
+      if (!workspaceId) {
+        throw new Error("Workspace is not resolved.");
+      }
       return createKnowledgePack({
-        workspace_id: workspaceId ?? "workspace-demo",
+        workspace_id: workspaceId,
         name: knowledgePackDraft.name.trim(),
         description: knowledgePackDraft.description,
         status: knowledgePackDraft.status,
@@ -297,9 +265,10 @@ export function AgentManagementView() {
       setKnowledgeDialogOpen(false);
       setEditingPack(null);
       setKnowledgePackDraft(makeKnowledgePackDraft());
-      toast.success("Knowledge pack saved.");
+      toast.success(t.agentManagement.toastKnowledgePackSaved);
     },
-    onError: (error) => toast.error(`Knowledge pack save failed: ${(error as Error).message}`),
+    onError: (error) =>
+      toast.error(`${t.agentManagement.toastKnowledgePackSaveFailedPrefix} ${(error as Error).message}`),
   });
 
   if (isLoading) {
@@ -315,32 +284,30 @@ export function AgentManagementView() {
     <div className="space-y-6 pb-24">
       <Card>
         <CardHeader>
-          <CardTitle>Agent Management</CardTitle>
-          <CardDescription>
-            Manage profiles, capability presets, tool policy, knowledge packs, and evidence scope from a single control plane.
-          </CardDescription>
+          <CardTitle>{t.agentManagement.title}</CardTitle>
+          <CardDescription>{t.agentManagement.description}</CardDescription>
         </CardHeader>
       </Card>
 
       <div className="grid items-start gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
         <Card>
           <CardHeader>
-            <CardTitle>Profiles</CardTitle>
-            <CardDescription>Create profiles here. Provider credentials belong in `/settings`.</CardDescription>
+            <CardTitle>{t.agentManagement.profilesTitle}</CardTitle>
+            <CardDescription>{t.agentManagement.profilesDescription}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex gap-2">
               <Input
                 value={newProfileName}
                 onChange={(event) => setNewProfileName(event.target.value)}
-                placeholder="New profile name"
+                placeholder={t.agentManagement.newProfilePlaceholder}
               />
               <Button
                 onClick={() => createProfileMutation.mutate()}
                 disabled={createProfileMutation.isPending || !newProfileName.trim()}
               >
                 <Plus className="h-4 w-4" />
-                Create
+                {t.agentManagement.create}
               </Button>
             </div>
 
@@ -362,10 +329,10 @@ export function AgentManagementView() {
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-semibold">{profile.name}</span>
-                    {profile.is_default && <Badge variant="success">Default</Badge>}
+                    {profile.is_default && <Badge variant="success">{t.agentManagement.defaultBadge}</Badge>}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {profile.description || "No description"}
+                    {profile.description || t.agentManagement.noDescription}
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                     <span>{formatPresetLabel(profile.capability_preset)}</span>
@@ -375,7 +342,7 @@ export function AgentManagementView() {
               ))}
               {(profiles ?? []).length === 0 && (
                 <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
-                  No profiles yet. Create one to define capability preset, tool policy, and knowledge scope.
+                  {t.agentManagement.noProfiles}
                 </div>
               )}
             </div>
@@ -384,72 +351,58 @@ export function AgentManagementView() {
 
         {!selectedProfile || !profileDraft ? (
           <Card>
-            <CardContent className="p-6 text-sm text-muted-foreground">
-              Select a profile to edit identity, capability, knowledge scope, evidence policy, and advanced model overrides.
-            </CardContent>
+            <CardContent className="p-6 text-sm text-muted-foreground">{t.agentManagement.selectProfileHint}</CardContent>
           </Card>
         ) : (
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Identity</CardTitle>
-                <CardDescription>Core agent identity and prompt contract.</CardDescription>
+                <CardTitle>{t.agentManagement.identityTitle}</CardTitle>
+                <CardDescription>{t.agentManagement.identityDescription}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Name</Label>
+                    <Label>{t.agentManagement.name}</Label>
                     <Input value={selectedProfile.name} disabled />
                   </div>
                   <div className="space-y-2">
-                    <Label>Status</Label>
+                    <Label>{t.agentManagement.status}</Label>
                     <Input value={selectedProfile.status} disabled />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Description</Label>
+                  <Label>{t.agentManagement.descriptionLabel}</Label>
                   <Input
                     value={profileDraft.description}
                     onChange={(event) =>
                       setProfileDraft((current) => (current ? { ...current, description: event.target.value } : current))
                     }
-                    placeholder="What this agent is for"
+                    placeholder={t.agentManagement.descriptionPlaceholder}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>System prompt</Label>
+                  <Label>{t.agentManagement.systemPromptLabel}</Label>
                   <Textarea
                     value={profileDraft.systemPrompt}
                     onChange={(event) =>
                       setProfileDraft((current) => (current ? { ...current, systemPrompt: event.target.value } : current))
                     }
                     className="min-h-[160px]"
-                    placeholder="You are an analyst agent..."
+                    placeholder={t.agentManagement.systemPromptPlaceholder}
                   />
                 </div>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={profileDraft.allowChatOverride}
-                    onChange={(event) =>
-                      setProfileDraft((current) =>
-                        current ? { ...current, allowChatOverride: event.target.checked } : current,
-                      )
-                    }
-                  />
-                  Allow per-conversation model override
-                </label>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Capability</CardTitle>
-                <CardDescription>Select the preset first, then narrow tool access inside that preset.</CardDescription>
+                <CardTitle>{t.agentManagement.capabilityTitle}</CardTitle>
+                <CardDescription>{t.agentManagement.capabilityDescription}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Capability preset</Label>
+                  <Label>{t.agentManagement.capabilityPreset}</Label>
                   <Select
                     value={profileDraft.capabilityPreset}
                     onValueChange={(value) =>
@@ -457,7 +410,7 @@ export function AgentManagementView() {
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select preset" />
+                      <SelectValue placeholder={t.agentManagement.selectPresetPlaceholder} />
                     </SelectTrigger>
                     <SelectContent>
                       {(capabilityCatalog?.presets ?? []).map((preset) => (
@@ -474,7 +427,9 @@ export function AgentManagementView() {
                     <p className="mt-1 text-sm text-muted-foreground">{selectedPreset.description}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs">
                       {selectedPreset.allowed_tool_families.map((family) => (
-                        <Badge key={family} variant="outline">{family}</Badge>
+                        <Badge key={family} variant="outline">
+                          {family}
+                        </Badge>
                       ))}
                     </div>
                   </div>
@@ -482,7 +437,7 @@ export function AgentManagementView() {
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Tool policy mode</Label>
+                    <Label>{t.agentManagement.toolPolicyMode}</Label>
                     <Select
                       value={profileDraft.toolPolicyMode}
                       onValueChange={(value) =>
@@ -493,68 +448,56 @@ export function AgentManagementView() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="preset">Preset</SelectItem>
-                        <SelectItem value="allowlist">Allowlist</SelectItem>
-                        <SelectItem value="blocklist">Blocklist</SelectItem>
+                        <SelectItem value="preset">{t.agentManagement.policyPreset}</SelectItem>
+                        <SelectItem value="allowlist">{t.agentManagement.policyAllowlist}</SelectItem>
+                        <SelectItem value="blocklist">{t.agentManagement.policyBlocklist}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Preset summary</Label>
-                    <Input value={selectedPreset?.default_tool_order.join(", ") ?? "No preset selected"} disabled />
-                  </div>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Allowed tools</Label>
+                    <Label>{t.agentManagement.presetSummary}</Label>
                     <Input
-                      value={profileDraft.allowedTools}
-                      onChange={(event) =>
-                        setProfileDraft((current) => (current ? { ...current, allowedTools: event.target.value } : current))
-                      }
-                      placeholder="retrieval.internal, ontology.lookup"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Blocked tools</Label>
-                    <Input
-                      value={profileDraft.blockedTools}
-                      onChange={(event) =>
-                        setProfileDraft((current) => (current ? { ...current, blockedTools: event.target.value } : current))
-                      }
-                      placeholder="graphiti.search"
+                      value={selectedPreset?.default_tool_order.join(", ") ?? t.agentManagement.noPresetSelected}
+                      disabled
                     />
                   </div>
                 </div>
 
-                <div className="rounded-2xl border p-4">
-                  <h3 className="font-semibold">Visible tools for this preset</h3>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {profileToolSummary.map((tool) => (
-                      <div key={tool.tool_name} className="rounded-xl border p-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{tool.label}</span>
-                          <Badge variant="outline">{tool.family}</Badge>
-                        </div>
-                        <p className="mt-1 text-sm text-muted-foreground">{tool.description}</p>
-                      </div>
-                    ))}
-                    {profileToolSummary.length === 0 && (
-                      <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                        No tool catalog entries matched this preset yet.
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <ToolDndBoard
+                  paletteTools={profileToolSummary}
+                  allowedToolNames={profileDraft.allowedTools}
+                  blockedToolNames={profileDraft.blockedTools}
+                  onAllowedChange={(names) =>
+                    setProfileDraft((current) => (current ? { ...current, allowedTools: names } : current))
+                  }
+                  onBlockedChange={(names) =>
+                    setProfileDraft((current) => (current ? { ...current, blockedTools: names } : current))
+                  }
+                  labels={{
+                    lanePalette: t.agentManagement.lanePalette,
+                    lanePaletteHint: t.agentManagement.lanePaletteHint,
+                    laneAllowed: t.agentManagement.laneAllowed,
+                    laneAllowedHint: t.agentManagement.laneAllowedHint,
+                    laneBlocked: t.agentManagement.laneBlocked,
+                    laneBlockedHint: t.agentManagement.laneBlockedHint,
+                    searchToolsPlaceholder: t.agentManagement.searchToolsPlaceholder,
+                    riskFilter: t.agentManagement.riskFilter,
+                    riskAll: t.agentManagement.riskAll,
+                    riskLow: t.agentManagement.riskLow,
+                    riskMedium: t.agentManagement.riskMedium,
+                    riskHigh: t.agentManagement.riskHigh,
+                    removeFromLane: t.agentManagement.removeFromLane,
+                    noCatalogTools: t.agentManagement.noCatalogTools,
+                  }}
+                />
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle>Knowledge Scope</CardTitle>
-                  <CardDescription>Select packs for the profile and create or edit packs inline.</CardDescription>
+                  <CardTitle>{t.agentManagement.knowledgeTitle}</CardTitle>
+                  <CardDescription>{t.agentManagement.knowledgeDescription}</CardDescription>
                 </div>
                 <Dialog
                   open={knowledgeDialogOpen}
@@ -575,18 +518,20 @@ export function AgentManagementView() {
                       }}
                     >
                       <Plus className="h-4 w-4" />
-                      New pack
+                      {t.agentManagement.newPack}
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
+                  <DialogContent className="max-w-2xl" closeLabel={t.common.accessibility.closeDialog}>
                     <DialogHeader>
-                      <DialogTitle>{editingPack ? "Edit knowledge pack" : "Create knowledge pack"}</DialogTitle>
-                      <DialogDescription>Knowledge packs stay inside the `/agents` workflow.</DialogDescription>
+                      <DialogTitle>
+                        {editingPack ? t.agentManagement.editKnowledgePack : t.agentManagement.createKnowledgePack}
+                      </DialogTitle>
+                      <DialogDescription>{t.agentManagement.knowledgeDialogDescription}</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                          <Label>Name</Label>
+                          <Label>{t.agentManagement.packName}</Label>
                           <Input
                             value={knowledgePackDraft.name}
                             onChange={(event) =>
@@ -595,7 +540,7 @@ export function AgentManagementView() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Status</Label>
+                          <Label>{t.agentManagement.packStatus}</Label>
                           <Select
                             value={knowledgePackDraft.status}
                             onValueChange={(value) =>
@@ -606,14 +551,14 @@ export function AgentManagementView() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="active">Active</SelectItem>
-                              <SelectItem value="archived">Archived</SelectItem>
+                              <SelectItem value="active">{t.agentManagement.activeStatus}</SelectItem>
+                              <SelectItem value="archived">{t.agentManagement.archivedStatus}</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
                       <div className="space-y-2">
-                        <Label>Description</Label>
+                        <Label>{t.agentManagement.packDescription}</Label>
                         <Textarea
                           value={knowledgePackDraft.description}
                           onChange={(event) =>
@@ -622,7 +567,7 @@ export function AgentManagementView() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>Documents</Label>
+                        <Label>{t.agentManagement.packDocuments}</Label>
                         <ScrollArea className="h-64 rounded-xl border">
                           <div className="space-y-2 p-3">
                             {documents.map((document) => {
@@ -654,13 +599,13 @@ export function AgentManagementView() {
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setKnowledgeDialogOpen(false)}>
-                        Cancel
+                        {t.agentManagement.cancel}
                       </Button>
                       <Button
                         onClick={() => saveKnowledgePackMutation.mutate()}
                         disabled={saveKnowledgePackMutation.isPending || !knowledgePackDraft.name.trim()}
                       >
-                        Save knowledge pack
+                        {t.agentManagement.savePack}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
@@ -678,9 +623,11 @@ export function AgentManagementView() {
                               <h3 className="font-semibold">{pack.name}</h3>
                               <Badge variant="outline">{pack.status}</Badge>
                             </div>
-                            <p className="mt-1 text-sm text-muted-foreground">{pack.description || "No description"}</p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {pack.description || t.agentManagement.noDescription}
+                            </p>
                             <p className="mt-2 text-xs text-muted-foreground">
-                              {pack.document_ids.length} linked documents
+                              {pack.document_ids.length} {t.agentManagement.linkedDocs}
                             </p>
                           </div>
                           <Button
@@ -692,7 +639,7 @@ export function AgentManagementView() {
                               setKnowledgeDialogOpen(true);
                             }}
                           >
-                            Edit
+                            {t.agentManagement.edit}
                           </Button>
                         </div>
                         <label className="mt-4 flex items-center gap-2 text-sm">
@@ -712,7 +659,7 @@ export function AgentManagementView() {
                               )
                             }
                           />
-                          Attach to this profile
+                          {t.agentManagement.attachProfile}
                         </label>
                         {checked && pack.document_ids.length > 0 && (
                           <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -729,7 +676,7 @@ export function AgentManagementView() {
                 </div>
                 {knowledgePacks.length === 0 && (
                   <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
-                    No knowledge packs yet. Create one here and attach documents before assigning it to a profile.
+                    {t.agentManagement.noPacks}
                   </div>
                 )}
               </CardContent>
@@ -737,8 +684,8 @@ export function AgentManagementView() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Evidence Policy</CardTitle>
-                <CardDescription>Control which evidence sources the profile may rely on.</CardDescription>
+                <CardTitle>{t.agentManagement.evidenceTitle}</CardTitle>
+                <CardDescription>{t.agentManagement.evidenceDescription}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -776,41 +723,8 @@ export function AgentManagementView() {
                       )
                     }
                   />
-                  Allow model-only fallback when policy permits
+                  {t.agentManagement.modelOnlyFallback}
                 </label>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Advanced Model Overrides</CardTitle>
-                <CardDescription>Optional per-task overrides. Keep this secondary to capability and knowledge scope.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {taskTypes.map((task) => (
-                  <div key={task.task_type} className="rounded-2xl border p-4">
-                    <div className="mb-3">
-                      <h3 className="font-semibold">{task.label}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Leave empty to inherit workspace defaults from `/settings`.
-                      </p>
-                    </div>
-                    <TaskModelPicker
-                      models={models}
-                      value={profileDraft.taskModels[task.task_type]}
-                      onChange={(value) =>
-                        setProfileDraft((current) =>
-                          current
-                            ? {
-                                ...current,
-                                taskModels: { ...current.taskModels, [task.task_type]: value },
-                              }
-                            : current,
-                        )
-                      }
-                    />
-                  </div>
-                ))}
               </CardContent>
             </Card>
           </div>
@@ -821,7 +735,10 @@ export function AgentManagementView() {
         <div className="fixed inset-x-0 bottom-2 z-30 px-3 sm:bottom-4 sm:px-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-3 rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
-              Editing `{selectedProfile.name}` with {formatPresetLabel(profileDraft.capabilityPreset)} and {summarizeKnowledgeScope(profileDraft.knowledgePackIds.length)}.
+              {t.agentManagement.editingSummary
+                .replace("{name}", selectedProfile.name)
+                .replace("{preset}", formatPresetLabel(profileDraft.capabilityPreset))
+                .replace("{scope}", summarizeKnowledgeScope(profileDraft.knowledgePackIds.length))}
             </p>
             <div className="grid grid-cols-2 gap-2 sm:flex">
               <Button
@@ -830,11 +747,11 @@ export function AgentManagementView() {
                 disabled={setDefaultMutation.isPending || selectedProfile.is_default}
               >
                 <Shield className="h-4 w-4" />
-                Set default
+                {t.agentManagement.setDefault}
               </Button>
               <Button onClick={() => saveProfileMutation.mutate()} disabled={saveProfileMutation.isPending}>
                 <Save className="h-4 w-4" />
-                Save profile
+                {t.agentManagement.saveProfile}
               </Button>
             </div>
           </div>

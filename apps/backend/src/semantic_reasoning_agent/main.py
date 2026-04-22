@@ -12,7 +12,6 @@ from semantic_reasoning_agent.services.alembic_service import AlembicService
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     database_manager = get_database_manager()
-    database_manager.create_schema()
     AlembicService(database_manager).upgrade()
     yield
 

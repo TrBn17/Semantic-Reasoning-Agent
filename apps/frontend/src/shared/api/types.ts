@@ -386,15 +386,11 @@ export interface SettingsProviderUpdate {
 export interface SettingsResponse {
   workspace: WorkspaceSummary;
   providers: SettingsProviderResponse[];
-  model_catalog: SettingsModelOption[];
-  task_defaults: SettingsTaskDefaultResponse[];
-  preferred_default_chat_model?: SettingsModelOption | null;
 }
 
 export interface SettingsUpdateRequest {
   workspace_id: string;
   providers: SettingsProviderUpdate[];
-  task_defaults: SettingsTaskDefaultUpdate[];
 }
 
 export interface KnowledgePackResponse {
@@ -522,8 +518,8 @@ export interface RetrievalReindexResponse {
 export interface OntologyBuildCreateRequest {
   document_id: string;
   workspace_id?: string | null;
-  provider?: string | null;
-  model?: string | null;
+  extraction_provider?: string | null;
+  extraction_model?: string | null;
 }
 
 export interface OntologyBuildStepResponse {
@@ -581,7 +577,11 @@ export interface OntologyBuildResponse {
   status: OntologyBuildStatus;
   domain?: string | null;
   ontology_title?: string | null;
+  extraction_provider?: string | null;
+  extraction_model?: string | null;
+  /** @deprecated Compatibility with older API responses. */
   provider?: string | null;
+  /** @deprecated Compatibility with older API responses. */
   model?: string | null;
   created_at: string;
   started_at?: string | null;
@@ -670,6 +670,8 @@ export interface OntologyGraphResponse {
   version?: OntologyVersionResponse | null;
   entities: OntologyEntityResponse[];
   relations: OntologyRelationResponse[];
+  /** True when published ontology was synced into Graphiti for this workspace. */
+  graphiti_indexed?: boolean;
 }
 
 /** POST /knowledge-graph/extract */
@@ -831,37 +833,38 @@ export interface ToolCallSummary {
   next_action_hints: string[];
 }
 
-export interface TaskResolutionRequest {
-  conversation_id?: string | null;
-  entrypoint?: string;
+export interface TaskResolveRequest {
   content: string;
   workspace_id?: string | null;
-  task_type?: string;
-  requested_output?: TaskOutputClass;
+  conversation_id?: string | null;
+  agent_profile_id?: string | null;
   provider?: string;
   model?: string;
   use_retrieval?: boolean;
   document_ids?: string[];
   top_k?: number;
-  web_enabled?: boolean;
-  freshness_required?: boolean;
+  enabled_tool_names?: string[] | null;
+  debug?: boolean;
 }
 
-export interface TaskResolutionResponse {
+export interface TaskResolveResponse {
   task_id: string;
-  workflow_run_id: string;
-  workflow_id: string;
-  workflow_mode: WorkflowMode;
-  status: TaskRunStatus;
-  output_type: TaskOutputClass;
-  reply?: string | null;
+  output_type: string;
+  workflow_id?: string | null;
+  stop_reason?: string | null;
+  grounded: boolean;
+  content: string;
   citations: Citation[];
-  evidence: Evidence[];
-  tool_calls: ToolCallSummary[];
-  trace_id?: string | null;
-  provider?: string | null;
-  model?: string | null;
+  evidence: Array<Record<string, unknown>>;
+  next_action_hints: string[];
+  trace: Array<Record<string, unknown>>;
 }
+
+/**
+ * @deprecated Use `TaskResolveRequest`/`TaskResolveResponse` to mirror backend contracts.
+ */
+export type TaskResolutionRequest = TaskResolveRequest;
+export type TaskResolutionResponse = TaskResolveResponse;
 
 export interface TaskRunRecord {
   id: string;

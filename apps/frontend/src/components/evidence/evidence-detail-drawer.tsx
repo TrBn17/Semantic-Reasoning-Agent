@@ -10,15 +10,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { track } from "@/shared/telemetry/track";
 import type { EvidenceItemViewModel } from "@/entities/evidence/types";
-
-const SOURCE_LABEL: Record<EvidenceItemViewModel["sourceType"], string> = {
-  retrieval_citation: "Retrieval citation",
-  document_chunk: "Document chunk",
-  ontology_candidate_entity: "Ontology candidate entity",
-  ontology_candidate_relation: "Ontology candidate relation",
-};
+import { useI18n } from "@/shared/i18n/use-language";
+import { track } from "@/shared/telemetry/track";
 
 export function EvidenceDetailDrawer({
   item,
@@ -27,54 +21,59 @@ export function EvidenceDetailDrawer({
   item: EvidenceItemViewModel | null;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
+  const sourceLabels: Record<EvidenceItemViewModel["sourceType"], string> = {
+    retrieval_citation: t.evidenceDetail.retrievalCitation,
+    document_chunk: t.evidenceDetail.documentChunk,
+    ontology_candidate_entity: t.evidenceDetail.ontologyCandidateEntity,
+    ontology_candidate_relation: t.evidenceDetail.ontologyCandidateRelation,
+  };
+
   return (
     <Sheet open={Boolean(item)} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent side="right" className="flex flex-col gap-4 sm:max-w-lg">
+      <SheetContent
+        side="right"
+        className="flex flex-col gap-4 sm:max-w-lg"
+        closeLabel={t.common.accessibility.closeSheet}
+      >
         {item && (
           <>
             <SheetHeader>
               <SheetTitle className="text-base">{item.title}</SheetTitle>
-              <SheetDescription>
-                {SOURCE_LABEL[item.sourceType]}
-              </SheetDescription>
+              <SheetDescription>{sourceLabels[item.sourceType]}</SheetDescription>
             </SheetHeader>
             <div className="flex flex-wrap gap-2">
               {typeof item.score === "number" && (
                 <Badge variant="outline">
-                  score {formatScore(item.score)}
+                  {t.evidenceDetail.scorePrefix} {formatScore(item.score)}
                 </Badge>
               )}
-              {typeof item.trustScore === "number" &&
-                item.trustScore !== item.score && (
-                  <Badge variant="outline">
-                    trust {formatScore(item.trustScore)}
-                  </Badge>
-                )}
-              {item.citationLabel && (
-                <Badge variant="secondary">{item.citationLabel}</Badge>
+              {typeof item.trustScore === "number" && item.trustScore !== item.score && (
+                <Badge variant="outline">
+                  {t.evidenceDetail.trustPrefix} {formatScore(item.trustScore)}
+                </Badge>
               )}
+              {item.citationLabel && <Badge variant="secondary">{item.citationLabel}</Badge>}
             </div>
             {item.contentSnippet && (
               <section className="space-y-1">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Snippet
+                  {t.evidenceDetail.snippet}
                 </div>
-                <p className="rounded-md border bg-muted/30 p-3 text-sm">
-                  {item.contentSnippet}
-                </p>
+                <p className="rounded-md border bg-muted/30 p-3 text-sm">{item.contentSnippet}</p>
               </section>
             )}
             {item.provenanceSummary && (
               <section className="space-y-1">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Provenance
+                  {t.evidenceDetail.provenance}
                 </div>
                 <p className="text-sm">{item.provenanceSummary}</p>
               </section>
             )}
             <section className="space-y-2">
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Links
+                {t.evidenceDetail.links}
               </div>
               <div className="flex flex-wrap gap-2">
                 {item.documentId && (
@@ -89,7 +88,7 @@ export function EvidenceDetailDrawer({
                         })
                       }
                     >
-                      Open document
+                      {t.evidenceDetail.openDocument}
                     </Button>
                   </Link>
                 )}
@@ -105,7 +104,7 @@ export function EvidenceDetailDrawer({
                         })
                       }
                     >
-                      Open build
+                      {t.evidenceDetail.openBuild}
                     </Button>
                   </Link>
                 )}
@@ -121,7 +120,7 @@ export function EvidenceDetailDrawer({
                         })
                       }
                     >
-                      External source
+                      {t.evidenceDetail.externalSource}
                     </Button>
                   </a>
                 )}

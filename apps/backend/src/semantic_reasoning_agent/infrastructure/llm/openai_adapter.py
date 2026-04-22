@@ -30,15 +30,15 @@ class OpenAIAdapter(ProviderAdapter):
     ``LLMMessage`` / ``LLMToolCall`` and OpenAI's message/tool shapes.
     """
 
-    provider = "openai"
-
     def __init__(
         self,
         *,
+        provider: str = "openai",
         api_key: str,
         base_url: str | None = None,
         client: Any | None = None,
     ) -> None:
+        self.provider = provider
         self._api_key = api_key
         self._base_url = base_url
         self._client = client
@@ -92,8 +92,12 @@ class OpenAIAdapter(ProviderAdapter):
             kwargs["tools"] = wire_tools
             kwargs["tool_choice"] = _to_openai_tool_choice(tool_choice)
 
-        import openai
-        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        if api_key == self._api_key and base_url == self._base_url:
+            client = self._get_client()
+        else:
+            import openai
+
+            client = openai.OpenAI(api_key=api_key, base_url=base_url)
         response = client.chat.completions.create(**kwargs)
         return _parse_openai_response(response, model=model, provider=self.provider)
 

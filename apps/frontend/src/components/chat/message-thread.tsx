@@ -1,7 +1,8 @@
 "use client";
 
 import { Bot, User } from "lucide-react";
-import { cn, formatDateTime } from "@/shared/utils";
+import { Time } from "@/shared/components/time";
+import { cn } from "@/shared/utils";
 import type { Message } from "@/shared/api/types";
 
 export function MessageThread({
@@ -73,7 +74,13 @@ function MessageRow({
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="font-medium capitalize">{message.role}</span>
           <span>&bull;</span>
-          <span>{pending ? "Streaming..." : formatDateTime(message.created_at)}</span>
+          <span>
+            {pending ? (
+              "Streaming..."
+            ) : (
+              <Time value={message.created_at} className="inline text-muted-foreground" />
+            )}
+          </span>
         </div>
         <div className="whitespace-pre-wrap break-words rounded-2xl bg-card px-4 py-3 text-sm leading-6 shadow-sm ring-1 ring-border">
           {message.content}

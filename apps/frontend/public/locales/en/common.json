@@ -1,0 +1,21 @@
+{
+  "appName": "Semantic Agent",
+  "loading": "Loading...",
+  "save": "Save",
+  "cancel": "Cancel",
+  "close": "Close",
+  "create": "Create",
+  "delete": "Delete",
+  "edit": "Edit",
+  "search": "Search",
+  "refresh": "Refresh",
+  "language": "Language",
+  "english": "English",
+  "vietnamese": "Vietnamese",
+  "theme": "Theme",
+  "light": "Light",
+  "dark": "Dark",
+  "system": "System",
+  "workspace": "Workspace",
+  "unknownError": "Unknown error"
+}

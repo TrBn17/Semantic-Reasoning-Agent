@@ -2,19 +2,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCcw, Save } from "lucide-react";
+import { ChevronDown, ChevronRight, RefreshCcw, Save } from "lucide-react";
 import { toast } from "sonner";
-import { TaskModelPicker, composeModelValue, parseModelValue } from "@/components/agents/model-picker";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getSettings, updateSettings } from "@/shared/api/settings";
+import type { SettingsResponse } from "@/shared/api/types";
+import { SettingSection } from "@/components/settings/setting-row";
+import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
+import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
-import { useWorkspaceStore } from "@/shared/state/workspace-store";
-import type { SettingsResponse, SettingsProviderResponse } from "@/shared/api/types";
+import { cn } from "@/shared/utils";
 
 type ProviderDraft = {
   enabled: boolean;
@@ -38,168 +38,179 @@ function hydrateProviderDrafts(settings: SettingsResponse): Record<string, Provi
   );
 }
 
-function hydrateTaskDrafts(settings: SettingsResponse): Record<string, string> {
-  return Object.fromEntries(
-    settings.task_defaults.map((task) => [task.task_type, composeModelValue(task.provider, task.model)]),
-  );
-}
-
-function providerStatus(provider: SettingsProviderResponse, draft?: ProviderDraft) {
-  const enabled = draft?.enabled ?? provider.enabled;
-  if (!enabled) {
-    return { label: "Disabled", variant: "secondary" as const };
+function draftsEqual(a: Record<string, ProviderDraft>, b: Record<string, ProviderDraft>): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    const left = a[key];
+    const right = b[key];
+    if (!left || !right) return false;
+    if (left.enabled !== right.enabled) return false;
+    const valueKeys = new Set([...Object.keys(left.values), ...Object.keys(right.values)]);
+    for (const vk of valueKeys) {
+      if ((left.values[vk] ?? "") !== (right.values[vk] ?? "")) return false;
+    }
   }
-  return provider.ready
-    ? { label: "Ready", variant: "success" as const }
-    : { label: "Needs setup", variant: "warning" as const };
+  return true;
 }
 
 export function ProviderSettingsView() {
+  const { t, language } = useI18n();
   const queryClient = useQueryClient();
-  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
+  const workspaceId = useActiveWorkspaceId();
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: queryKeys.settings.bootstrap(workspaceId),
     queryFn: () => getSettings(workspaceId),
   });
   const [providerDrafts, setProviderDrafts] = useState<Record<string, ProviderDraft>>({});
-  const [taskDrafts, setTaskDrafts] = useState<Record<string, string>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!data) return;
     setProviderDrafts(hydrateProviderDrafts(data));
-    setTaskDrafts(hydrateTaskDrafts(data));
   }, [data]);
 
+  const baselineDrafts = useMemo(
+    () => (data ? hydrateProviderDrafts(data) : {}),
+    [data],
+  );
+  const isDirty = useMemo(
+    () => !draftsEqual(providerDrafts, baselineDrafts),
+    [providerDrafts, baselineDrafts],
+  );
+
   const mutation = useMutation({
-    mutationFn: () =>
-      updateSettings({
-        workspace_id: data?.workspace.id ?? workspaceId ?? "workspace-demo",
+    mutationFn: () => {
+      const resolvedWorkspaceId = data?.workspace.id ?? workspaceId;
+      if (!resolvedWorkspaceId) {
+        throw new Error("Workspace is not resolved.");
+      }
+      return updateSettings({
+        workspace_id: resolvedWorkspaceId,
         providers:
           data?.providers.map((provider) => ({
             provider: provider.provider,
             enabled: providerDrafts[provider.provider]?.enabled ?? provider.enabled,
             values: providerDrafts[provider.provider]?.values ?? {},
           })) ?? [],
-        task_defaults:
-          data?.task_defaults
-            .map((task) => {
-              const parsed = parseModelValue(taskDrafts[task.task_type]);
-              if (!parsed) return null;
-              return {
-                use_case: task.use_case,
-                provider: parsed.provider,
-                model: parsed.model,
-              };
-            })
-            .filter((item): item is NonNullable<typeof item> => Boolean(item)) ?? [],
-      }),
+      });
+    },
     onSuccess: async (updated) => {
       queryClient.setQueryData(queryKeys.settings.bootstrap(workspaceId), updated);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.settings.all }),
         queryClient.invalidateQueries({ queryKey: queryKeys.settings.models(workspaceId) }),
       ]);
-      toast.success("Settings saved.");
+      toast.success(t.agentsSettings.toasts.agentSettingsSaved);
     },
-    onError: (error) => toast.error(`Save failed: ${(error as Error).message}`),
+    onError: (error) =>
+      toast.error(`${t.agentsSettings.toasts.saveFailedPrefix} ${(error as Error).message}`),
   });
-
-  const providerCount = data?.providers.filter((provider) => provider.ready).length ?? 0;
-  const modelCount = data?.model_catalog.filter((model) => model.ready).length ?? 0;
-
-  const providerGroups = useMemo(
-    () => Object.fromEntries((data?.model_catalog ?? []).map((model) => [composeModelValue(model.provider, model.model), model])),
-    [data?.model_catalog],
-  );
 
   if (isLoading || !data) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
-        <Skeleton className="h-72 w-full" />
+      <div className="space-y-3">
+        <Skeleton className="h-20 w-full rounded-xl" />
+        <Skeleton className="h-24 w-full rounded-xl" />
+        <Skeleton className="h-24 w-full rounded-xl" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 pb-24">
-      <Card>
-        <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <CardTitle>Provider Configuration</CardTitle>
-            <CardDescription>
-              Configure provider credentials, inspect readiness, and choose workspace-level model defaults.
-            </CardDescription>
+    <div className="space-y-6">
+      <SettingSection
+        title={t.agentsSettings.providerEnv.title}
+        description={t.agentsSettings.providerEnv.description}
+        action={
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => void refetch()}
+              disabled={isFetching || mutation.isPending}
+              aria-label={t.common.refresh}
+            >
+              <RefreshCcw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => mutation.mutate()}
+              disabled={mutation.isPending || !isDirty}
+            >
+              <Save className="mr-1.5 h-3.5 w-3.5" />
+              {language === "vi" ? "Luu" : t.common.save}
+            </Button>
           </div>
-          <div className="grid grid-cols-2 gap-3 text-sm lg:flex">
-            <div className="rounded-xl border px-4 py-3">
-              <div className="text-muted-foreground">Workspace</div>
-              <div className="font-semibold">{data.workspace.name}</div>
-            </div>
-            <div className="rounded-xl border px-4 py-3">
-              <div className="text-muted-foreground">Ready providers</div>
-              <div className="font-semibold">{providerCount}</div>
-            </div>
-            <div className="rounded-xl border px-4 py-3">
-              <div className="text-muted-foreground">Ready models</div>
-              <div className="font-semibold">{modelCount}</div>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
+        }
+      >
+        <div className="divide-y">
+          {data.providers.map((provider) => {
+            const draft = providerDrafts[provider.provider];
+            const isOpen = expanded[provider.provider] ?? false;
+            const enabled = draft?.enabled ?? provider.enabled;
+            const hasFields = provider.fields.length > 0;
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Providers</CardTitle>
-            <CardDescription>Store keys or URLs here. Agent profiles no longer live on this page.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {data.providers.map((provider) => {
-              const draft = providerDrafts[provider.provider];
-              const status = providerStatus(provider, draft);
-              return (
-                <div key={provider.provider} className="rounded-2xl border p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold">{provider.label}</h3>
-                        <Badge variant={status.variant}>{status.label}</Badge>
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">{provider.status_text}</p>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={draft?.enabled ?? provider.enabled}
-                        onChange={(event) =>
-                          setProviderDrafts((current) => ({
-                            ...current,
-                            [provider.provider]: {
-                              enabled: event.target.checked,
-                              values: current[provider.provider]?.values ?? hydrateProviderDrafts(data)[provider.provider].values,
-                            },
-                          }))
-                        }
-                      />
-                      Enabled
-                    </label>
-                  </div>
-
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    {provider.fields.length === 0 && (
-                      <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                        This provider does not require extra configuration.
-                      </div>
+            return (
+              <div key={provider.provider} className="py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    className="group flex min-w-0 flex-1 items-center gap-2 text-left"
+                    onClick={() =>
+                      setExpanded((current) => ({
+                        ...current,
+                        [provider.provider]: !isOpen,
+                      }))
+                    }
+                    aria-expanded={isOpen}
+                    aria-controls={`provider-panel-${provider.provider}`}
+                  >
+                    {hasFields ? (
+                      isOpen ? (
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                      )
+                    ) : (
+                      <span className="inline-block h-4 w-4 shrink-0" aria-hidden />
                     )}
+                    <span className="truncate text-sm font-medium">{provider.label}</span>
+                  </button>
+
+                  <ToggleSwitch
+                    checked={enabled}
+                    onChange={(next) =>
+                      setProviderDrafts((current) => ({
+                        ...current,
+                        [provider.provider]: {
+                          enabled: next,
+                          values:
+                            current[provider.provider]?.values ??
+                            hydrateProviderDrafts(data)[provider.provider].values,
+                        },
+                      }))
+                    }
+                    ariaLabel={`${t.agentsSettings.providerEnv.enabled} ${provider.label}`}
+                  />
+                </div>
+
+                {isOpen && hasFields && (
+                  <div
+                    id={`provider-panel-${provider.provider}`}
+                    className="mt-3 space-y-3 rounded-lg border bg-background/60 p-3"
+                  >
                     {provider.fields.map((field) => {
                       const valueState = provider.values.find((value) => value.key === field.key);
+                      const inputId = `${provider.provider}-${field.key}`;
                       return (
-                        <div key={field.key} className="space-y-2">
-                          <Label htmlFor={`${provider.provider}-${field.key}`}>{field.label}</Label>
+                        <div key={field.key} className="space-y-1.5">
+                          <Label htmlFor={inputId} className="text-xs font-medium">
+                            {field.label}
+                          </Label>
                           <Input
-                            id={`${provider.provider}-${field.key}`}
+                            id={inputId}
                             type={field.secret ? "password" : "text"}
                             placeholder={field.placeholder}
                             value={draft?.values[field.key] ?? ""}
@@ -209,108 +220,71 @@ export function ProviderSettingsView() {
                                 [provider.provider]: {
                                   enabled: current[provider.provider]?.enabled ?? provider.enabled,
                                   values: {
-                                    ...(current[provider.provider]?.values ?? hydrateProviderDrafts(data)[provider.provider].values),
+                                    ...(current[provider.provider]?.values ??
+                                      hydrateProviderDrafts(data)[provider.provider].values),
                                     [field.key]: event.target.value,
                                   },
                                 },
                               }))
                             }
+                            className="h-8 text-sm"
                           />
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-[11px] leading-relaxed text-muted-foreground">
                             {field.help_text}
                             {valueState?.configured && !draft?.values[field.key]
-                              ? ` Saved: ${valueState.display_value || "configured"}`
+                              ? ` · ${t.agentsSettings.providerEnv.currentPrefix} ${
+                                  valueState.display_value ||
+                                  t.agentsSettings.providerEnv.configured
+                                }`
                               : ""}
                           </p>
                         </div>
                       );
                     })}
                   </div>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
+                )}
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Workspace Defaults</CardTitle>
-              <CardDescription>These defaults apply before an agent profile overrides them.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {data.task_defaults.map((task) => {
-                const selectedValue = taskDrafts[task.task_type];
-                const selectedModel = selectedValue ? providerGroups[selectedValue] : null;
-                return (
-                  <div key={task.task_type} className="rounded-2xl border p-4">
-                    <div className="mb-3">
-                      <h3 className="font-semibold">{task.label}</h3>
-                      <p className="text-sm text-muted-foreground">{task.description}</p>
-                    </div>
-                    <TaskModelPicker
-                      models={data.model_catalog}
-                      value={selectedValue}
-                      onChange={(value) =>
-                        setTaskDrafts((current) => ({ ...current, [task.task_type]: value }))
-                      }
-                    />
-                    {selectedModel && (
-                      <p className="mt-3 text-xs text-muted-foreground">
-                        {selectedModel.ready ? "Ready" : "Blocked"}: {selectedModel.reason}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Curated Model Catalog</CardTitle>
-              <CardDescription>Frontend product flows should use this catalog instead of provider discovery endpoints.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2">
-              {data.model_catalog.map((model) => (
-                <div key={composeModelValue(model.provider, model.model)} className="rounded-2xl border p-4">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold">{model.label}</h3>
-                    <Badge variant={model.ready ? "success" : "warning"}>
-                      {model.ready ? "Ready" : "Blocked"}
-                    </Badge>
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">{model.description || model.reason}</p>
-                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span>{model.provider}</span>
-                    <span>{model.model}</span>
-                    {model.supports_structured_output && <span>Structured output</span>}
-                    {model.supports_streaming && <span>Streaming</span>}
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                {isOpen && !hasFields && (
+                  <p className="mt-2 pl-6 text-xs text-muted-foreground">
+                    {t.agentsSettings.providerEnv.noAdditionalEnv}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
-      </div>
-
-      <div className="fixed inset-x-0 bottom-2 z-30 px-3 sm:bottom-4 sm:px-6">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 rounded-xl border bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
-            `/settings` is now limited to provider configuration and workspace model defaults.
-          </p>
-          <div className="grid grid-cols-2 gap-2 sm:flex">
-            <Button type="button" variant="outline" onClick={() => void refetch()} disabled={isFetching || mutation.isPending}>
-              <RefreshCcw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button onClick={() => mutation.mutate()} disabled={mutation.isPending} className="col-span-2 sm:col-span-1">
-              <Save className="h-4 w-4" />
-              Save settings
-            </Button>
-          </div>
-        </div>
-      </div>
+      </SettingSection>
     </div>
+  );
+}
+
+function ToggleSwitch({
+  checked,
+  onChange,
+  ariaLabel,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
+        checked ? "bg-primary border-primary" : "bg-muted border-border",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-4 w-4 transform rounded-full bg-background shadow transition-transform",
+          checked ? "translate-x-4" : "translate-x-0.5",
+        )}
+      />
+    </button>
   );
 }

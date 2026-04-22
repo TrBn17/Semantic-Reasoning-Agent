@@ -124,7 +124,7 @@ export function WorkspaceSwitcher() {
       </DropdownMenu>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md" closeLabel={t.common.accessibility.closeDialog}>
           <DialogHeader>
             <DialogTitle>{t.workspaceSwitcher.createTitle}</DialogTitle>
             <DialogDescription>

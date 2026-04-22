@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
+from semantic_reasoning_agent.core.runtime_constants import DEFAULT_TOOL_TIMEOUT_MS, TOOL_GRAPHITI_INGEST
+from semantic_reasoning_agent.core.time import utc_now
 from semantic_reasoning_agent.domain.contracts.tool_envelope import ToolEnvelope, ToolMeta, ToolResult
 from semantic_reasoning_agent.domain.contracts.tool_spec import ToolSpec
 from semantic_reasoning_agent.infrastructure.graphiti.graphiti_gateway import GraphitiGateway
@@ -22,10 +23,10 @@ _SPEC_INPUT_SCHEMA: dict[str, Any] = {
 
 
 class GraphitiIngestTool(Tool):
-    tool_name = "graphiti.ingest_episode"
+    tool_name = TOOL_GRAPHITI_INGEST
 
     SPEC = ToolSpec(
-        tool_name="graphiti.ingest_episode",
+        tool_name=TOOL_GRAPHITI_INGEST,
         tool_family="graph",
         tool_type="internal_service",
         version="1.0.0",
@@ -36,7 +37,7 @@ class GraphitiIngestTool(Tool):
         risk_level="medium",
         side_effect_level="write_internal",
         supports_parallel=False,
-        timeout_ms=15000,
+        timeout_ms=DEFAULT_TOOL_TIMEOUT_MS,
     )
 
     def __init__(self, gateway: GraphitiGateway) -> None:
@@ -54,7 +55,7 @@ class GraphitiIngestTool(Tool):
         if not isinstance(source_description, str) or not source_description.strip():
             raise ValueError("graphiti.ingest_episode requires a non-empty 'source_description' argument.")
 
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         if not self._gateway.is_enabled():
             return ToolResult(
                 call_id=envelope.call_id,

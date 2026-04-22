@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from semantic_reasoning_agent.core.runtime_constants import DEFAULT_TASK_TOP_K
 from semantic_reasoning_agent.schemas.retrieval import Citation
 class TaskResolveRequest(BaseModel):
     content: str
@@ -12,12 +13,19 @@ class TaskResolveRequest(BaseModel):
     model: str | None = None
     use_retrieval: bool = False
     document_ids: list[str] = Field(default_factory=list)
-    top_k: int = 3
+    top_k: int = DEFAULT_TASK_TOP_K
     enabled_tool_names: list[str] | None = None
+    debug: bool = False
 
 
 class TaskResolveResponse(BaseModel):
     task_id: str
     output_type: str = "answer"
+    workflow_id: str | None = None
+    stop_reason: str | None = None
+    grounded: bool = True
     content: str
     citations: list[Citation] = Field(default_factory=list)
+    evidence: list[dict] = Field(default_factory=list)
+    next_action_hints: list[str] = Field(default_factory=list)
+    trace: list[dict] = Field(default_factory=list)

@@ -16,9 +16,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { streamMessage } from "@/shared/api/chat";
 import { getConversation } from "@/shared/api/conversations";
 import { listDocuments } from "@/shared/api/documents";
-import { listModels } from "@/shared/api/models";
+import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
+import { useSettingsModelsQuery } from "@/shared/hooks/use-settings-models-query";
 import { queryKeys } from "@/shared/query/keys";
-import { useWorkspaceStore } from "@/shared/state/workspace-store";
+import { useI18n } from "@/shared/i18n/use-language";
 import type { ChatReply, ChatToolCallSummary, Citation } from "@/shared/api/types";
 
 const CitationsDrawer = dynamic(
@@ -31,7 +32,8 @@ const CitationsDrawer = dynamic(
 
 export function ChatView({ conversationId }: { conversationId: string }) {
   const queryClient = useQueryClient();
-  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
+  const { t } = useI18n();
+  const workspaceId = useActiveWorkspaceId();
   const [latestCitations, setLatestCitations] = useState<Citation[]>([]);
   const [streamingMessage, setStreamingMessage] = useState("");
   const [toolCalls, setToolCalls] = useState<ChatToolCallSummary[]>([]);
@@ -42,10 +44,7 @@ export function ChatView({ conversationId }: { conversationId: string }) {
     queryFn: () => getConversation(conversationId),
   });
 
-  const { data: models = [] } = useQuery({
-    queryKey: [...queryKeys.models, workspaceId ?? null],
-    queryFn: () => listModels(workspaceId),
-  });
+  const { data: models = [] } = useSettingsModelsQuery();
 
   const { data: documents = [] } = useQuery({
     queryKey: queryKeys.documents.list(),
@@ -99,13 +98,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               return;
             }
             if (event === "error") {
-              toast.error(String(data.message ?? "Streaming failed"));
+              toast.error(String(data.message ?? t.chatView.streamingFailed));
             }
           },
         },
       );
     } catch (error) {
-      toast.error(`Failed to send: ${(error as Error).message}`);
+      toast.error(`${t.chatView.sendFailedPrefix} ${(error as Error).message}`);
     } finally {
       setIsStreaming(false);
     }
@@ -117,10 +116,10 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         <div className="mx-auto flex max-w-6xl flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h2 className="text-xl font-semibold">{conversation?.title ?? "Conversation"}</h2>
+              <h2 className="text-xl font-semibold">{conversation?.title ?? t.chatView.conversationFallback}</h2>
               <p className="text-sm text-muted-foreground">
                 {conversation
-                  ? `${conversation.effective_agent_name ?? "Workspace runtime"} · ${conversation.provider} · ${conversation.model}`
+                  ? `${conversation.effective_agent_name ?? t.chatView.workspaceRuntime} · ${conversation.provider} · ${conversation.model}`
                   : ""}
               </p>
             </div>
@@ -167,10 +166,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
                 <Bot className="h-5 w-5 text-muted-foreground" />
               </div>
-              <h3 className="text-lg font-semibold">Ask with tools, citations, and graph context</h3>
+              <h3 className="text-lg font-semibold">{t.chatView.emptyTitle}</h3>
               <p className="mt-2 text-sm text-muted-foreground">
-                Start with a direct question. Open Advanced when you need document scope,
-                retrieval tuning, or temporary tool toggles.
+                {t.chatView.emptyDescription}
               </p>
             </div>
           )}

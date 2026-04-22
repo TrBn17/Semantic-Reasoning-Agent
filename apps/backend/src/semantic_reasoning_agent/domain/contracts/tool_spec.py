@@ -71,6 +71,18 @@ class ToolSpec:
             },
         }
 
+    def to_gemini_tool(self) -> dict[str, Any]:
+        """Serialize to Gemini ``tools`` function declaration shape."""
+        return {
+            "functionDeclarations": [
+                {
+                    "name": self.tool_name,
+                    "description": self.description,
+                    "parameters": dict(self.input_schema),
+                }
+            ]
+        }
+
 
 def risk_at_most(candidate: RiskLevel, ceiling: RiskLevel) -> bool:
     return _RISK_ORDER[candidate] <= _RISK_ORDER[ceiling]

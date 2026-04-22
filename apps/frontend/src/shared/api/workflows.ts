@@ -1,7 +1,7 @@
 import { apiFetch } from "@/shared/api/client";
 import type {
-  TaskResolutionRequest,
-  TaskResolutionResponse,
+  TaskResolveRequest,
+  TaskResolveResponse,
   WorkflowRunRecord,
   WorkflowSpec,
 } from "@/shared/api/types";
@@ -16,9 +16,9 @@ export function listWorkflowRuns(): Promise<WorkflowRunRecord[]> {
 
 export function runWorkflow(
   workflowId: string,
-  payload: TaskResolutionRequest,
-): Promise<TaskResolutionResponse> {
-  return apiFetch<TaskResolutionResponse>(`/workflows/${workflowId}/run`, {
+  payload: TaskResolveRequest,
+): Promise<TaskResolveResponse> {
+  return apiFetch<TaskResolveResponse>(`/workflows/${workflowId}/run`, {
     method: "POST",
     body: payload,
   });

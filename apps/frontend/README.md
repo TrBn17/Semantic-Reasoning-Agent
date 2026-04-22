@@ -1,6 +1,6 @@
 # Frontend (Next.js)
 
-Workspace control plane for the Semantic Reasoning Agent. Primary product surfaces include ask, documents, evidence, ontology builds/review/publish, graph, `/settings` for provider configuration, and `/agents` for agent profile management. `/tools` remains available only as an internal admin/debug surface for AGENTS.md §9 execution primitives.
+Workspace control plane for the Semantic Reasoning Agent. Primary product surfaces include ask, documents, evidence, ontology builds/review/publish, graph, `/settings` for provider configuration, and `/agents` for agent profile management. `/tools` remains available as an internal admin/debug surface.
 
 ## Stack
 
@@ -8,6 +8,8 @@ Workspace control plane for the Semantic Reasoning Agent. Primary product surfac
 - Tailwind CSS + shadcn/ui primitives
 - TanStack Query (server state) + zustand (workspace / profile preferences)
 - sonner toasts, lucide icons
+- `react-i18next` namespaces with EN/VI dictionaries
+- `next-themes` for dark/light/system mode
 
 ## Layout
 
@@ -18,8 +20,13 @@ src/app/
   ontology/           # builds + review + published graph
   graph/              # Cytoscape explorer
   settings/           # providers, readiness, workspace model defaults
+  settings/models     # model catalog detail
   agents/             # agent profiles, capability presets, knowledge packs
+  tasks/              # task resolve playground
+  workflows/          # workflow registry and runner
   tools/              # admin/debug tool registry + invoke dialog
+  artifacts/          # scaffolded (capability-gated)
+  connectors/         # scaffolded (capability-gated)
 components/
   ui/                 # shadcn primitives
   layout/             # sidebar, header, workspace controls
@@ -30,8 +37,9 @@ lib/
   api/                # typed clients bound to canonical backend contracts
   query/ state/       # query-key factory, zustand store
 src/shared/
-  capabilities/       # feature flags for gated routes
-  i18n/               # en + vi dictionaries
+  capabilities/       # runtime capabilities (from backend probes/settings)
+  i18n/               # react-i18next bootstrap + bridge hook
+  layout/             # command palette, breadcrumbs, mobile nav, theme toggle
 ```
 
 ## Surfaces
@@ -82,6 +90,13 @@ Shipped tools: `retrieval.internal` and `ontology.lookup`.
 
 Point at a different backend by setting `NEXT_PUBLIC_API_BASE_URL` or `INTERNAL_API_BASE_URL`.
 
+## i18n and theme
+
+- Language state persists in `semantic-reasoning-language` localStorage.
+- New i18n resources live in `public/locales/{en,vi}/`.
+- Existing components can still use `useI18n()` bridge while new components can use `useT()` from `shared/i18n/use-t.ts`.
+- Theme mode persists via `next-themes` (`light`, `dark`, `system`).
+
 ## Scripts
 
 - `npm run dev`
@@ -89,3 +104,4 @@ Point at a different backend by setting `NEXT_PUBLIC_API_BASE_URL` or `INTERNAL_
 - `npm run start`
 - `npm run typecheck`
 - `npm run lint`
+- `npm run i18n:check`

@@ -16,9 +16,11 @@ import {
 import { listAgentProfiles } from "@/shared/api/agent-profiles";
 import { createConversation } from "@/shared/api/conversations";
 import { queryKeys } from "@/shared/query/keys";
+import { useI18n } from "@/shared/i18n/use-language";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 
 export default function ChatLandingPage() {
+  const { t } = useI18n();
   const router = useRouter();
   const queryClient = useQueryClient();
   const {
@@ -34,7 +36,7 @@ export default function ChatLandingPage() {
   const mutation = useMutation({
     mutationFn: () =>
       createConversation({
-        title: "New conversation",
+        title: t.pages.ask.newConversationTitle,
         workspace_id: workspaceId ?? undefined,
         agent_profile_id: preferredAgentProfileId ?? undefined,
       }),
@@ -42,7 +44,7 @@ export default function ChatLandingPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations.all });
       router.push(`/ask/${c.id}`);
     },
-    onError: (err) => toast.error(`Failed to create: ${(err as Error).message}`),
+    onError: (err) => toast.error(`${t.pages.ask.createFailedPrefix} ${(err as Error).message}`),
   });
 
   return (
@@ -51,11 +53,8 @@ export default function ChatLandingPage() {
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted">
           <MessageSquare className="h-6 w-6 text-muted-foreground" />
         </div>
-        <h2 className="text-lg font-semibold">Start a new conversation</h2>
-        <p className="text-sm text-muted-foreground">
-          Pick an agent profile and create a chat. Model routing will come from
-          that profile or the workspace default.
-        </p>
+        <h2 className="text-lg font-semibold">{t.pages.ask.newConversationHeading}</h2>
+        <p className="text-sm text-muted-foreground">{t.pages.ask.description}</p>
         <Select
           value={preferredAgentProfileId ?? "__default__"}
           onValueChange={(value) =>
@@ -63,10 +62,10 @@ export default function ChatLandingPage() {
           }
         >
           <SelectTrigger>
-            <SelectValue placeholder="Select profile" />
+            <SelectValue placeholder={t.chatRuntimeControls.selectProfile} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__default__">Workspace default</SelectItem>
+            <SelectItem value="__default__">{t.pages.ask.workspaceDefault}</SelectItem>
             {(profiles ?? []).map((profile) => (
               <SelectItem key={profile.id} value={profile.id}>
                 {`${profile.name} · ${formatPresetLabel(profile.capability_preset)} · ${summarizeKnowledgeScope(profile.knowledge_pack_ids.length)}`}
@@ -80,7 +79,7 @@ export default function ChatLandingPage() {
           size="lg"
         >
           <Plus className="h-4 w-4" />
-          New conversation
+          {t.pages.ask.newConversationButton}
         </Button>
       </div>
     </div>

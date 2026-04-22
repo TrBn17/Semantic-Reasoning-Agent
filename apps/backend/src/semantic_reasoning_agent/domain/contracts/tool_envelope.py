@@ -6,6 +6,7 @@ from typing import Any, Literal, Mapping
 from uuid import UUID
 
 from semantic_reasoning_agent.domain.contracts.evidence import Evidence
+from semantic_reasoning_agent.core.runtime_constants import DEFAULT_TOOL_TIMEOUT_MS
 
 ToolStatus = Literal["success", "partial", "failed"]
 
@@ -33,7 +34,7 @@ class ToolConstraints:
     web_enabled: bool = False
     freshness_required: bool = False
     max_results: int = 10
-    timeout_ms: int = 15000
+    timeout_ms: int = DEFAULT_TOOL_TIMEOUT_MS
 
 
 @dataclass(frozen=True)
