@@ -100,9 +100,11 @@ Implemented API families today:
 - `/api/v1/documents/*`
 - `/api/v1/retrieval/*`
 - `/api/v1/ontology/*`
-- `/api/v1/models/*`
+- `/api/v1/settings/*`
 - `/api/v1/agents/*`
 - `/api/v1/agents/profiles/*`
+- `/api/v1/agent-capabilities/*`
+- `/api/v1/knowledge-packs/*`
 - `/api/v1/auth/*`
 
 Planned next control-plane additions from the backend architecture:

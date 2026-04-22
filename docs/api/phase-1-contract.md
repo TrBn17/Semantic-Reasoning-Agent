@@ -4,7 +4,7 @@
 
 - `GET /health`
 - `GET /api/v1/auth/me`
-- `GET /api/v1/models`
+- `GET /api/v1/settings/models`
 - `GET /api/v1/conversations`
 - `POST /api/v1/conversations`
 - `GET /api/v1/conversations/{conversation_id}`

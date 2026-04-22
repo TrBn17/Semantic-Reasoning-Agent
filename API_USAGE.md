@@ -29,7 +29,7 @@ Backend hiện tại hoạt động tốt nhất nếu bạn hiểu nó theo cá
 
 Các điểm đã xác minh live ngày `2026-04-21`:
 
-- Sau khi restart backend, `GET /api/v1/agents/settings`, `GET /api/v1/models`, và `GET /api/v1/providers/openrouter/models` đều thấy `openrouter` là runtime-ready.
+- Sau khi restart backend, `GET /api/v1/settings`, `GET /api/v1/settings/models`, và `GET /api/v1/providers/openrouter/models` đều thấy `openrouter` là runtime-ready.
 - Catalog OpenRouter có model `minimax/minimax-m2.5:free`.
 - `POST /api/v1/chat/messages` trả đúng `OPENROUTER_CHAT_OK` khi dùng `openrouter + minimax/minimax-m2.5:free`.
 - `POST /api/v1/tasks/resolve` fallback sang OpenRouter thành công và trả đúng `TASK_RESOLVE_OPENROUTER_OK` khi không có evidence nội bộ.
@@ -72,14 +72,14 @@ Trả ngay dữ liệu đồng bộ:
 
 ### Endpoint nên đọc theo thứ tự
 
-1. `GET /api/v1/agents/settings`
-2. `GET /api/v1/models`
+1. `GET /api/v1/settings`
+2. `GET /api/v1/settings/models`
 3. `GET /api/v1/providers/openrouter/models`
-4. `PUT /api/v1/agents/settings` khi cần bật provider hoặc đổi model theo task
+4. `PUT /api/v1/settings` khi cần bật provider hoặc đổi model theo task
 
 ### Ý nghĩa từng endpoint
 
-`GET /api/v1/agents/settings`
+`GET /api/v1/settings`
 
 - endpoint tổng hợp tốt nhất cho frontend settings screen
 - cho biết:
@@ -88,7 +88,7 @@ Trả ngay dữ liệu đồng bộ:
   - field nào còn thiếu
   - task nào đang gán model nào
 
-`GET /api/v1/models`
+`GET /api/v1/settings/models`
 
 - catalog model đã được merge với trạng thái readiness cho workspace hiện tại
 - frontend picker nên ưu tiên nguồn này nếu muốn hiển thị model “chọn được ngay”
@@ -99,7 +99,7 @@ Trả ngay dữ liệu đồng bộ:
 - phù hợp khi người dùng muốn refresh model list mới nhất
 - với OpenRouter, endpoint này đã live trả được `minimax/minimax-m2.5:free`
 
-`PUT /api/v1/agents/settings`
+`PUT /api/v1/settings`
 
 - lưu cấu hình provider theo workspace
 - lưu gán model theo `task_type`
@@ -109,7 +109,7 @@ Trả ngay dữ liệu đồng bộ:
 
 Trước khi restart backend:
 
-- `GET /api/v1/agents/settings` báo `openrouter` chưa có `OPENROUTER_API_KEY`
+- `GET /api/v1/settings` báo `openrouter` chưa có `OPENROUTER_API_KEY`
 - `GET /api/v1/providers/openrouter/models` trả lỗi thiếu key
 
 Sau khi restart backend ngày `2026-04-21`:
@@ -147,7 +147,7 @@ Sau khi restart backend ngày `2026-04-21`:
 
 ### Lưu ý rất quan trọng
 
-- Lưu secret/cấu hình qua `PUT /api/v1/agents/settings` không thay thế được việc backend process phải nạp adapter lúc startup.
+- Lưu secret/cấu hình qua `PUT /api/v1/settings` không thay thế được việc backend process phải nạp adapter lúc startup.
 - Nếu `.env` đã có `OPENROUTER_API_KEY` nhưng runtime vẫn không thấy, cần restart backend process/container.
 
 ## 5. Flow 3: Tạo conversation và gửi chat
@@ -428,9 +428,9 @@ Trạng thái thực tế:
 ### Trả dữ liệu hoàn chỉnh ngay
 
 - `GET /api/v1/auth/me`
-- `GET /api/v1/agents/settings`
-- `PUT /api/v1/agents/settings`
-- `GET /api/v1/models`
+- `GET /api/v1/settings`
+- `PUT /api/v1/settings`
+- `GET /api/v1/settings/models`
 - `GET /api/v1/providers/{provider}/models`
 - `POST /api/v1/conversations`
 - `POST /api/v1/chat/messages`
@@ -469,8 +469,8 @@ Nghĩa là:
 
 Nên làm tiếp:
 
-1. `GET /api/v1/agents/settings`
-2. nếu cần, `PUT /api/v1/agents/settings`
+1. `GET /api/v1/settings`
+2. nếu cần, `PUT /api/v1/settings`
 3. nếu `.env` vừa đổi, restart backend process/container
 
 ### `OpenRouter API key not configured`
@@ -529,7 +529,7 @@ Nên làm tiếp:
 
 ## 12. Khuyến nghị triển khai cho frontend/no-code
 
-- Với màn settings, lấy `GET /api/v1/agents/settings` làm nguồn sự thật chính.
+- Với màn settings, lấy `GET /api/v1/settings` làm nguồn sự thật chính.
 - Với chat UI, luôn tạo conversation trước rồi mới gửi message.
 - Với “ask one question now”, ưu tiên `POST /api/v1/tasks/resolve`.
 - Với document UX, hiển thị rõ trạng thái ingest và job list thay vì giả định upload xong là search được ngay.

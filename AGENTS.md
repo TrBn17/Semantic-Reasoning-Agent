@@ -793,9 +793,7 @@ When the requested output class is an answer, the answer path is:
 
 As of the current repository state, document parsing is implemented with:
 
-- PDF: `marker` via `documents/parsers/pdf_marker_parser.py` when the optional `pdf_parsing` extra is installed, otherwise `pypdf` fast-mode fallback
-- DOCX: `python-docx`
-- XLSX: `openpyxl`
+- All non-CSV formats (PDF, DOCX, XLSX, images, etc.): `marker` via `documents/parsers/marker_document_parser.py` when the optional `pdf_parsing` extra is installed, otherwise `pypdf` fast-mode fallback for PDFs
 - CSV: stdlib `csv`
 
 Current ingestion jobs are:

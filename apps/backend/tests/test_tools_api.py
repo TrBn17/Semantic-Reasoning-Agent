@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from semantic_reasoning_agent.main import app
 
 
-def test_list_tools_returns_registered_phase3_tools() -> None:
+def test_list_tools_returns_registered_tools() -> None:
     client = TestClient(app)
     response = client.get("/api/v1/tools")
     assert response.status_code == 200
