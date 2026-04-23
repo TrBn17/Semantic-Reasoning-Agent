@@ -26,6 +26,7 @@ from .ontology import (
     OntologyVersionORM,
 )
 from .providers import ProviderConfigORM, ProviderSecretORM, TaskModelConfigORM
+from .search_tools import SearchToolConfigORM
 from .runtime_audit import (
     EvidenceBundleORM,
     EvidenceConflictORM,
@@ -62,6 +63,7 @@ __all__ = [
     "ProviderConfigORM",
     "ProviderSecretORM",
     "TaskModelConfigORM",
+    "SearchToolConfigORM",
     "TaskRunORM",
     "TaskRunStepORM",
     "ToolCallAuditORM",

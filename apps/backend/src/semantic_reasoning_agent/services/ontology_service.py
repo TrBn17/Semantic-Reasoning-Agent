@@ -592,6 +592,15 @@ class OntologyService:
                 model=build.extraction_model,
             )
             resolved_domain = extraction.domain or preliminary_domain
+            if (
+                resolved_domain in {"unavailable", "unconfigured", "disabled"}
+                and not extraction.entities
+                and not extraction.relations
+            ):
+                raise OntologyBuildError(
+                    "Ontology extraction model is unavailable for the selected provider/model. "
+                    "Verify provider settings, credentials, and runtime readiness, then retry."
+                )
             if resolved_domain and resolved_domain != "pending":
                 self._update_build_state(
                     build_id,
@@ -653,11 +662,14 @@ class OntologyService:
 
             self._mark_step_running(build_id, "sync_neo4j")
             sync_detail = (
-                "Neo4j is disabled; publish will keep the relational snapshot as the source of truth."
+                "Graph runtime is disabled. Build stores relational candidates only; graph sync happens on publish."
             )
             if self._graph_publisher.is_enabled():
                 self._graph_publisher.publish()
-                sync_detail = "Graphiti runtime graph is enabled; publish will refresh runtime graph indices."
+                sync_detail = (
+                    "Graphiti/Neo4j is enabled and indices were prepared. "
+                    "Ontology nodes/edges are synced only when the build is published."
+                )
             self._mark_step_completed(
                 build_id,
                 "sync_neo4j",

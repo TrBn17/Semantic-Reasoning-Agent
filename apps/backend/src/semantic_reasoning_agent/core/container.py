@@ -23,6 +23,7 @@ from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 from semantic_reasoning_agent.services.runtime_audit_service import RuntimeAuditService
+from semantic_reasoning_agent.services.search_tool_service import SearchToolConfigService
 from semantic_reasoning_agent.services.secret_service import DatabaseSecretRepository, SecretService
 from semantic_reasoning_agent.services.task_runtime import TaskRuntimeService
 from semantic_reasoning_agent.services.tool_registry import ToolRegistry, build_tool_registry
@@ -55,6 +56,7 @@ class AppContainer:
     workflow_registry_service: WorkflowRegistryService
     chat_stream_service: ChatStreamService
     runtime_audit_service: RuntimeAuditService
+    search_tool_service: SearchToolConfigService
 
 
 @lru_cache
@@ -118,10 +120,18 @@ def get_app_container() -> AppContainer:
             adapter_registry=adapter_registry,
         ),
     )
+    search_tool_service = SearchToolConfigService(
+        settings=settings,
+        database_manager=database_manager,
+        model_config_service=model_config_service,
+        retrieval_service=retrieval_service,
+        graphiti_gateway=graphiti_gateway,
+    )
     tool_registry = build_tool_registry(
         retrieval_service=retrieval_service,
         ontology_service=ontology_service,
         graphiti_gateway=graphiti_gateway,
+        search_tool_service=search_tool_service,
     )
     tool_runtime = ToolRuntime(tool_registry)
     agent_capability_service = AgentCapabilityService(tool_registry)
@@ -163,4 +173,5 @@ def get_app_container() -> AppContainer:
         workflow_registry_service=workflow_registry_service,
         chat_stream_service=chat_stream_service,
         runtime_audit_service=runtime_audit_service,
+        search_tool_service=search_tool_service,
     )

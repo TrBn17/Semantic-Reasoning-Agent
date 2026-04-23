@@ -100,7 +100,7 @@ export function SettingsModelsView() {
               onChange={(event) => setOnlyReady(event.target.checked)}
               className="h-3.5 w-3.5"
             />
-            {t.agentsSettings.picker.onlyReady}
+            {language === "vi" ? "Chỉ sẵn sàng" : "Only ready"}
           </label>
         </div>
       </SettingSection>

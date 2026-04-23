@@ -403,11 +403,20 @@ class ModelConfigService:
                         ProviderConfigORM.provider == provider_update.provider,
                     )
                 )
+                existing_values = existing.env_values if existing is not None else {}
                 filtered_values = {
                     field.key: provider_update.values.get(field.key, "").strip()
                     for field in spec.fields
                     if not field.secret and provider_update.values.get(field.key, "").strip()
                 }
+                # Keep existing non-secret values when a client omits keys
+                # (for example, saving before local drafts finish hydrating).
+                for field in spec.fields:
+                    if field.secret or field.key in provider_update.values:
+                        continue
+                    existing_value = (existing_values or {}).get(field.key, "").strip()
+                    if existing_value:
+                        filtered_values[field.key] = existing_value
                 for field in spec.fields:
                     if not field.secret:
                         continue

@@ -53,6 +53,12 @@ export const queryKeys = {
     catalog: () => ["agent-capabilities", "catalog"] as const,
     tools: () => ["agent-capabilities", "tools"] as const,
   },
+  searchTools: {
+    all: ["search-tools"] as const,
+    list: (workspaceId?: string | null, toolType?: string | null) =>
+      ["search-tools", "list", workspaceId ?? null, toolType ?? "all"] as const,
+    detail: (id: string) => ["search-tools", id] as const,
+  },
   ontology: {
     all: ["ontology"] as const,
     graph: (workspaceId?: string) => ["ontology", "graph", workspaceId ?? null] as const,

@@ -216,7 +216,6 @@ export function AgentManagementView() {
         tool_policy: buildToolPolicy(profileDraft),
         knowledge_pack_ids: profileDraft.knowledgePackIds,
         evidence_policy: buildEvidencePolicy(profileDraft),
-        task_models: [],
       });
     },
     onSuccess: async () => {

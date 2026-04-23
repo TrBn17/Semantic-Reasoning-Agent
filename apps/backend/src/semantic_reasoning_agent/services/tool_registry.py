@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from semantic_reasoning_agent.infrastructure.graphiti.graphiti_gateway import GraphitiGateway
     from semantic_reasoning_agent.services.ontology_service import OntologyService
     from semantic_reasoning_agent.services.retrieval_service import RetrievalService
+    from semantic_reasoning_agent.services.search_tool_service import SearchToolConfigService
 
 
 class UnknownToolError(LookupError):
@@ -90,6 +91,7 @@ def build_tool_registry(
     retrieval_service: "RetrievalService | None" = None,
     ontology_service: "OntologyService | None" = None,
     graphiti_gateway: "GraphitiGateway | None" = None,
+    search_tool_service: "SearchToolConfigService | None" = None,
 ) -> ToolRegistry:
     """Construct a ``ToolRegistry`` and register the Phase-3 tools.
 
@@ -127,5 +129,21 @@ def build_tool_registry(
         registry.register(
             GraphitiIngestTool.SPEC,
             lambda gateway=graphiti_gateway: GraphitiIngestTool(gateway),
+        )
+    if search_tool_service is not None:
+        from semantic_reasoning_agent.tools.graph.supersearch_graph_tool import (
+            SuperSearchGraphTool,
+        )
+        from semantic_reasoning_agent.tools.retrieval.supersearch_docs_tool import (
+            SuperSearchDocsTool,
+        )
+
+        registry.register(
+            SuperSearchDocsTool.SPEC,
+            lambda svc=search_tool_service: SuperSearchDocsTool(svc),
+        )
+        registry.register(
+            SuperSearchGraphTool.SPEC,
+            lambda svc=search_tool_service: SuperSearchGraphTool(svc),
         )
     return registry

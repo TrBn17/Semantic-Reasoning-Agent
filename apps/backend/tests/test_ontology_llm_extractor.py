@@ -114,6 +114,8 @@ def test_open_domain_llm_extractor_supports_ready_non_anthropic_provider() -> No
             )
         ],
         workspace_id="workspace-openrouter",
+        provider="openrouter",
+        model="minimax/minimax-m2.5:free",
     )
 
     assert result.domain == "delivery_ops"

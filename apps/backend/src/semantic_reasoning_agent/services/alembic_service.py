@@ -8,7 +8,6 @@ from sqlalchemy import inspect
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import Base
 
 
 class AlembicService:
@@ -27,15 +26,14 @@ class AlembicService:
         with self._database_manager.engine.begin() as connection:
             inspector = inspect(connection)
             has_alembic_version = inspector.has_table("alembic_version")
-            has_conversations = inspector.has_table("conversations")
-
-            if not has_alembic_version and not has_conversations:
-                # Fresh database with no historical baseline tables:
-                # materialize current ORM schema and align Alembic state.
-                Base.metadata.create_all(connection)
-                config.attributes["connection"] = connection
-                command.stamp(config, revision)
-                return
+            existing_tables = {
+                table_name for table_name in inspector.get_table_names() if table_name != "alembic_version"
+            }
+            if existing_tables and not has_alembic_version:
+                raise RuntimeError(
+                    "Database contains application tables but is not tracked by Alembic. "
+                    "Reset the database for the new baseline or stamp it manually before startup."
+                )
 
             config.attributes["connection"] = connection
             command.upgrade(config, revision)

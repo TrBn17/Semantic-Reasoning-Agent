@@ -825,6 +825,95 @@ export interface StandardToolOutput {
   meta: ToolMeta;
 }
 
+export type SearchToolType = "docs" | "graph";
+export type SearchFusionStrategy = "semantic_only" | "bm25_only" | "hybrid_rrf";
+export type SearchCollectionTarget = "workspace" | "documents";
+export type SearchOntologyScope = "published" | "version";
+export type SearchGraphSearchType = "nodes" | "edges" | "combined";
+export type SearchGraphReranker = "cross_encoder" | "rrf" | "none";
+
+export interface SearchToolConfigResponse {
+  id: string;
+  workspace_id: string;
+  tool_type: SearchToolType;
+  name: string;
+  description: string;
+  provider: string;
+  model: string;
+  default_top_k: number;
+  collection_target: SearchCollectionTarget;
+  document_ids: string[];
+  bm25_enabled: boolean;
+  fusion_strategy: SearchFusionStrategy;
+  ontology_scope: SearchOntologyScope;
+  ontology_version_id?: string | null;
+  graph_search_type: SearchGraphSearchType;
+  reranker: SearchGraphReranker;
+  config_metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  ready: boolean;
+  ready_reason: string;
+}
+
+export interface SearchToolConfigCreateRequest {
+  workspace_id?: string | null;
+  tool_type: SearchToolType;
+  name: string;
+  description?: string;
+  provider: string;
+  model: string;
+  default_top_k?: number;
+  collection_target?: SearchCollectionTarget;
+  document_ids?: string[];
+  bm25_enabled?: boolean;
+  fusion_strategy?: SearchFusionStrategy;
+  ontology_scope?: SearchOntologyScope;
+  ontology_version_id?: string | null;
+  graph_search_type?: SearchGraphSearchType;
+  reranker?: SearchGraphReranker;
+  config_metadata?: Record<string, unknown>;
+}
+
+export interface SearchToolConfigUpdateRequest {
+  name?: string;
+  description?: string;
+  provider?: string;
+  model?: string;
+  default_top_k?: number;
+  collection_target?: SearchCollectionTarget;
+  document_ids?: string[];
+  bm25_enabled?: boolean;
+  fusion_strategy?: SearchFusionStrategy;
+  ontology_scope?: SearchOntologyScope;
+  ontology_version_id?: string | null;
+  graph_search_type?: SearchGraphSearchType;
+  reranker?: SearchGraphReranker;
+  config_metadata?: Record<string, unknown>;
+}
+
+export interface SearchToolRunRequest {
+  query: string;
+  top_k?: number | null;
+  bm25_enabled?: boolean | null;
+  fusion_strategy?: SearchFusionStrategy | null;
+  reranker?: SearchGraphReranker | null;
+}
+
+export interface SearchToolRunResponse {
+  config_id: string;
+  tool_type: SearchToolType;
+  tool_name: string;
+  status: ToolStatus;
+  query: string;
+  evidence: Evidence[];
+  next_action_hints: string[];
+  error_code?: string | null;
+  error_message?: string | null;
+  latency_ms: number;
+  meta: ToolMeta;
+}
+
 export interface ToolCallSummary {
   tool_name: string;
   status: string;

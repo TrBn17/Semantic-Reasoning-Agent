@@ -63,19 +63,21 @@ export function ProviderSettingsView() {
   });
   const [providerDrafts, setProviderDrafts] = useState<Record<string, ProviderDraft>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const hydratedDrafts = useMemo(() => (data ? hydrateProviderDrafts(data) : {}), [data]);
+  const hasHydratedDrafts = useMemo(() => {
+    if (!data) return false;
+    return Object.keys(providerDrafts).length >= data.providers.length;
+  }, [data, providerDrafts]);
 
   useEffect(() => {
     if (!data) return;
     setProviderDrafts(hydrateProviderDrafts(data));
   }, [data]);
 
-  const baselineDrafts = useMemo(
-    () => (data ? hydrateProviderDrafts(data) : {}),
-    [data],
-  );
+  const baselineDrafts = hydratedDrafts;
   const isDirty = useMemo(
-    () => !draftsEqual(providerDrafts, baselineDrafts),
-    [providerDrafts, baselineDrafts],
+    () => hasHydratedDrafts && !draftsEqual(providerDrafts, baselineDrafts),
+    [hasHydratedDrafts, providerDrafts, baselineDrafts],
   );
 
   const mutation = useMutation({
@@ -90,15 +92,19 @@ export function ProviderSettingsView() {
           data?.providers.map((provider) => ({
             provider: provider.provider,
             enabled: providerDrafts[provider.provider]?.enabled ?? provider.enabled,
-            values: providerDrafts[provider.provider]?.values ?? {},
+            values:
+              providerDrafts[provider.provider]?.values ??
+              hydratedDrafts[provider.provider]?.values ??
+              {},
           })) ?? [],
       });
     },
     onSuccess: async (updated) => {
-      queryClient.setQueryData(queryKeys.settings.bootstrap(workspaceId), updated);
+      const resolvedWorkspaceId = updated.workspace.id || workspaceId;
+      queryClient.setQueryData(queryKeys.settings.bootstrap(resolvedWorkspaceId), updated);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.settings.all }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.settings.models(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.settings.models(resolvedWorkspaceId) }),
       ]);
       toast.success(t.agentsSettings.toasts.agentSettingsSaved);
     },
@@ -137,7 +143,7 @@ export function ProviderSettingsView() {
               type="button"
               size="sm"
               onClick={() => mutation.mutate()}
-              disabled={mutation.isPending || !isDirty}
+              disabled={mutation.isPending || !hasHydratedDrafts || !isDirty}
             >
               <Save className="mr-1.5 h-3.5 w-3.5" />
               {language === "vi" ? "Luu" : t.common.save}

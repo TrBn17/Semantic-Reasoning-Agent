@@ -60,6 +60,33 @@ class _FakeRateLimitError(Exception):
         self.body = body
 
 
+class _UnavailableExtractor:
+    def classify_document_domain(self, chunks) -> str:  # noqa: ANN001
+        return "pending"
+
+    def extract_ontology_candidates(  # noqa: ANN001
+        self,
+        chunks,
+        workspace_id=None,
+        provider=None,
+        model=None,
+    ):
+        from semantic_reasoning_agent.domain.ontology.models import ExtractionResult
+
+        return ExtractionResult(domain="unavailable", entities=[], relations=[])
+
+    def summarize_ontology(  # noqa: ANN001
+        self,
+        chunks,
+        *,
+        workspace_id=None,
+        provider=None,
+        model=None,
+        domain=None,
+    ) -> OntologyNarrative:
+        return OntologyNarrative(title="Unavailable Ontology", summary="Model is not ready.")
+
+
 def test_process_build_marks_rate_limited_extraction_as_failed(
     document_service,
     ontology_service,
@@ -92,6 +119,39 @@ def test_process_build_marks_rate_limited_extraction_as_failed(
     assert failed_build.status.value == "failed"
     assert failed_build.domain is None
     assert "temporarily rate-limited upstream" in (failed_build.error_message or "")
+
+
+def test_process_build_fails_when_extraction_model_is_unavailable(
+    document_service,
+    ontology_service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = document_service.upload_document(
+        filename="ontology-source.docx",
+        content=_build_docx_bytes(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    monkeypatch.setattr(
+        ontology_service._task_dispatcher,
+        "enqueue_ontology_build_processing",
+        lambda build_id: None,
+    )
+    ontology_service._ontology_extractor = _UnavailableExtractor()
+
+    build = ontology_service.create_build(
+        OntologyBuildCreateRequest(
+            document_id=document.id,
+            extraction_provider="openai",
+            extraction_model="gpt-5-mini",
+        )
+    )
+
+    with pytest.raises(OntologyBuildError, match="model is unavailable"):
+        ontology_service.process_build(build.id)
+
+    failed_build = ontology_service.get_build(build.id)
+    assert failed_build.status.value == "failed"
+    assert "unavailable" in (failed_build.error_message or "").lower()
 
 
 def test_process_build_uses_extraction_domain_when_classification_is_deferred(

@@ -80,7 +80,7 @@ Shipped tools: `retrieval.internal` and `ontology.lookup`.
    .venv\Scripts\python.exe apps/backend/serve.py
    .venv\Scripts\python.exe apps/backend/worker/serve.py
    ```
-2. Start the frontend:
+2. Start the frontend in development:
    ```powershell
    cd apps/frontend
    npm install
@@ -89,6 +89,20 @@ Shipped tools: `retrieval.internal` and `ontology.lookup`.
 3. Open `http://localhost:3000`.
 
 Point at a different backend by setting `NEXT_PUBLIC_API_BASE_URL` or `INTERNAL_API_BASE_URL`.
+
+## Run in production mode
+
+For production behavior, build first and then serve the compiled output:
+
+```powershell
+cd apps/frontend
+npm install
+npm run build
+npm run start
+```
+
+The repo `docker compose` frontend service now follows this production flow inside
+the image instead of running `next dev`.
 
 ## i18n and theme
 

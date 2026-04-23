@@ -105,10 +105,10 @@ export function ChatRuntimeControls({
             selectModelPlaceholder: t.chatRuntimeControls.selectModel,
             noModelMatch: t.agentsSettings.picker.noModelMatch,
             assignmentUnavailable: t.agentsSettings.picker.assignmentUnavailable,
-            readyBadge: t.agentsSettings.picker.readyBadge,
-            blockedBadge: t.agentsSettings.picker.blockedBadge,
-            capabilityStreaming: t.agentsSettings.picker.capabilityStreaming,
-            capabilityStructured: t.agentsSettings.picker.capabilityStructured,
+            readyBadge: t.agentsSettings.taskRouting.ready,
+            blockedBadge: t.agentsSettings.taskRouting.blocked,
+            capabilityStreaming: t.agentsSettings.taskRouting.streaming,
+            capabilityStructured: t.agentsSettings.taskRouting.structuredOutput,
           }}
         />
       </div>
