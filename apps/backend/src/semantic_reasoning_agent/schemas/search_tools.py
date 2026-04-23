@@ -13,6 +13,7 @@ CollectionTarget = Literal["workspace", "documents"]
 OntologyScope = Literal["published", "version"]
 GraphSearchType = Literal["nodes", "edges", "combined"]
 GraphReranker = Literal["cross_encoder", "rrf", "none"]
+AssignableToolSlot = Literal["rag", "ontology_search"]
 
 
 class SearchToolConfigResponse(BaseModel):
@@ -23,9 +24,15 @@ class SearchToolConfigResponse(BaseModel):
     tool_type: SearchToolType
     name: str
     description: str = ""
-    provider: str
-    model: str
+    provider: str = ""
+    model: str = ""
+    tool_name: str
+    embedding_provider: str
+    embedding_model: str
     default_top_k: int = 5
+    system_key: str | None = None
+    is_system: bool = False
+    assignable_slots: list[AssignableToolSlot] = Field(default_factory=list)
 
     collection_target: CollectionTarget = "workspace"
     document_ids: list[str] = Field(default_factory=list)
@@ -50,8 +57,10 @@ class SearchToolConfigCreateRequest(BaseModel):
     tool_type: SearchToolType
     name: str = Field(..., min_length=1, max_length=128)
     description: str = ""
-    provider: str
-    model: str
+    provider: str | None = None
+    model: str | None = None
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
     default_top_k: int = Field(default=5, ge=1, le=50)
 
     collection_target: CollectionTarget = "workspace"
@@ -72,6 +81,8 @@ class SearchToolConfigUpdateRequest(BaseModel):
     description: str | None = None
     provider: str | None = None
     model: str | None = None
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
     default_top_k: int | None = Field(default=None, ge=1, le=50)
 
     collection_target: CollectionTarget | None = None
@@ -93,6 +104,7 @@ class SearchToolRunRequest(BaseModel):
     bm25_enabled: bool | None = None
     fusion_strategy: FusionStrategy | None = None
     reranker: GraphReranker | None = None
+    document_ids: list[str] | None = None
 
 
 class SearchToolRunResponse(BaseModel):

@@ -26,6 +26,7 @@ import {
 } from "@/components/documents/status-badges";
 import {
   getDocument,
+  listDocumentArtifacts,
   listDocumentJobs,
   reprocessDocument,
 } from "@/shared/api/documents";
@@ -61,6 +62,10 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
       return hasActiveJob ? 3000 : false;
     },
   });
+  const { data: artifacts } = useQuery({
+    queryKey: queryKeys.documents.artifacts(documentId),
+    queryFn: () => listDocumentArtifacts(documentId),
+  });
   const { data: allBuilds } = useQuery({
     queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
     queryFn: () => listBuilds(workspaceId ?? undefined),
@@ -69,6 +74,21 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
     .filter((b) => b.document_id === documentId)
     .slice()
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const markdownArtifact = (artifacts ?? [])
+    .filter((artifact) => artifact.artifact_type === "markdown")
+    .slice()
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  const markdownPreview = (() => {
+    const inlineText = markdownArtifact?.metadata?.inline_text;
+    if (typeof inlineText !== "string") return null;
+    const trimmed = inlineText.trim();
+    if (!trimmed) return null;
+    return trimmed.length > 3000 ? `${trimmed.slice(0, 3000)}\n\n…` : trimmed;
+  })();
+  const artifactDownloadUrl =
+    markdownArtifact?.public_url && /^https?:\/\//.test(markdownArtifact.public_url)
+      ? markdownArtifact.public_url
+      : null;
   const mutation = useMutation({
     mutationFn: () => reprocessDocument(documentId),
     onSuccess: () => {
@@ -91,12 +111,7 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
       <p className="text-sm text-destructive">Document not found.</p>
     );
 
-  const pdfMode =
-    doc.document_type === "pdf"
-      ? String(doc.ingestion_options?.pdf_mode ?? "fast")
-      : null;
-  const outputFormat = String(doc.ingestion_options?.output_format ?? "markdown");
-  const extractImages = Boolean(doc.ingestion_options?.extract_images ?? true);
+  const ingestionMode = String(doc.ingestion_mode ?? "both");
 
   return (
     <div className="space-y-6">
@@ -110,16 +125,9 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
             {doc.filename} · {doc.document_type.toUpperCase()} ·{" "}
             {doc.chunk_count} chunks · parser {doc.parser_version}
           </p>
-          {pdfMode && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              PDF mode: {pdfMode}
-            </p>
-          )}
-          {doc.document_type !== "csv" && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Output: {outputFormat} · Extract images: {extractImages ? "on" : "off"}
-            </p>
-          )}
+          <p className="mt-1 text-xs text-muted-foreground">
+            Ingestion mode: {ingestionMode}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">
             Created <Time value={doc.created_at} className="inline" /> · Updated{" "}
             <Time value={doc.updated_at} className="inline" />
@@ -194,6 +202,38 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
               )}
             </TableBody>
           </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardTitle className="text-sm">Extracted markdown</CardTitle>
+          {artifactDownloadUrl ? (
+            <Button asChild variant="outline" size="sm">
+              <a href={artifactDownloadUrl} target="_blank" rel="noreferrer">
+                Download
+              </a>
+            </Button>
+          ) : null}
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!markdownArtifact ? (
+            <p className="text-xs text-muted-foreground">No markdown artifact yet.</p>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                {markdownArtifact.name} · {markdownArtifact.content_type} · {(markdownArtifact.size_bytes / 1024).toFixed(1)} KB
+              </p>
+              {artifactDownloadUrl ? null : (
+                <p className="text-xs text-amber-700">
+                  Download URL is unavailable in this object store mode. Preview uses inline artifact metadata.
+                </p>
+              )}
+              <pre className="max-h-96 overflow-auto rounded-lg border bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">
+                {markdownPreview ?? "Markdown preview is unavailable for this artifact."}
+              </pre>
+            </>
+          )}
         </CardContent>
       </Card>
 

@@ -13,7 +13,7 @@ from semantic_reasoning_agent.persistence.models import Base, ConversationORM
 from semantic_reasoning_agent.services.alembic_service import AlembicService
 
 
-BASELINE_REVISION = "20260422_baseline"
+HEAD_REVISION = "20260423_drop_ontology_candidate_tables"
 
 
 def _sqlite_url(path: Path) -> str:
@@ -103,7 +103,7 @@ def test_upgrade_uses_alembic_baseline_for_fresh_database(tmp_path: Path, monkey
 
     with manager.engine.connect() as connection:
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert revision == BASELINE_REVISION
+    assert revision == HEAD_REVISION
 
     inspector = inspect(manager.engine)
     assert set(Base.metadata.tables).issubset(set(inspector.get_table_names()))
@@ -115,7 +115,7 @@ def test_alembic_history_has_single_head() -> None:
     config.set_main_option("script_location", str(backend_root / "alembic"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == [BASELINE_REVISION]
+    assert script.get_heads() == [HEAD_REVISION]
 
 
 def test_upgrade_rejects_unversioned_database_with_existing_tables(tmp_path: Path) -> None:

@@ -4,30 +4,28 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
-from semantic_reasoning_agent.core.runtime_constants import (
-    TOOL_ONTOLOGY_LOOKUP,
-)
 from semantic_reasoning_agent.core.time import utc_now
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import AgentProfileORM, ConversationORM, MessageORM
+from semantic_reasoning_agent.persistence.models import (
+    AgentProfileORM,
+    ConversationORM,
+    MessageORM,
+    SearchToolConfigORM,
+)
 from semantic_reasoning_agent.schemas.chat import (
     ConversationAgentProfileRequest,
     ConversationCreateRequest,
     ConversationModelSelectionRequest,
     ConversationResponse,
+    ConversationToolBinding,
     Message,
 )
+from semantic_reasoning_agent.schemas.agent_profiles import AgentProfileToolAssignment
 from semantic_reasoning_agent.services.agent_profile_service import (
     AgentProfileNotFoundError,
     AgentProfileService,
 )
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
-
-DEFAULT_EFFECTIVE_TOOL_NAMES = [
-    TOOL_ONTOLOGY_LOOKUP,
-    "graph.search",
-    "graph.ingest",
-]
 
 
 class ConversationNotFoundError(ValueError):
@@ -246,29 +244,71 @@ class ConversationService:
             model=conversation.model,
             uses_model_override=conversation.uses_model_override,
             effective_agent_name=profile.name if profile is not None else None,
-            effective_tool_names=self._effective_tool_names(profile),
+            effective_tool_names=[
+                item.tool_name for item in self._effective_tool_bindings(profile)
+            ],
+            effective_tool_bindings=self._effective_tool_bindings(profile),
             created_at=conversation.created_at,
             updated_at=conversation.updated_at,
             messages=messages,
         )
 
-    @staticmethod
-    def _effective_tool_names(profile: AgentProfileORM | None) -> list[str]:
+    def _effective_tool_bindings(
+        self,
+        profile: AgentProfileORM | None,
+    ) -> list[ConversationToolBinding]:
         if profile is None or not profile.tool_assignments:
-            return DEFAULT_EFFECTIVE_TOOL_NAMES.copy()
-        assignment_map = {
-            (item.get("tool_name") or item.get("toolName")): bool(item.get("enabled", item.get("is_enabled", True)))
-            for item in (profile.tool_assignments or [])
-            if (item.get("tool_name") or item.get("toolName"))
-        }
-        effective = [
-            tool_name
-            for tool_name in DEFAULT_EFFECTIVE_TOOL_NAMES
-            if assignment_map.get(tool_name, True)
-        ]
-        extra_enabled = [
-            tool_name
-            for tool_name, enabled in assignment_map.items()
-            if enabled and tool_name not in effective
-        ]
-        return effective + sorted(extra_enabled)
+            return []
+        normalized = sorted(
+            [
+                AgentProfileToolAssignment.model_validate(item)
+                for item in (profile.tool_assignments or [])
+                if isinstance(item, dict)
+                and bool((item.get("enabled", item.get("is_enabled", True))))
+            ],
+            key=lambda item: int(item.position),
+        )
+        config_lookup = self._load_config_lookup(
+            profile.workspace_id,
+            [
+                str(item.config_id)
+                for item in normalized
+                if item.config_id
+            ],
+        )
+        bindings: list[ConversationToolBinding] = []
+        for index, item in enumerate(normalized):
+            tool_name = item.tool_name.strip()
+            if not tool_name:
+                continue
+            config_id = item.config_id
+            config = config_lookup.get(str(config_id)) if config_id else None
+            bindings.append(
+                ConversationToolBinding(
+                    slot=item.slot,
+                    tool_name=tool_name,
+                    config_id=str(config_id) if config_id else None,
+                    label=config.name if config is not None else tool_name,
+                    enabled=item.enabled,
+                    position=item.position if item.position is not None else index,
+                    is_system=bool(config.is_system) if config is not None else False,
+                    system_key=config.system_key if config is not None else None,
+                )
+            )
+        return bindings
+
+    def _load_config_lookup(
+        self,
+        workspace_id: str,
+        config_ids: list[str],
+    ) -> dict[str, SearchToolConfigORM]:
+        if not config_ids:
+            return {}
+        with self._database_manager.session() as session:
+            rows = session.scalars(
+                select(SearchToolConfigORM).where(
+                    SearchToolConfigORM.workspace_id == workspace_id,
+                    SearchToolConfigORM.id.in_(config_ids),
+                )
+            ).all()
+            return {row.id: row for row in rows}

@@ -96,6 +96,85 @@ class OpenRouterModelsClient:
         return sorted(result, key=lambda m: m.id)
 
 
+class CloudflareModelsClient:
+    """Fetch models from Cloudflare Workers AI model search endpoint."""
+
+    def __init__(self, api_key: str, account_id: str):
+        self.api_key = api_key
+        self.account_id = account_id
+        self.base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/models/search"
+
+    @staticmethod
+    def _is_chat_model(item: dict) -> bool:
+        task = item.get("task") if isinstance(item, dict) else None
+        if not isinstance(task, dict):
+            return False
+        task_name = str(task.get("name") or "").strip().lower()
+        return task_name == "text generation"
+
+    async def get_models(self) -> list[ProviderModel]:
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        page = 1
+        per_page = 100
+        result: list[ProviderModel] = []
+        seen_model_ids: set[str] = set()
+
+        try:
+            async with aiohttp.ClientSession(headers=headers) as session:
+                while True:
+                    async with session.get(
+                        self.base_url,
+                        params={
+                            "hide_experimental": "true",
+                            "page": page,
+                            "per_page": per_page,
+                        },
+                    ) as response:
+                        if response.status != 200:
+                            text = await response.text()
+                            raise RuntimeError(
+                                f"Cloudflare model search returned {response.status}: {text}"
+                            )
+                        payload = await response.json()
+
+                    if not payload.get("success", False):
+                        raise RuntimeError(
+                            f"Cloudflare model search failed: {payload.get('errors') or payload.get('messages') or 'unknown error'}"
+                        )
+
+                    items = payload.get("result", [])
+                    if not isinstance(items, list) or not items:
+                        break
+
+                    for item in items:
+                        # Cloudflare chat/completions expects the model slug (e.g. @cf/...),
+                        # not the UUID returned in `id`.
+                        model_id = item.get("name")
+                        if not self._is_chat_model(item):
+                            continue
+                        if not model_id or model_id in seen_model_ids:
+                            continue
+                        seen_model_ids.add(model_id)
+                        result.append(
+                            ProviderModel(
+                                id=model_id,
+                                name=item.get("name") or model_id,
+                                context_window=item.get("context_window"),
+                                supports_streaming=True,
+                                supports_structured_output=False,
+                                description=item.get("description"),
+                            )
+                        )
+
+                    if len(items) < per_page:
+                        break
+                    page += 1
+        except aiohttp.ClientError as exc:
+            raise RuntimeError(f"Failed to fetch Cloudflare models: {exc}") from exc
+
+        return sorted(result, key=lambda m: m.id)
+
+
 class AnthropicModelsClient:
     """Fetch models from Anthropic's /v1/models (SDK: client.models.list)."""
 
@@ -208,7 +287,14 @@ class OllamaModelsClient:
 class ProviderModelsService:
     """Composes per-provider clients and fetches catalogs concurrently."""
 
-    PROVIDERS: tuple[str, ...] = ("openai", "openrouter", "anthropic", "gemini", "ollama")
+    PROVIDERS: tuple[str, ...] = (
+        "openai",
+        "openrouter",
+        "cloudflare",
+        "anthropic",
+        "gemini",
+        "ollama",
+    )
 
     def __init__(self, settings: Settings | None = None):
         self._settings = settings or get_settings()
@@ -238,6 +324,25 @@ class ProviderModelsService:
             if not resolved_api_key:
                 raise ValueError("OpenRouter API key not configured")
             return await OpenRouterModelsClient(resolved_api_key, resolved_base_url).get_models()
+
+        if provider == "cloudflare":
+            resolved_api_key = api_key or self._settings.cloudflare_api_key
+            resolved_base_url = base_url or (
+                f"https://api.cloudflare.com/client/v4/accounts/{self._settings.cloudflare_account_id}/ai/v1"
+                if self._settings.cloudflare_account_id
+                else None
+            )
+            if not resolved_api_key:
+                raise ValueError("Cloudflare API key not configured")
+            if not resolved_base_url:
+                raise ValueError("Cloudflare account id not configured")
+            marker = "/accounts/"
+            if marker not in resolved_base_url:
+                raise ValueError("Cloudflare base URL is invalid")
+            account_id = resolved_base_url.split(marker, 1)[1].split("/", 1)[0]
+            if not account_id:
+                raise ValueError("Cloudflare account id not configured")
+            return await CloudflareModelsClient(resolved_api_key, account_id).get_models()
 
         if provider == "anthropic":
             resolved_api_key = api_key or self._settings.anthropic_api_key

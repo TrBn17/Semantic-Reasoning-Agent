@@ -9,7 +9,13 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 BASE_DIR = Path(__file__).resolve().parents[1]
+ALEMBIC_DIR = Path(__file__).resolve().parent
 SRC_DIR = BASE_DIR / "src"
+# Alembic loads revision scripts as plain modules; add this directory so shared
+# helpers (e.g. sqlite_portable) can be imported without colliding with the
+# installed `alembic` package name.
+if str(ALEMBIC_DIR) not in sys.path:
+    sys.path.insert(0, str(ALEMBIC_DIR))
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 

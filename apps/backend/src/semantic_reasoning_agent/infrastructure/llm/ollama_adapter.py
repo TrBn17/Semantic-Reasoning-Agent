@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence
 from urllib import error, request
 
 from semantic_reasoning_agent.domain.contracts.llm import (
@@ -46,9 +46,12 @@ class OllamaAdapter(ProviderAdapter):
         model: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        response_format: Literal["json_object", "text"] | None = None,
+        reasoning_effort: Literal["low", "medium", "high"] | None = None,
         workspace_id: str | None = None,
         model_config_service: Any | None = None,
     ) -> LLMResponse:
+        del response_format, reasoning_effort
         base_url = self._base_url
         if workspace_id and model_config_service:
             creds = model_config_service.get_provider_credentials(workspace_id)

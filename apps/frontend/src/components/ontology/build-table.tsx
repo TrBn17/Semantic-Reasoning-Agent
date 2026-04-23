@@ -7,31 +7,27 @@ import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { BuildStatusBadge } from "@/components/ontology/status-badges";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import { deleteBuild, listBuilds } from "@/shared/api/ontology";
+import { Time } from "@/shared/components/time";
 import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
-import { Time } from "@/shared/components/time";
-import { rankItems } from "@/shared/utils/fuzzy";
 import { formatDateTime } from "@/shared/utils";
+import { rankItems } from "@/shared/utils/fuzzy";
+
+const STATUS_FILTERS = ["all", "pending", "running", "failed", "published"] as const;
 
 export function BuildTable({ limit }: { limit?: number }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>("all");
   const workspaceId = useWorkspaceStore((s) => s.workspaceId);
   const previousStatusesRef = useRef<Record<string, string>>({});
+
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
     queryFn: () => listBuilds(workspaceId ?? undefined),
@@ -42,6 +38,7 @@ export function BuildTable({ limit }: { limit?: number }) {
         : false;
     },
   });
+
   const deleteMutation = useMutation({
     mutationFn: (buildId: string) => deleteBuild(buildId),
     onSuccess: () => {
@@ -52,12 +49,10 @@ export function BuildTable({ limit }: { limit?: number }) {
       toast.error(`Failed to delete build: ${(err as Error).message}`);
     },
   });
+
   const builds = useMemo(() => data ?? [], [data]);
   const rows = useMemo(() => {
-    const scoped = builds.filter((build) => {
-      if (statusFilter !== "all" && build.status !== statusFilter) return false;
-      return true;
-    });
+    const scoped = builds.filter((build) => statusFilter === "all" || build.status === statusFilter);
     const filtered = search.trim()
       ? rankItems(scoped, search, (build) => [
           build.extraction_provider ?? build.provider,
@@ -92,119 +87,140 @@ export function BuildTable({ limit }: { limit?: number }) {
       }
     }
 
-    previousStatusesRef.current = Object.fromEntries(
-      builds.map((build) => [build.id, build.status]),
-    );
+    previousStatusesRef.current = Object.fromEntries(builds.map((build) => [build.id, build.status]));
   }, [builds, t.ontologyUi.unknownError]);
 
   if (isLoading) return <Skeleton className="h-64 w-full" />;
-  if (isError)
+  if (isError) {
     return <p className="text-sm text-destructive">{t.ontologyUi.failedToLoadBuilds}</p>;
-
-  if (rows.length === 0)
-    return (
-      <p className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-        {t.ontologyBuild.emptyBuildsList}
-      </p>
-    );
+  }
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-2 sm:grid-cols-[1fr_180px]">
-        <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.common.search} />
+    <div className="space-y-4">
+      <div className="space-y-3 rounded-2xl border bg-card p-4">
         <Input
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value || "all")}
-          placeholder={t.ontologyBuild.statusFilterPlaceholder}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t.common.search}
         />
+        <div className="flex flex-wrap gap-2">
+          {STATUS_FILTERS.map((filter) => {
+            const active = statusFilter === filter;
+            return (
+              <Button
+                key={filter}
+                type="button"
+                size="sm"
+                variant={active ? "default" : "outline"}
+                className="rounded-full"
+                onClick={() => setStatusFilter(filter)}
+              >
+                {filter}
+              </Button>
+            );
+          })}
+        </div>
       </div>
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t.ontologyBuild.tableBuild}</TableHead>
-              <TableHead>{t.ontologyBuild.tableStatus}</TableHead>
-              <TableHead>{t.ontologyBuild.tableDomain}</TableHead>
-              <TableHead>{t.ontologyBuild.tableModel}</TableHead>
-              <TableHead className="text-right">{t.ontologyBuild.tableEntities}</TableHead>
-              <TableHead className="text-right">{t.ontologyBuild.tableRelations}</TableHead>
-              <TableHead className="text-right">{t.ontologyBuild.tablePending}</TableHead>
-              <TableHead>{t.ontologyBuild.tableUpdated}</TableHead>
-              <TableHead className="text-right">{t.common.delete}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((build) => {
-              const provider = build.extraction_provider ?? build.provider;
-              const model = build.extraction_model ?? build.model;
-              return (
-                <TableRow key={build.id}>
-              <TableCell>
-                <Link
-                  href={`/ontology/builds/${build.id}`}
-                  className="font-mono text-xs underline-offset-4 hover:underline"
-                >
-                  {build.id.slice(0, 8)}...
-                </Link>
-                <div className="text-xs text-muted-foreground">
-                  doc {build.document_id.slice(0, 8)}...
-                </div>
-                {build.ontology_title ? (
-                  <div className="mt-1 text-sm font-medium">{build.ontology_title}</div>
-                ) : null}
-                {build.status === "failed" && build.error_message && (
-                  <div className="mt-1 max-w-sm text-xs text-destructive">
-                    {build.error_message}
-                  </div>
-                )}
-              </TableCell>
-              <TableCell>
-                <BuildStatusBadge status={build.status} />
-              </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {build.domain ?? "-"}
-              </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {model ? `${provider ?? t.ontologyUi.unknownProvider} · ${model}` : t.ontologyUi.modelNotRecorded}
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {build.entity_count}
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {build.relation_count}
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                {build.pending_entity_count + build.pending_relation_count}
-              </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                <Time value={build.updated_at} className="inline" />
-              </TableCell>
-                  <TableCell className="text-right">
-                    {build.status === "failed" ? (
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        aria-label={t.common.delete}
-                        disabled={deleteMutation.isPending}
-                        onClick={() => {
-                          const confirmed = window.confirm(
-                            `Delete failed ontology build ${build.id.slice(0, 8)}?`,
-                          );
-                          if (!confirmed) return;
-                          deleteMutation.mutate(build.id);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
+
+      {rows.length === 0 ? (
+        <p className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+          {t.ontologyBuild.emptyBuildsList}
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {rows.map((build) => {
+            const provider = build.extraction_provider ?? build.provider;
+            const model = build.extraction_model ?? build.model;
+            const pendingCount = build.pending_entity_count + build.pending_relation_count;
+            const title =
+              build.ontology_title || `${t.ontologyBuild.documentLabel} ${build.document_id.slice(0, 8)}...`;
+
+            return (
+              <Card key={build.id} className="overflow-hidden rounded-2xl border">
+                <CardContent className="space-y-4 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <BuildStatusBadge status={build.status} />
+                        {build.domain ? (
+                          <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                            {build.domain}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div>
+                        <Link
+                          href={`/ontology/builds/${build.id}`}
+                          className="text-base font-semibold underline-offset-4 hover:underline"
+                        >
+                          {title}
+                        </Link>
+                        <p className="text-xs text-muted-foreground">
+                          #{build.id.slice(0, 8)}... - {provider ?? t.ontologyUi.unknownProvider} /{" "}
+                          {model ?? t.ontologyUi.unknownModel}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 self-start">
+                      <Button asChild variant="outline" size="sm">
+                        <Link href={`/ontology/builds/${build.id}`}>Details</Link>
                       </Button>
+                      {build.status === "failed" ? (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label={t.common.delete}
+                          disabled={deleteMutation.isPending}
+                          onClick={() => {
+                            const confirmed = window.confirm(
+                              `Delete failed ontology build ${build.id.slice(0, 8)}?`,
+                            );
+                            if (!confirmed) return;
+                            deleteMutation.mutate(build.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl bg-muted/40 px-3 py-2">
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {t.ontologyBuild.tablePending}
+                      </p>
+                      <p className="text-lg font-semibold">{pendingCount}</p>
+                    </div>
+                    <div className="rounded-xl bg-muted/40 px-3 py-2">
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {t.ontologyBuild.tabEntities}
+                      </p>
+                      <p className="text-lg font-semibold">{build.entity_count}</p>
+                    </div>
+                    <div className="rounded-xl bg-muted/40 px-3 py-2">
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {t.ontologyBuild.tabRelations}
+                      </p>
+                      <p className="text-lg font-semibold">{build.relation_count}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>
+                      {t.ontologyBuild.tableUpdated} <Time value={build.updated_at} className="inline" />
+                    </span>
+                    {build.status === "failed" && build.error_message ? (
+                      <span className="max-w-2xl text-destructive">{build.error_message}</span>
                     ) : null}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

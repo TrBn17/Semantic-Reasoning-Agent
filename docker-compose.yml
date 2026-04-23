@@ -19,7 +19,6 @@ x-backend-docker-overrides: &backend-docker-overrides
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL_DOCKER:-http://host.docker.internal:11434}
   MINIO_ENDPOINT: ${MINIO_ENDPOINT_DOCKER:-minio:9000}
   QDRANT_URL: ${QDRANT_URL_DOCKER:-http://qdrant:6333}
-  MARKER_MODEL_CACHE_DIR: ${MARKER_MODEL_CACHE_DIR_DOCKER:-/workspace/.cache/datalab/models}
 
 services:
   postgres:
@@ -102,6 +101,7 @@ services:
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin};
       mc mb --ignore-existing local/${OBJECT_STORE_BUCKET:-semantic-artifacts};
       mc anonymous set download local/${OBJECT_STORE_BUCKET:-semantic-artifacts};
+      mc ilm rule add --expire-days ${MINIO_MARKDOWN_RETENTION_DAYS:-30} --prefix "documents/" local/${OBJECT_STORE_BUCKET:-semantic-artifacts} || true;
       exit 0;
       "
 

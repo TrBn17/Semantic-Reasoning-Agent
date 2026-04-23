@@ -21,6 +21,7 @@ export interface ComposerSubmitPayload {
 
 interface ToolToggle {
   tool_name: string;
+  label?: string;
   enabled: boolean;
   locked?: boolean;
   reason?: string;
@@ -97,7 +98,7 @@ export function MessageComposer({
               .slice(0, 3)
               .map((tool) => (
                 <Badge key={tool.tool_name} variant="outline" className="font-mono text-[11px]">
-                  {tool.tool_name}
+                  {tool.label ?? tool.tool_name}
                 </Badge>
               ))}
           </div>
@@ -186,7 +187,8 @@ export function MessageComposer({
                   return (
                     <label key={tool.tool_name} className="flex items-start justify-between gap-3 text-sm">
                       <div>
-                        <div className="font-mono text-xs">{tool.tool_name}</div>
+                        <div className="text-xs font-medium">{tool.label ?? tool.tool_name}</div>
+                        <div className="font-mono text-[10px] text-muted-foreground">{tool.tool_name}</div>
                         {tool.reason && (
                           <div className="text-xs text-muted-foreground">{tool.reason}</div>
                         )}

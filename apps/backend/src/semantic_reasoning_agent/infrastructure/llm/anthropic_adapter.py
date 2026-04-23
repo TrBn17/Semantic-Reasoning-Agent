@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from semantic_reasoning_agent.domain.contracts.llm import (
     FinishReason,
@@ -64,9 +64,12 @@ class AnthropicAdapter(ProviderAdapter):
         model: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        response_format: Literal["json_object", "text"] | None = None,
+        reasoning_effort: Literal["low", "medium", "high"] | None = None,
         workspace_id: str | None = None,
         model_config_service: Any | None = None,
     ) -> LLMResponse:
+        del response_format, reasoning_effort
         api_key = self._api_key
         base_url = self._base_url
 

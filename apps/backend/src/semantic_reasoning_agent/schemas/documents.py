@@ -33,6 +33,7 @@ class DocumentResponse(BaseModel):
     chunk_count: int = 0
     tags: list[str] = Field(default_factory=list)
     ingestion_options: dict[str, object] = Field(default_factory=dict)
+    ingestion_mode: str = "both"
     source_url: str
     source_object_key: str | None = None
     source_content_type: str | None = None
@@ -43,12 +44,7 @@ class DocumentResponse(BaseModel):
 
 
 class DocumentIngestionOptionsResponse(BaseModel):
-    pdf_mode: str = "fast"
-    output_format: str = "markdown"
-    use_llm: bool = False
-    force_ocr: bool = False
-    strip_existing_ocr: bool = False
-    extract_images: bool = True
+    ingestion_mode: str = "both"
 
 
 class DocumentOptionChoice(BaseModel):
@@ -59,12 +55,8 @@ class DocumentOptionChoice(BaseModel):
 
 class DocumentIngestionCapabilitiesResponse(BaseModel):
     supported_types: list[str]
-    marker_supported_types: list[str]
-    csv_supported_types: list[str]
     default_options: DocumentIngestionOptionsResponse
-    pdf_mode_options: list[DocumentOptionChoice]
-    output_format_options: list[DocumentOptionChoice]
-    supports_extract_images: bool = True
+    ingestion_mode_options: list[DocumentOptionChoice]
 
 
 class DocumentJobResponse(BaseModel):

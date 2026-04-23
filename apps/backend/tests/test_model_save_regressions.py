@@ -56,6 +56,52 @@ def test_settings_update_preserves_omitted_non_secret_provider_fields() -> None:
     assert field_value["display_value"] == "https://example.local/v1"
 
 
+def test_settings_update_preserves_existing_secret_when_client_sends_blank_secret() -> None:
+    workspace_id = "workspace-secret-regression"
+    first = client.put(
+        "/api/v1/settings",
+        json={
+            "workspace_id": workspace_id,
+            "providers": [
+                {
+                    "provider": "openai",
+                    "enabled": False,
+                    "values": {
+                        "OPENAI_API_KEY": "demo-openai-key",
+                    },
+                }
+            ],
+        },
+    )
+    assert first.status_code == 200
+
+    second = client.put(
+        "/api/v1/settings",
+        json={
+            "workspace_id": workspace_id,
+            "providers": [
+                {
+                    "provider": "openai",
+                    "enabled": True,
+                    "values": {
+                        "OPENAI_API_KEY": "",
+                    },
+                }
+            ],
+        },
+    )
+    assert second.status_code == 200
+
+    latest = client.get("/api/v1/settings", params={"workspace_id": workspace_id})
+    assert latest.status_code == 200
+    provider_payload = next(item for item in latest.json()["providers"] if item["provider"] == "openai")
+    assert provider_payload["enabled"] is True
+    field_value = _provider_field_value(latest.json(), "openai", "OPENAI_API_KEY")
+    assert field_value["configured"] is True
+    assert field_value["source"] == "database"
+    assert field_value["display_value"] != ""
+
+
 def test_profile_patch_without_task_models_preserves_existing_assignments() -> None:
     create = client.post(
         "/api/v1/agents/profiles",

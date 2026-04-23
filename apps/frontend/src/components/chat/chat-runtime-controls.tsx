@@ -21,7 +21,7 @@ import type { ConversationResponse, SettingsModelOption } from "@/shared/api/typ
 import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
-import { composeModelValue } from "@/shared/utils/model-value";
+import { composeModelValue, parseModelValue } from "@/shared/utils/model-value";
 
 export function ChatRuntimeControls({
   conversation,
@@ -41,10 +41,13 @@ export function ChatRuntimeControls({
 
   const updateModelMutation = useMutation({
     mutationFn: (value: string) => {
-      const [provider, model] = value.split("::");
+      const parsed = parseModelValue(value);
+      if (!parsed) {
+        throw new Error(t.agentsSettings.picker.assignmentUnavailable);
+      }
       return updateConversationModelSelection(conversation.id, {
-        provider,
-        model,
+        provider: parsed.provider,
+        model: parsed.model,
         workspace_id: conversation.workspace_id,
       });
     },
@@ -114,16 +117,14 @@ export function ChatRuntimeControls({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline">{conversation.provider}</Badge>
-        <Badge variant="outline">{conversation.model}</Badge>
         {conversation.effective_agent_name && (
           <Badge variant="outline">
             {t.chatRuntimeControls.agentPrefix}: {conversation.effective_agent_name}
           </Badge>
         )}
-        {conversation.effective_tool_names.slice(0, 4).map((toolName) => (
-          <Badge key={toolName} variant="outline" className="font-mono text-[11px]">
-            {toolName}
+        {conversation.effective_tool_bindings.slice(0, 4).map((binding) => (
+          <Badge key={`${binding.slot}:${binding.config_id ?? binding.tool_name}`} variant="outline" className="text-[11px]">
+            {binding.label}
           </Badge>
         ))}
       </div>

@@ -13,7 +13,6 @@ os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "true")
 os.environ.setdefault("CELERY_TASK_EAGER_PROPAGATES", "true")
 os.environ.setdefault("NEO4J_ENABLED", "false")
 os.environ.setdefault("OBJECT_STORE_BACKEND", "postgres")
-os.environ.setdefault("MARKER_MODEL_CACHE_DIR", ".cache/datalab-test/models")
 
 
 BACKEND_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -26,10 +25,12 @@ from semantic_reasoning_agent.entrypoints.dependencies import (  # noqa: E402
 )
 from semantic_reasoning_agent.core.container import get_app_container  # noqa: E402
 from semantic_reasoning_agent.domain.ontology.models import (  # noqa: E402
+    ExtractedFact,
     ExtractedEntity,
     ExtractedRelation,
     ExtractionResult,
     OntologyNarrative,
+    QueryRuleSpec,
 )
 
 
@@ -44,29 +45,28 @@ class _StubOntologyExtractor:
     review/publish pipeline without a real LLM call.
     """
 
-    def classify_document_domain(self, chunks) -> str:  # noqa: ANN001
+    def classify_document_domain(self, document) -> str:  # noqa: ANN001
         return "test_domain"
 
     def extract_ontology_candidates(  # noqa: ANN001
         self,
-        chunks,
+        document,
         workspace_id=None,
         provider=None,
         model=None,
     ) -> ExtractionResult:
-        first_chunk_id = chunks[0].chunk_id if chunks else None
         provenance = {
             "extractor": "test_stub",
             "prompt_version": "v1",
             "run_id": "test-run",
-            "source_chunk_id": first_chunk_id,
+            "source_document_id": getattr(document, "document_id", None),
             "provider": provider,
             "model": model,
         }
         entities = [
-            _stub_entity("Alpha Initiative", "alpha-initiative", first_chunk_id, provenance),
-            _stub_entity("Beta System", "beta-system", first_chunk_id, provenance),
-            _stub_entity("Audit Service", "audit-service", first_chunk_id, provenance),
+            _stub_entity("Alpha Initiative", "alpha-initiative", None, provenance),
+            _stub_entity("Beta System", "beta-system", None, provenance),
+            _stub_entity("Audit Service", "audit-service", None, provenance),
         ]
         relations = [
             _stub_relation(
@@ -76,7 +76,7 @@ class _StubOntologyExtractor:
                 target_name="Beta System",
                 relation_type="depends_on",
                 evidence_text="Alpha initiative depends on Beta system for approvals.",
-                source_chunk_id=first_chunk_id,
+                source_chunk_id=None,
                 provenance=provenance,
             ),
             _stub_relation(
@@ -86,7 +86,7 @@ class _StubOntologyExtractor:
                 target_name="Audit Service",
                 relation_type="uses",
                 evidence_text="Beta system uses Audit service.",
-                source_chunk_id=first_chunk_id,
+                source_chunk_id=None,
                 provenance=provenance,
             ),
         ]
@@ -94,7 +94,7 @@ class _StubOntologyExtractor:
 
     def summarize_ontology(  # noqa: ANN001
         self,
-        chunks,
+        document,
         *,
         workspace_id=None,
         provider=None,
@@ -118,6 +118,21 @@ def _stub_entity(name: str, resolution_key: str, source_chunk_id, provenance: di
         evidence_text=f"Mention of {name}",
         provenance=provenance,
         aliases=set(),
+        query_rules=[
+            QueryRuleSpec(
+                rule_id=f"entity-rule:{resolution_key}",
+                scope="entity_type",
+                query_route="hybrid",
+                trigger_keywords=["sensor", "threshold"],
+            )
+        ],
+        facts=[
+            ExtractedFact(
+                metric_key="maintenance_threshold",
+                value_num=80.0,
+                unit="percent",
+            )
+        ],
     )
 
 
@@ -142,6 +157,21 @@ def _stub_relation(
         source_chunk_id=source_chunk_id,
         evidence_text=evidence_text,
         provenance=provenance,
+        query_rules=[
+            QueryRuleSpec(
+                rule_id=f"relation-rule:{source_key}:{relation_type}:{target_key}",
+                scope="relation_type",
+                query_route="sql_facts",
+                trigger_keywords=["maintenance", "sensor"],
+            )
+        ],
+        facts=[
+            ExtractedFact(
+                metric_key="event_count",
+                value_num=3.0,
+                unit="times",
+            )
+        ],
     )
 
 

@@ -49,6 +49,16 @@ export function deleteSearchTool(id: string, workspaceId?: string): Promise<void
   });
 }
 
+export function duplicateSearchTool(
+  id: string,
+  workspaceId?: string,
+): Promise<SearchToolConfigResponse> {
+  return apiFetch<SearchToolConfigResponse>(`/search-tools/${id}/duplicate`, {
+    method: "POST",
+    searchParams: { workspace_id: workspaceId },
+  });
+}
+
 export function runSearchTool(
   id: string,
   payload: SearchToolRunRequest,

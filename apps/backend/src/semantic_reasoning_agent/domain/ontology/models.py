@@ -5,6 +5,32 @@ from typing import Any
 
 
 @dataclass(slots=True)
+class QueryRuleSpec:
+    rule_id: str
+    scope: str
+    query_route: str
+    trigger_keywords: list[str] = field(default_factory=list)
+    intent_tags: list[str] = field(default_factory=list)
+    required_fields: list[str] = field(default_factory=list)
+    aggregation: str = "latest"
+    confidence_threshold: float | None = None
+    fallback_route: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ExtractedFact:
+    metric_key: str
+    value_num: float | None = None
+    value_text: str | None = None
+    value_bool: bool | None = None
+    unit: str | None = None
+    observed_at: str | None = None
+    source_chunk_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class ExtractedEntity:
     name: str
     canonical_name: str
@@ -15,6 +41,8 @@ class ExtractedEntity:
     evidence_text: str
     provenance: dict[str, Any]
     aliases: set[str] = field(default_factory=set)
+    query_rules: list[QueryRuleSpec] = field(default_factory=list)
+    facts: list[ExtractedFact] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -28,6 +56,8 @@ class ExtractedRelation:
     source_chunk_id: str | None
     evidence_text: str
     provenance: dict[str, Any]
+    query_rules: list[QueryRuleSpec] = field(default_factory=list)
+    facts: list[ExtractedFact] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -35,6 +65,7 @@ class ExtractionResult:
     domain: str
     entities: list[ExtractedEntity]
     relations: list[ExtractedRelation]
+    trace: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -44,6 +75,6 @@ class OntologyNarrative:
 
 
 @dataclass(slots=True)
-class OntologySourceChunk:
-    chunk_id: str
-    text: str
+class OntologyDocument:
+    document_id: str
+    markdown: str

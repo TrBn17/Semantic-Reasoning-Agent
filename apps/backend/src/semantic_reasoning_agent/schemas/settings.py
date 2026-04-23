@@ -35,11 +35,25 @@ class SettingsProviderResponse(BaseModel):
     values: list[SettingsProviderFieldValue]
 
 
+class WorkspaceSearchDefaultsResponse(BaseModel):
+    embedding_provider: str
+    embedding_model: str
+    ready: bool
+    reason: str
+
+
 class PublicSettingsResponse(BaseModel):
     workspace: WorkspaceSummary
     providers: list[SettingsProviderResponse]
+    search_defaults: WorkspaceSearchDefaultsResponse
+
+
+class WorkspaceSearchDefaultsUpdateRequest(BaseModel):
+    embedding_provider: str
+    embedding_model: str
 
 
 class PublicSettingsUpdateRequest(BaseModel):
     workspace_id: str
     providers: list[ProviderConfigUpdate] = Field(default_factory=list)
+    search_defaults: WorkspaceSearchDefaultsUpdateRequest | None = None

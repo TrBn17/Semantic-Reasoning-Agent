@@ -16,6 +16,7 @@ export const queryKeys = {
     list: () => ["documents", "list"] as const,
     detail: (id: string) => ["documents", id] as const,
     jobs: (id: string) => ["documents", id, "jobs"] as const,
+    artifacts: (id: string) => ["documents", id, "artifacts"] as const,
   },
   retrieval: {
     search: (query: string, topK: number, documentIds: string[]) =>

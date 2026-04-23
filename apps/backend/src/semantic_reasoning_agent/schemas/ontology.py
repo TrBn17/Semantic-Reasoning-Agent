@@ -53,6 +53,7 @@ class OntologyBuildStepResponse(BaseModel):
     name: str
     status: OntologyStepStatus
     detail: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     started_at: datetime | None = None
     finished_at: datetime | None = None
 
@@ -61,6 +62,30 @@ class OntologyAttributeDefinitionResponse(BaseModel):
     name: str
     value_type: str = "text"
     description: str | None = None
+
+
+class OntologyQueryRuleResponse(BaseModel):
+    rule_id: str
+    scope: str
+    query_route: str
+    trigger_keywords: list[str] = Field(default_factory=list)
+    intent_tags: list[str] = Field(default_factory=list)
+    required_fields: list[str] = Field(default_factory=list)
+    aggregation: str = "latest"
+    confidence_threshold: float | None = None
+    fallback_route: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OntologyFactResponse(BaseModel):
+    metric_key: str
+    value_num: float | None = None
+    value_text: str | None = None
+    value_bool: bool | None = None
+    unit: str | None = None
+    observed_at: datetime | None = None
+    source_chunk_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class OntologySourceTargetDefinitionResponse(BaseModel):
@@ -75,6 +100,7 @@ class OntologyEntityTypeDefinitionResponse(BaseModel):
     name: str
     description: str | None = None
     attributes: list[OntologyAttributeDefinitionResponse] = Field(default_factory=list)
+    query_rules: list[OntologyQueryRuleResponse] = Field(default_factory=list)
     examples: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -86,6 +112,7 @@ class OntologyRelationTypeDefinitionResponse(BaseModel):
     name: str
     description: str | None = None
     attributes: list[OntologyAttributeDefinitionResponse] = Field(default_factory=list)
+    query_rules: list[OntologyQueryRuleResponse] = Field(default_factory=list)
     allowed_source_targets: list[OntologySourceTargetDefinitionResponse] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -104,6 +131,8 @@ class OntologyCandidateEntityResponse(BaseModel):
     source_chunk_id: str | None = None
     evidence_text: str
     provenance: dict[str, Any] = Field(default_factory=dict)
+    query_rules: list[OntologyQueryRuleResponse] = Field(default_factory=list)
+    facts: list[OntologyFactResponse] = Field(default_factory=list)
     aliases: list[str] = Field(default_factory=list)
     merged_into_entity_id: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
@@ -125,6 +154,8 @@ class OntologyCandidateRelationResponse(BaseModel):
     source_chunk_id: str | None = None
     evidence_text: str
     provenance: dict[str, Any] = Field(default_factory=dict)
+    query_rules: list[OntologyQueryRuleResponse] = Field(default_factory=list)
+    facts: list[OntologyFactResponse] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -203,6 +234,7 @@ class OntologyEntityResponse(BaseModel):
     name: str
     entity_type: str
     aliases: list[str] = Field(default_factory=list)
+    query_rules: list[OntologyQueryRuleResponse] = Field(default_factory=list)
     source_build_id: str
     source_document_id: str
     created_at: datetime = Field(default_factory=utc_now)
@@ -220,6 +252,7 @@ class OntologyRelationResponse(BaseModel):
     source_document_id: str
     evidence_text: str
     provenance: dict[str, Any] = Field(default_factory=dict)
+    query_rules: list[OntologyQueryRuleResponse] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -244,6 +277,7 @@ class OntologyGraphDraftNodeRequest(BaseModel):
     entity_type: str
     resolution_key: str | None = None
     aliases: list[str] = Field(default_factory=list)
+    query_rules: list[OntologyQueryRuleResponse] = Field(default_factory=list)
     source_document_id: str | None = None
     source_build_id: str | None = None
 
@@ -253,6 +287,7 @@ class OntologyGraphDraftNodeUpdateRequest(BaseModel):
     entity_type: str | None = None
     resolution_key: str | None = None
     aliases: list[str] | None = None
+    query_rules: list[OntologyQueryRuleResponse] | None = None
     source_document_id: str | None = None
     source_build_id: str | None = None
 
@@ -264,6 +299,7 @@ class OntologyGraphDraftRelationRequest(BaseModel):
     relation_type: str
     confidence: float = 1.0
     evidence_text: str = ""
+    query_rules: list[OntologyQueryRuleResponse] = Field(default_factory=list)
     source_document_id: str | None = None
     source_build_id: str | None = None
 
@@ -274,6 +310,7 @@ class OntologyGraphDraftRelationUpdateRequest(BaseModel):
     relation_type: str | None = None
     confidence: float | None = None
     evidence_text: str | None = None
+    query_rules: list[OntologyQueryRuleResponse] | None = None
     source_document_id: str | None = None
     source_build_id: str | None = None
 

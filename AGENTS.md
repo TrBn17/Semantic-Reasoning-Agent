@@ -1,3 +1,831 @@
+# AGENTS Guide (Current Architecture)
+
+Tai lieu nay la **nguon su that cho Agent** khi lam viec trong repo `Semantic-Reasoning-Agent`.
+Muc tieu la phan anh **trang thai dang chay thuc te** cua codebase, khong mo ta roadmap cu.
+
+---
+
+## 1) Project Identity
+
+`Semantic-Reasoning-Agent` la nen tang:
+
+- **backend-first**
+- **tool-first**
+- **workflow-centric**
+- **ontology-guided**
+
+Chat la entrypoint quan trong, nhung **khong phai kien truc trung tam**.
+Trung tam runtime hien tai:
+
+- task resolution (`/api/v1/tasks/resolve`)
+- tool runtime (`ToolRegistry` + `ToolRuntime`)
+- ontology grounding + evidence routing
+- document/ontology processing pipelines (Celery jobs)
+
+---
+
+## 2) Tech Stack (As-Built)
+
+### Backend
+
+- Python 3.11+
+- FastAPI
+- SQLAlchemy + Alembic
+- Celery
+- Pydantic v2 (`pydantic-settings`)
+- LLM providers: OpenAI, Anthropic, Gemini, Ollama, OpenRouter
+- Graph layer: Neo4j + Graphiti gateway
+- Storage: Postgres blob store (default), MinIO (optional via port)
+- Retrieval index: Postgres vector seam (default), Qdrant backend path (optional)
+
+### Frontend
+
+- Next.js 15
+- React 19 + TypeScript
+- Tailwind + Radix/shadcn UI
+- TanStack Query + Zustand
+- i18n (`react-i18next`, EN/VI)
+
+### Local Infra (`docker-compose.yml`)
+
+- `postgres`
+- `redis`
+- `neo4j`
+- `minio`
+- `qdrant`
+- `api`
+- `worker`
+- `frontend`
+
+---
+
+## 3) Canonical Source Layout
+
+### Backend package root
+
+`apps/backend/src/semantic_reasoning_agent`
+
+- `core`: settings + DI container
+- `entrypoints`: FastAPI routers
+- `services`: application/runtime services
+- `documents`: conversion + chunking + ingestion orchestration
+- `domain`: contracts + ontology domain logic
+- `tools`: tool implementations and schemas
+- `infrastructure`: adapters (LLM, graphiti, storage, ontology extraction)
+- `persistence`: DB manager + ORM models
+- `workers`: Celery app + async job tasks
+- `ports`: interface seams for infra adapters
+
+### Frontend
+
+`apps/frontend/src`
+
+- `app`: routes/pages (`ask`, `documents`, `ontology`, `graph`, `settings`, `agents`, `tasks`, `tools`, `search-tools`, ...)
+- `components`: feature UI blocks
+- `shared/api`: typed API clients mapping backend schemas
+- `shared/query`, `shared/layout`, `shared/i18n`: app runtime utilities
+
+---
+
+## 4) API Surface (Current)
+
+Router dang ky o `entrypoints/router.py`:
+
+- `/api/v1/auth/*`
+- `/api/v1/settings/*`
+- `/api/v1/providers/*` (internal/advanced discovery)
+- `/api/v1/conversations/*`
+- `/api/v1/chat/*`
+- `/api/v1/tasks/*`
+- `/api/v1/workflows/*`
+- `/api/v1/tools/*` (internal/admin control plane)
+- `/api/v1/search-tools/*`
+- `/api/v1/documents/*`
+- `/api/v1/retrieval/*`
+- `/api/v1/ontology/*`
+- `/api/v1/agents/*`
+- `/api/v1/agents/profiles/*`
+- `/api/v1/agent-capabilities/*`
+- `/api/v1/knowledge-packs/*`
+
+Luu y:
+
+- Public entrypoint cho task runtime: `POST /api/v1/tasks/resolve`
+- `POST /api/v1/workflows/{id}/run` la internal/debug
+- `GET /api/v1/tools` va `POST /api/v1/tools/{tool_name}/invoke` la internal/admin
+- `POST /api/v1/search-tools/{config_id}/duplicate` dung de nhan ban system/default search tool thanh custom tool
+
+---
+
+## 5) Runtime Flows (Current Truth)
+
+### 5.1 Chat / Task Resolution Flow
+
+1. `POST /chat/messages` vao `ChatStreamService`.
+2. Resolve model/provider readiness qua `ModelConfigService`.
+3. Append user message vao conversation.
+4. Goi `TaskRuntimeService.resolve_chat_request(...)`.
+5. Trong `TaskRuntimeService`:
+   - interpret task
+   - ontology grounding
+   - workflow select
+   - build tool plan theo `agent_profiles.tool_assignments`, capability guardrails, va document scope
+   - validate plan qua `AgenticLoopService`
+   - invoke tools qua `ToolRuntime` (tuan thu `ToolEnvelope`/`ToolResult`)
+   - assemble evidence + citations
+   - sufficiency check (`EvidenceJudge`) + conflict analysis (`ConflictEngine`)
+   - output routing (`OutputRouter`)
+   - fallback sang model-only answer neu policy cho phep
+6. Assistant response duoc append vao conversation va tra ve API (kem citations + tool_calls).
+
+Tool planning chat runtime co the su dung:
+
+- `supersearch.docs` qua slot `rag`
+- `supersearch.graph` qua slot `ontology_search`
+- internal tools nhu `retrieval.internal` / `ontology.lookup` / `graphiti.search` van ton tai trong registry nhung khong con la flow gan tool chinh cho agent profile
+
+Theo:
+
+- slot bindings luu trong `agent_profiles.tool_assignments`
+- capability preset/profile policy
+- allowed/blocked tools
+- selected document scope (request + knowledge packs)
+- evidence source policy
+
+Quy tac quan trong:
+
+- `tool instance` la don vi gan thuc te, khong phai `tool family`
+- v1 co 2 slot chinh: `rag` va `ontology_search`
+- neu slot trong, runtime khong fallback ngam ve search tool mac dinh cu
+- `ConversationResponse` expose `effective_tool_bindings`, khong chi `effective_tool_names`
+
+### 5.2 Document Ingestion Flow
+
+`DocumentService` la orchestrator chinh.
+
+Ingestion modes:
+
+- `ontology`
+- `retrieval`
+- `both` (default)
+
+Pipeline jobs:
+
+1. `convert_markdown`
+2. `store_artifacts`
+3. `build_chunks` (chi khi mode = `retrieval` hoac `both`)
+4. `index_chunks` (chi khi mode = `retrieval` hoac `both`)
+
+Conversion + chunking:
+
+- Converter chinh: `MarkdownConverterService`
+- Native converters cho `pdf`, `docx`, `xlsx`, `csv`, text-like formats
+- Fallback converter: `markitdown`
+- Chunking: `MarkdownChunker`
+- Artifacts luu object store + metadata DB (`markdown`, `normalized_json`)
+- `document_chunks` luu embedding payload cung metadata `embedding_provider` / `embedding_model`
+
+Structured extraction (`POST /documents/{id}/extract`):
+
+- doc markdown artifact
+- heuristic extraction hoac LLM extraction (neu provider/model ready)
+- luu `DocumentExtractionRun`
+
+### 5.3 Ontology Build / Review / Publish Flow
+
+`OntologyService` xu ly toan bo vong doi ontology.
+
+Build creation:
+
+- `POST /ontology/builds`
+- document phai o trang thai `indexed`
+- bat buoc `extraction_provider` + `extraction_model`
+- enqueue Celery task
+
+Async build processing:
+
+- Worker chay `process_ontology_build_task` -> `OntologyService.process_build`
+- Steps tracked trong DB:
+  1. `classify_document_domain`
+  2. `extract_entities`
+  3. `extract_relations`
+  4. `resolve_entities`
+  5. `build_graph_upsert_plan`
+  6. `sync_neo4j`
+
+Review + publish:
+
+- Review candidate entities/relations
+- Publish build: `POST /ontology/builds/{id}/publish`
+- Preview publish: `GET /ontology/builds/{id}/publish-preview`
+- Published snapshot day qua `OntologyGraphPublisher` (Graphiti/Neo4j path)
+
+Draft graph editing:
+
+- `GET /ontology/graph/draft`
+- CRUD draft nodes/relations
+- update entity/relation type drafts
+- reset/publish draft
+
+### 5.4 Search Tools Flow (Saved Super Search)
+
+`SearchToolConfigService` cung cap:
+
+- search tool theo model `tool instance`, workspace-scoped cho `docs` va `graph`
+- CRUD configs voi explicit `embedding_provider` / `embedding_model`
+- system-managed defaults duoc auto-provision per workspace:
+  - `workspace_default_rag` -> `docs`
+  - `workspace_default_ontology_search` -> `graph`
+- readiness validation dua tren embedding backend readiness thuc te, khong chi metadata check
+- run config:
+  - docs: semantic retrieval tren embedding index + optional BM25/fusion
+  - graph: ontology semantic index truoc, roi moi den graphiti/sql-facts routing
+- output normalized Evidence shape
+
+Workspace search defaults:
+
+- settings luu `embedding_provider` va `embedding_model` mac dinh cho workspace
+- mac dinh local hien tai dung Cloudflare embeddings tu env neu workspace chua override
+- tool config cu van duoc doc/backfill qua field legacy `provider` / `model`
+
+Frontend flow:
+
+- trang `agents` la luong chinh de gan 2 slot tool
+- trang `search-tools` la luong nang cao de xem, duplicate, va tuy chinh tool instance
+- system tools co badge/lock ro rang va khong cho mutate truc tiep
+
+### 5.5 Tool Control Plane Flow
+
+`/api/v1/tools` dung cho internal/admin:
+
+- list registry metadata (`ToolSpec`)
+- invoke tool truc tiep bang standard envelope
+
+Registry build tai `core/container.py` qua `build_tool_registry(...)`.
+Tools co the register (tuy dependency san sang):
+
+- `retrieval.internal`
+- `ontology.lookup`
+- `graphiti.search`
+- `graphiti.ingest_episode`
+- `supersearch.docs`
+- `supersearch.graph`
+
+---
+
+## 6) Worker Model
+
+Celery app o `workers/celery_app.py`, tasks o `workers/worker_tasks.py`.
+
+Hai background jobs chinh:
+
+- `semantic_reasoning_agent.tasks.process_document`
+- `semantic_reasoning_agent.tasks.process_ontology_build`
+
+Dispatcher path: services goi `TaskDispatcher`, khong goi task truc tiep.
+
+Search index notes:
+
+- document chunk embeddings duoc tao trong retrieval/index path bang `EmbeddingService`
+- ontology semantic index hien duoc ensure/rebuild boi `SearchToolConfigService` khi provision/run graph search tool, chua la Celery flow rieng
+
+---
+
+## 7) Data Boundaries (Current)
+
+- **Postgres**: source-of-truth cho metadata, conversations, docs, chunks, ontology review/publish state, runtime audit
+- **Postgres** cung luu `workspace_search_settings`, `search_tool_configs`, `document_chunks` embeddings, va `ontology_search_index`
+- **Redis**: Celery broker/result backend + ephemeral runtime support
+- **Neo4j/Graphiti**: graph runtime/projection path
+- **MinIO**: object-store backend optional (`OBJECT_STORE_BACKEND`)
+- **Qdrant**: vector backend optional (`VECTOR_STORE_BACKEND`)
+
+Mac dinh local hien tai van co duong Postgres object + retrieval, khong bat buoc migrate ngay.
+
+---
+
+## 8) Legacy Removal Notes (Important)
+
+Khi update code/doc, **khong quay lai narrative cu**:
+
+- Khong mo ta project la "chatbot backend thuan chat".
+- Khong coi parser registry cu (`documents/parsers/*`) la active path.
+  - Path ingestion hien tai: `documents/converters/markdown_converter.py` + `documents/chunking.py`.
+- Khong coi `/tools`, `/tasks`, `/workflows` la "planned-only".
+  - Chung da co route runtime trong code.
+- Khong coi ontology graph la output phu.
+  - Ontology runtime + review/publish + draft editing la luong chinh.
+
+---
+
+## 9) Agent Working Checklist
+
+Truoc khi sua code:
+
+1. Xac dinh dung module owner:
+   - documents -> `documents/*`, `services/retrieval_service.py`, worker task
+   - task runtime -> `services/task_runtime.py`, `services/*_engine.py`, `tools/*`
+   - ontology -> `services/ontology_service.py`, `infrastructure/ontology/*`, `schemas/ontology.py`
+   - API surface -> `entrypoints/v1/*` + `schemas/*`
+2. Neu sua API contract, cap nhat frontend `shared/api/*` va `shared/api/types.ts`.
+3. Neu them/sua background flow, verify queue path qua `TaskDispatcher` + `worker_tasks.py`.
+4. Khong de endpoint "planned" trong docs neu route da ton tai hoac da bi xoa.
+5. Neu sua search tools / agent runtime, keep nhat quan 4 lop:
+   - `settings` workspace embedding defaults
+   - `search-tools` tool-instance contracts
+   - `agent_profiles.tool_assignments` slot-based bindings
+   - `conversation/chat` effective binding payloads
+
+Sau khi sua code:
+
+1. Chay tests lien quan backend/frontend.
+2. Confirm lint/typecheck pass.
+3. Cap nhat tai lieu lien quan (`README.md`, `apps/backend/README.md`, `apps/frontend/README.md`) neu contract thay doi.
+4. Khong tai dua vao implicit fallback khi doc/code docs ve agent tool assignment.
+
+---
+
+## 10) Useful Commands
+
+```powershell
+# Infra + app stack
+docker compose up -d
+
+# Backend
+.venv\Scripts\python.exe -m pytest apps/backend/tests
+.venv\Scripts\python.exe -m ruff check apps/backend/src apps/backend/tests
+.venv\Scripts\python.exe apps/backend/serve.py
+.venv\Scripts\python.exe apps/backend/worker/serve.py
+
+# Frontend
+cd apps/frontend
+npm install
+npm run dev
+npm run build
+npm run lint
+npm run typecheck
+```
+
+---
+
+## 11) Quick Mental Model For New Agents
+
+Neu ban moi vao repo, dung model nay:
+
+- Conversation/chat chi la UI-entrypoint.
+- Public runtime entrypoint la `tasks/resolve`.
+- Tool runtime + evidence contracts la "spine" cua system.
+- Document ingestion tao markdown artifacts; retrieval branch optional theo mode.
+- Ontology co full lifecycle: build -> review -> publish -> graph/draft.
+- Search-tools la `tool instance` workspace-scoped, co 2 default system tools va embedding defaults theo workspace.
+- Agent profile gan tool qua 2 slot `rag` va `ontology_search`; khong co implicit fallback neu chua gan slot.
+
+---
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **Semantic-Reasoning-Agent** (8182 symbols, 19473 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/Semantic-Reasoning-Agent/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/Semantic-Reasoning-Agent/clusters` | All functional areas |
+| `gitnexus://repo/Semantic-Reasoning-Agent/processes` | All execution flows |
+| `gitnexus://repo/Semantic-Reasoning-Agent/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->
+# AGENTS Guide (Current Architecture)
+
+Tài liệu này là **nguồn sự thật cho Agent** khi làm việc trong repo `Semantic-Reasoning-Agent`.
+Mục tiêu là phản ánh **trạng thái đang chạy thực tế** của codebase, không mô tả roadmap cũ.
+
+---
+
+## 1) Project Identity
+
+`Semantic-Reasoning-Agent` là một nền tảng:
+
+- **backend-first**
+- **tool-first**
+- **workflow-centric**
+- **ontology-guided**
+
+Chat là entrypoint quan trọng, nhưng **không phải kiến trúc trung tâm**.
+Trung tâm runtime hiện tại là:
+
+- task resolution (`/api/v1/tasks/resolve`)
+- tool runtime (`ToolRegistry` + `ToolRuntime`)
+- ontology grounding + evidence routing
+- document/ontology processing pipelines (Celery jobs)
+
+---
+
+## 2) Tech Stack (As-Built)
+
+### Backend
+
+- Python 3.11+
+- FastAPI
+- SQLAlchemy + Alembic
+- Celery
+- Pydantic v2 (`pydantic-settings`)
+- LLM providers: OpenAI, Anthropic, Gemini, Ollama, OpenRouter (qua settings/adapters)
+- Graph layer: Neo4j + Graphiti gateway
+- Storage: Postgres blob store (default), MinIO (optional via port)
+- Retrieval index: Postgres vector seam (default), Qdrant backend path (optional)
+
+### Frontend
+
+- Next.js 15
+- React 19 + TypeScript
+- Tailwind + Radix/shadcn UI
+- TanStack Query + Zustand
+- i18n (`react-i18next`, EN/VI)
+
+### Local Infra (`docker-compose.yml`)
+
+- `postgres`
+- `redis`
+- `neo4j`
+- `minio`
+- `qdrant`
+- `api`
+- `worker`
+- `frontend`
+
+---
+
+## 3) Canonical Source Layout
+
+### Backend package root
+
+`apps/backend/src/semantic_reasoning_agent`
+
+- `core`: settings + DI container
+- `entrypoints`: FastAPI routers
+- `services`: application/runtime services
+- `documents`: conversion + chunking + ingestion orchestration
+- `domain`: contracts + ontology domain logic
+- `tools`: tool implementations and schemas
+- `infrastructure`: adapters (LLM, graphiti, storage, ontology extraction)
+- `persistence`: DB manager + ORM models
+- `workers`: Celery app + async job tasks
+- `ports`: interface seams for infra adapters
+
+### Frontend
+
+`apps/frontend/src`
+
+- `app`: routes/pages (`ask`, `documents`, `ontology`, `graph`, `settings`, `agents`, `tasks`, `tools`, `search-tools`, ...)
+- `components`: feature UI blocks
+- `shared/api`: typed API clients mapping backend schemas
+- `shared/query`, `shared/layout`, `shared/i18n`: app runtime utilities
+
+---
+
+## 4) API Surface (Current)
+
+Router đăng ký ở `entrypoints/router.py`:
+
+- `/api/v1/auth/*`
+- `/api/v1/settings/*`
+- `/api/v1/providers/*` (internal/advanced discovery)
+- `/api/v1/conversations/*`
+- `/api/v1/chat/*`
+- `/api/v1/tasks/*`
+- `/api/v1/workflows/*`
+- `/api/v1/tools/*` (internal/admin control plane)
+- `/api/v1/search-tools/*`
+- `/api/v1/documents/*`
+- `/api/v1/retrieval/*`
+- `/api/v1/ontology/*`
+- `/api/v1/agents/*`
+- `/api/v1/agents/profiles/*`
+- `/api/v1/agent-capabilities/*`
+- `/api/v1/knowledge-packs/*`
+
+Luu y:
+
+- Public entrypoint cho task runtime: `POST /api/v1/tasks/resolve`
+- `POST /api/v1/workflows/{id}/run` la internal/debug
+- `GET /api/v1/tools` va `POST /api/v1/tools/{tool_name}/invoke` la internal/admin
+
+---
+
+## 5) Runtime Flows (Current Truth)
+
+## 5.1 Chat / Task Resolution Flow
+
+1. `POST /chat/messages` vao `ChatStreamService`.
+2. Resolve model/provider readiness qua `ModelConfigService`.
+3. Append user message vao conversation.
+4. Gọi `TaskRuntimeService.resolve_chat_request(...)`.
+5. Trong `TaskRuntimeService`:
+   - interpret task
+   - ontology grounding
+   - workflow select
+   - build tool plan theo profile/capability/document scope
+   - validate plan qua `AgenticLoopService`
+   - invoke tools qua `ToolRuntime` (tuan thu `ToolEnvelope`/`ToolResult`)
+   - assemble evidence + citations
+   - sufficiency check (`EvidenceJudge`) + conflict analysis (`ConflictEngine`)
+   - output routing (`OutputRouter`)
+   - fallback sang model-only answer neu policy cho phep
+6. Assistant response duoc append vao conversation va tra ve cho API (kem citations + tool_calls).
+
+### Tool planning hiện tại (chat runtime)
+
+Co the su dung:
+
+- `retrieval.internal`
+- `ontology.lookup`
+- `graphiti.search`
+
+Tuy theo:
+
+- capability preset/profile policy
+- allowed/blocked tools
+- selected document scope (request + knowledge packs)
+- evidence source policy
+
+## 5.2 Document Ingestion Flow
+
+`DocumentService` la orchestrator chính.
+
+### Ingestion modes
+
+- `ontology`
+- `retrieval`
+- `both` (default)
+
+### Pipeline jobs
+
+Base jobs:
+
+1. `convert_markdown`
+2. `store_artifacts`
+
+Retrieval-only jobs (khi mode = `retrieval` hoac `both`):
+
+3. `build_chunks`
+4. `index_chunks`
+
+### Conversion + chunking model
+
+- Converter chính: `MarkdownConverterService`
+- Native converters cho: `pdf`, `docx`, `xlsx`, `csv`, text-like formats
+- Fallback converter: `markitdown`
+- Chunking: `MarkdownChunker`
+- Artifacts luu object store + metadata DB (`markdown`, `normalized_json`)
+
+### Structured extraction
+
+`POST /documents/{id}/extract`:
+
+- đọc markdown artifact
+- heuristic extraction hoac LLM extraction (neu provider/model ready)
+- lưu `DocumentExtractionRun`
+
+## 5.3 Ontology Build / Review / Publish Flow
+
+`OntologyService` xử lý toàn bộ vòng đời ontology:
+
+### Build creation
+
+- `POST /ontology/builds`
+- yeu cau document da `indexed`
+- yeu cau explicit `extraction_provider` + `extraction_model`
+- enqueue Celery task
+
+### Async build processing
+
+Celery worker chạy `process_ontology_build_task` -> `OntologyService.process_build`.
+
+Pipeline steps (tracked in DB):
+
+1. `classify_document_domain`
+2. `extract_entities`
+3. `extract_relations`
+4. `resolve_entities`
+5. `build_graph_upsert_plan`
+6. `sync_neo4j`
+
+### Review + publish
+
+- Review candidate entities/relations
+- Publish build: `POST /ontology/builds/{id}/publish`
+- Preview publish: `GET /ontology/builds/{id}/publish-preview`
+- Published snapshot đẩy qua `OntologyGraphPublisher` (Graphiti/Neo4j path)
+
+### Draft graph editing
+
+Co draft APIs:
+
+- `GET /ontology/graph/draft`
+- CRUD draft nodes/relations
+- update entity/relation type drafts
+- reset/publish draft
+
+## 5.4 Search Tools Flow (Saved Super Search)
+
+`SearchToolConfigService` cung cap:
+
+- CRUD configs cho `docs` va `graph`
+- readiness validation theo provider/model
+- run config:
+  - docs: semantic + optional BM25 + fusion
+  - graph: graphiti/sql-facts/hybrid path (tu routing)
+- output normalised Evidence shape
+
+## 5.5 Tool Control Plane Flow
+
+`/api/v1/tools` dung cho internal/admin:
+
+- list registry metadata (`ToolSpec`)
+- invoke tool trực tiếp bằng standard envelope
+
+Registry build tại `core/container.py` qua `build_tool_registry(...)`.
+Các tool có thể được register tùy dependency sẵn sàng:
+
+- `retrieval.internal`
+- `ontology.lookup`
+- `graphiti.search`
+- `graphiti.ingest_episode`
+- `supersearch.docs`
+- `supersearch.graph`
+
+---
+
+## 6) Worker Model
+
+Celery app ở `workers/celery_app.py`, tasks ở `workers/worker_tasks.py`.
+
+Hai background jobs chính:
+
+- `semantic_reasoning_agent.tasks.process_document`
+- `semantic_reasoning_agent.tasks.process_ontology_build`
+
+Dispatcher: `services` gọi `TaskDispatcher`, không gọi task trực tiếp.
+
+---
+
+## 7) Data Boundaries (Current)
+
+- **Postgres**: source-of-truth cho metadata, conversations, docs, chunks, ontology review/publish state, runtime audit
+- **Redis**: Celery broker/result backend + ephemeral runtime support
+- **Neo4j/Graphiti**: graph runtime/projection path
+- **MinIO**: object-store backend optional (qua `OBJECT_STORE_BACKEND`)
+- **Qdrant**: vector backend optional (qua `VECTOR_STORE_BACKEND`)
+
+Mac dinh local hien tai van co duong Postgres object + retrieval khong bat buoc migrates ngay.
+
+---
+
+## 8) Legacy Removal Notes (Important)
+
+Khi update code/doc, **khong quay lai narrative cu** sau:
+
+- Khong mo ta project la "chatbot backend thuan chat".
+- Khong coi parser registry cu (`documents/parsers/*`) la active path.
+  - Path ingestion hien tai: `documents/converters/markdown_converter.py` + `documents/chunking.py`.
+- Khong coi `/tools`, `/tasks`, `/workflows` la "planned-only".
+  - Chung da co route runtime trong code.
+- Khong coi ontology graph la output phu.
+  - Ontology runtime + review/publish + draft editing dang la luong chinh.
+
+---
+
+## 9) Agent Working Checklist
+
+Truoc khi sua code:
+
+1. Xac dinh dung module owner:
+   - documents -> `documents/*`, `services/retrieval_service.py`, worker task
+   - task runtime -> `services/task_runtime.py`, `services/*_engine.py`, `tools/*`
+   - ontology -> `services/ontology_service.py`, `infrastructure/ontology/*`, `schemas/ontology.py`
+   - API surface -> `entrypoints/v1/*` + `schemas/*`
+2. Neu sua contract API, cap nhat frontend `shared/api/*` va `shared/api/types.ts`.
+3. Neu them/sua background flow, verify queue path qua `TaskDispatcher` + `worker_tasks.py`.
+4. Khong de "planned endpoint" trong docs neu route da ton tai hoac da bi xoa.
+
+Sau khi sua code:
+
+1. Chay tests lien quan backend/frontend.
+2. Confirm lint/typecheck pass.
+3. Cap nhat tai lieu co lien quan (`README.md`, `apps/backend/README.md`, `apps/frontend/README.md`) neu contract thay doi.
+
+---
+
+## 10) Useful Commands
+
+```powershell
+# Infra + app stack
+docker compose up -d
+
+# Backend
+.venv\Scripts\python.exe -m pytest apps/backend/tests
+.venv\Scripts\python.exe -m ruff check apps/backend/src apps/backend/tests
+.venv\Scripts\python.exe apps/backend/serve.py
+.venv\Scripts\python.exe apps/backend/worker/serve.py
+
+# Frontend
+cd apps/frontend
+npm install
+npm run dev
+npm run build
+npm run lint
+npm run typecheck
+```
+
+---
+
+## 11) Quick Mental Model For New Agents
+
+Neu ban moi vao repo, dung model nay:
+
+- Conversation/chat chi la UI-entrypoint.
+- Public runtime entrypoint la `tasks/resolve`.
+- Tool runtime + evidence contracts la "spine" cua system.
+- Document ingestion tao markdown artifacts; retrieval branch la optional theo mode.
+- Ontology co full lifecycle: build -> review -> publish -> graph/draft.
+- Search-tools la lop cau hinh/rerank bo sung cho retrieval+graph.
+
+---
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **Semantic-Reasoning-Agent** (8182 symbols, 19473 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/Semantic-Reasoning-Agent/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/Semantic-Reasoning-Agent/clusters` | All functional areas |
+| `gitnexus://repo/Semantic-Reasoning-Agent/processes` | All execution flows |
+| `gitnexus://repo/Semantic-Reasoning-Agent/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->
 # Technical PRD v2.1 (Upgrade Blueprint, Backend-First)
 ## Tool-First, Workflow-Centric, Ontology-Guided Backend Agent Platform
 
@@ -793,35 +1621,37 @@ When the requested output class is an answer, the answer path is:
 
 As of the current repository state, document parsing is implemented with:
 
-- All non-CSV formats (PDF, DOCX, XLSX, images, etc.): `marker` via `documents/parsers/marker_document_parser.py` when the optional `pdf_parsing` extra is installed, otherwise `pypdf` fast-mode fallback for PDFs
-- CSV: stdlib `csv`
+- A single converter path: `MarkItDown` via `documents/converters/markdown_converter.py`
+- All supported source formats are normalized into markdown before any downstream branch
 
 Current ingestion jobs are:
 
-- `parse_document`
-- `build_chunks`
-- `embed_chunks`
-- `upsert_qdrant`
+- `convert_markdown`
+- `store_artifacts`
+- `build_chunks` (retrieval/both mode only)
+- `index_chunks` (retrieval/both mode only)
+The system supports three per-document modes:
 
-The current implementation still writes chunks to Postgres and uses a DB-backed token vector backend. The job name `upsert_qdrant` should be treated as a future-facing slot, not as proof that Qdrant is already the active backend.
+- `ontology`: convert to markdown and keep ontology pipeline independent from vector indexing
+- `retrieval`: convert to markdown + chunk + embed into `document_chunks`
+- `both`: run ontology-ready markdown and retrieval indexing in parallel
 
 ### Parser Strategy
 
 Short-term strategy:
 
-- keep a normalized parser contract behind the documents parser registry
-- use `marker` as the preferred PDF backend with two modes: `fast` and `accurate`
-- keep `pypdf` as the fast fallback when the optional Marker extra is not installed
-- keep DOCX/XLSX/CSV on native parsers without changing upstream workflow contracts
+- keep one converter contract (`MarkdownConverterService`) to normalize file types
+- keep chunking as a separate concern in `MarkdownChunker`
+- keep ontology and retrieval branches isolated after markdown is produced
 
 ### Parser Fallback
 
 Fallback rules:
 
-- use `marker` first when available
-- `fast` mode may fallback to `pypdf` if Marker is unavailable in the runtime
-- `accurate` mode requires Marker because it is the OCR-heavy path
-- keep fallback choice in parser provenance
+- use MarkItDown as the default converter
+- if markdown is empty, raise `DocumentProcessingError` with a user-facing reason
+- for ontology build, read markdown artifact directly (not `document_chunks`)
+- keep converter metadata/version in normalized artifact payload
 
 ### Parse Output Contract
 
@@ -830,23 +1660,17 @@ Fallback rules:
   "document_id": "string",
   "workspace_id": "string",
   "source_object_ref": "string",
-  "file_type": "pdf | docx | xlsx | csv",
-  "parser_name": "string",
-  "parser_version": "string",
+  "file_type": "supported by MarkItDown",
+  "converter_name": "markitdown",
+  "converter_version": "string",
+  "ingestion_mode": "ontology | retrieval | both",
   "ocr_used": false,
   "quality_flags": [],
-  "structure": {
-    "pages": [],
-    "sections": [],
-    "tables": [],
-    "sheets": []
-  },
-  "chunks": [],
+  "markdown_artifact": "document.md",
+  "chunks": "present only for retrieval/both",
   "metadata": {
     "filename": "string",
-    "mime_type": "string",
-    "page_count": 0,
-    "sheet_names": []
+    "mime_type": "string"
   }
 }
 ```

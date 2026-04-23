@@ -10,6 +10,10 @@ class _FakeModelConfigService:
         return {
             "openai": {"api_key": "oa-key", "base_url": "https://openai.example/v1"},
             "openrouter": {"api_key": "or-key", "base_url": "https://openrouter.ai/api/v1"},
+            "cloudflare": {
+                "api_key": "cf-key",
+                "base_url": "https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1",
+            },
             "anthropic": {"api_key": "an-key", "base_url": "https://anthropic.example/v1"},
             "gemini": {"api_key": "gm-key"},
             "ollama": {"base_url": "http://localhost:11434"},
@@ -22,6 +26,8 @@ def test_build_registry_uses_workspace_credentials_for_all_supported_providers()
         openai_base_url=None,
         openrouter_api_key=None,
         openrouter_base_url=None,
+        cloudflare_api_key=None,
+        cloudflare_account_id=None,
         anthropic_api_key=None,
         anthropic_base_url=None,
         google_api_key=None,
@@ -37,6 +43,7 @@ def test_build_registry_uses_workspace_credentials_for_all_supported_providers()
     assert set(registry.adapters.keys()) == {
         "openai",
         "openrouter",
+        "cloudflare",
         "anthropic",
         "gemini",
         "ollama",

@@ -3,25 +3,37 @@ from io import BytesIO
 import pytest
 from docx import Document as DocxDocument
 
+from semantic_reasoning_agent.core.container import get_app_container
+from semantic_reasoning_agent.persistence.models import (
+    OntologyBuildORM,
+    OntologyBuildStepORM,
+)
+from semantic_reasoning_agent.persistence.models import OntologyEntityFactORM, OntologyRelationFactORM
 from semantic_reasoning_agent.schemas.ontology import OntologyBuildCreateRequest
-from semantic_reasoning_agent.services.ontology_service import OntologyBuildError
-from semantic_reasoning_agent.domain.ontology.models import OntologyNarrative
+from semantic_reasoning_agent.services.ontology_service import (
+    OntologyBuildError,
+    OntologyBuildNotFoundError,
+)
+from semantic_reasoning_agent.domain.ontology.models import (
+    ExtractedEntity,
+    ExtractedRelation,
+    ExtractionResult,
+    OntologyNarrative,
+)
 from semantic_reasoning_agent.schemas.ontology import (
-    OntologyCandidateEntityUpdateRequest,
     OntologyDraftPublishRequest,
     OntologyGraphDraftNodeRequest,
     OntologyGraphDraftRelationRequest,
-    OntologyReviewAction,
 )
 
 
 class _RateLimitedExtractor:
-    def classify_document_domain(self, chunks) -> str:  # noqa: ANN001
+    def classify_document_domain(self, document) -> str:  # noqa: ANN001
         return "pending"
 
     def extract_ontology_candidates(  # noqa: ANN001
         self,
-        chunks,
+        document,
         workspace_id=None,
         provider=None,
         model=None,
@@ -43,7 +55,7 @@ class _RateLimitedExtractor:
 
     def summarize_ontology(  # noqa: ANN001
         self,
-        chunks,
+        document,
         *,
         workspace_id=None,
         provider=None,
@@ -61,12 +73,12 @@ class _FakeRateLimitError(Exception):
 
 
 class _UnavailableExtractor:
-    def classify_document_domain(self, chunks) -> str:  # noqa: ANN001
+    def classify_document_domain(self, document) -> str:  # noqa: ANN001
         return "pending"
 
     def extract_ontology_candidates(  # noqa: ANN001
         self,
-        chunks,
+        document,
         workspace_id=None,
         provider=None,
         model=None,
@@ -77,7 +89,7 @@ class _UnavailableExtractor:
 
     def summarize_ontology(  # noqa: ANN001
         self,
-        chunks,
+        document,
         *,
         workspace_id=None,
         provider=None,
@@ -85,6 +97,87 @@ class _UnavailableExtractor:
         domain=None,
     ) -> OntologyNarrative:
         return OntologyNarrative(title="Unavailable Ontology", summary="Model is not ready.")
+
+
+class _ChunkedTraceExtractor:
+    def classify_document_domain(self, document) -> str:  # noqa: ANN001
+        return "pending"
+
+    def extract_ontology_candidates(  # noqa: ANN001
+        self,
+        document,
+        workspace_id=None,
+        provider=None,
+        model=None,
+    ) -> ExtractionResult:
+        base_provenance = {
+            "extractor": "fake",
+            "provider": provider or "openrouter",
+            "model": model or "test-model",
+            "prompt_version": "v2",
+            "source_document_id": document.document_id,
+        }
+        entities = [
+            ExtractedEntity(
+                name="Alpha",
+                canonical_name="Alpha",
+                resolution_key="alpha",
+                entity_type="system",
+                confidence=0.9,
+                source_chunk_id=None,
+                evidence_text="Alpha evidence.",
+                provenance=base_provenance,
+                aliases={"A"},
+            ),
+            ExtractedEntity(
+                name="Beta",
+                canonical_name="Beta",
+                resolution_key="beta",
+                entity_type="system",
+                confidence=0.8,
+                source_chunk_id=None,
+                evidence_text="Beta evidence.",
+                provenance=base_provenance,
+                aliases=set(),
+            ),
+        ]
+        relations = [
+            ExtractedRelation(
+                source_resolution_key="alpha",
+                target_resolution_key="beta",
+                source_name="Alpha",
+                target_name="Beta",
+                relation_type="depends_on",
+                confidence=0.7,
+                source_chunk_id=None,
+                evidence_text="Alpha depends on Beta.",
+                provenance=base_provenance,
+            )
+        ]
+        return ExtractionResult(
+            domain="chunked_ops",
+            entities=entities,
+            relations=relations,
+            trace={
+                "chunks": [
+                    {"stage": "entities", "chunk_index": 0},
+                    {"stage": "relations", "chunk_index": 0},
+                    {"stage": "entities", "chunk_index": 1},
+                ],
+                "errors": ["chunk[1] entities: empty_payload"],
+            },
+        )
+
+    def summarize_ontology(  # noqa: ANN001
+        self,
+        document,
+        *,
+        workspace_id=None,
+        provider=None,
+        model=None,
+        domain=None,
+    ) -> OntologyNarrative:
+        return OntologyNarrative(title="Chunked Trace Build", summary="Chunked extraction traces are present.")
 
 
 def test_process_build_marks_rate_limited_extraction_as_failed(
@@ -119,6 +212,80 @@ def test_process_build_marks_rate_limited_extraction_as_failed(
     assert failed_build.status.value == "failed"
     assert failed_build.domain is None
     assert "temporarily rate-limited upstream" in (failed_build.error_message or "")
+
+
+def test_delete_build_removes_failed_build_and_steps(
+    document_service,
+    ontology_service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = document_service.upload_document(
+        filename="ontology-source.docx",
+        content=_build_docx_bytes(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    monkeypatch.setattr(
+        ontology_service._task_dispatcher,
+        "enqueue_ontology_build_processing",
+        lambda build_id: None,
+    )
+    ontology_service._ontology_extractor = _RateLimitedExtractor()
+
+    build = ontology_service.create_build(
+        OntologyBuildCreateRequest(
+            document_id=document.id,
+            extraction_provider="openrouter",
+            extraction_model="qwen/qwen3-next-80b-a3b-instruct:free",
+        )
+    )
+
+    with pytest.raises(OntologyBuildError):
+        ontology_service.process_build(build.id)
+
+    ontology_service.delete_build(build.id)
+
+    with pytest.raises(OntologyBuildNotFoundError):
+        ontology_service.get_build(build.id)
+
+    with get_app_container().database_manager.session() as session:
+        assert session.get(OntologyBuildORM, build.id) is None
+        assert (
+            session.query(OntologyBuildStepORM)
+            .filter(OntologyBuildStepORM.build_id == build.id)
+            .count()
+            == 0
+        )
+
+
+def test_delete_build_rejects_non_failed_build(
+    document_service,
+    ontology_service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document = document_service.upload_document(
+        filename="ontology-source.docx",
+        content=_build_docx_bytes(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    monkeypatch.setattr(
+        ontology_service._task_dispatcher,
+        "enqueue_ontology_build_processing",
+        lambda build_id: None,
+    )
+
+    build = ontology_service.create_build(
+        OntologyBuildCreateRequest(
+            document_id=document.id,
+            extraction_provider="echo",
+            extraction_model="local-echo",
+        )
+    )
+
+    with pytest.raises(OntologyBuildError, match="Only failed ontology builds can be deleted."):
+        ontology_service.delete_build(build.id)
+
+    reloaded_build = ontology_service.get_build(build.id)
+    assert reloaded_build.status.value == "pending"
 
 
 def test_process_build_fails_when_extraction_model_is_unavailable(
@@ -184,71 +351,68 @@ def test_process_build_uses_extraction_domain_when_classification_is_deferred(
     assert completed_build.domain == "test_domain"
     assert completed_build.ontology_title == "Delivery Dependencies"
     assert completed_build.ontology_summary
+    extract_entities_step = next(
+        step for step in completed_build.steps if step.name == "extract_entities"
+    )
+    extract_relations_step = next(
+        step for step in completed_build.steps if step.name == "extract_relations"
+    )
+    entities_trace = extract_entities_step.metadata.get("safe_trace")
+    relations_trace = extract_relations_step.metadata.get("safe_trace")
+    assert isinstance(entities_trace, dict)
+    assert entities_trace.get("domain") == "test_domain"
+    assert entities_trace.get("entity_count") == completed_build.entity_count
+    assert isinstance(relations_trace, dict)
+    assert relations_trace.get("domain") == "test_domain"
+    assert relations_trace.get("relation_count") == completed_build.relation_count
+    assert completed_build.pending_entity_count == 0
+    assert completed_build.pending_relation_count == 0
 
 
-def test_publish_build_appends_to_existing_version_and_keeps_document_title(
+def test_process_build_propagates_chunked_trace_metadata(
     document_service,
     ontology_service,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    document = document_service.upload_document(
+        filename="ontology-source.docx",
+        content=_build_docx_bytes(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
     monkeypatch.setattr(
         ontology_service._task_dispatcher,
         "enqueue_ontology_build_processing",
         lambda build_id: None,
     )
+    ontology_service._ontology_extractor = _ChunkedTraceExtractor()
 
-    first_document = document_service.upload_document(
-        filename="first.docx",
-        content=_build_docx_bytes(),
-        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
-    first_build = ontology_service.create_build(
+    build = ontology_service.create_build(
         OntologyBuildCreateRequest(
-            document_id=first_document.id,
-            extraction_provider="echo",
-            extraction_model="local-echo",
+            document_id=document.id,
+            extraction_provider="openrouter",
+            extraction_model="test-model",
         )
     )
-    ontology_service.process_build(first_build.id)
-    for entity in ontology_service.list_build_entities(first_build.id):
-        ontology_service.review_entity(entity.id, action=OntologyReviewAction.approve)
-    for relation in ontology_service.list_build_relations(first_build.id):
-        ontology_service.review_relation(relation.id, action=OntologyReviewAction.approve)
-    first_publish = ontology_service.publish_build(first_build.id)
+    ontology_service.process_build(build.id)
+    completed_build = ontology_service.get_build(build.id)
+    assert completed_build.status.value == "completed"
+    assert completed_build.domain == "chunked_ops"
 
-    second_document = document_service.upload_document(
-        filename="second.docx",
-        content=_build_docx_bytes(),
-        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    extract_entities_step = next(
+        step for step in completed_build.steps if step.name == "extract_entities"
     )
-    second_build = ontology_service.create_build(
-        OntologyBuildCreateRequest(
-            document_id=second_document.id,
-            extraction_provider="echo",
-            extraction_model="local-echo",
-        )
+    extract_relations_step = next(
+        step for step in completed_build.steps if step.name == "extract_relations"
     )
-    ontology_service.process_build(second_build.id)
-    updated_candidate = ontology_service.list_build_entities(second_build.id)[0]
-    ontology_service.update_entity(
-        updated_candidate.id,
-        OntologyCandidateEntityUpdateRequest(canonical_name="Alpha Initiative Prime"),
-    )
-    for entity in ontology_service.list_build_entities(second_build.id):
-        ontology_service.review_entity(entity.id, action=OntologyReviewAction.approve)
-    for relation in ontology_service.list_build_relations(second_build.id):
-        ontology_service.review_relation(relation.id, action=OntologyReviewAction.approve)
-    second_publish = ontology_service.publish_build(second_build.id)
 
-    graph = ontology_service.get_graph()
-    assert first_publish.version.version_number == 1
-    assert second_publish.version.version_number == 2
-    assert graph.version is not None
-    assert graph.version.version_number == 2
-    assert len(graph.entities) == 3
-    assert any(entity.name == "Alpha Initiative Prime" for entity in graph.entities)
-    reloaded_first_document = document_service.get_document(first_document.id)
-    assert reloaded_first_document.title == first_document.title
+    entities_trace = extract_entities_step.metadata.get("safe_trace")
+    relations_trace = extract_relations_step.metadata.get("safe_trace")
+    assert isinstance(entities_trace, dict)
+    assert entities_trace.get("chunk_count") == 3
+    assert entities_trace.get("errors") == ["chunk[1] entities: empty_payload"]
+    assert isinstance(relations_trace, dict)
+    assert relations_trace.get("chunk_count") == 3
+    assert relations_trace.get("errors") == ["chunk[1] entities: empty_payload"]
 
 
 def test_graph_draft_round_trip_publish_and_reset(
@@ -274,17 +438,14 @@ def test_graph_draft_round_trip_publish_and_reset(
         )
     )
     ontology_service.process_build(build.id)
-    for entity in ontology_service.list_build_entities(build.id):
-        ontology_service.review_entity(entity.id, action=OntologyReviewAction.approve)
-    for relation in ontology_service.list_build_relations(build.id):
-        ontology_service.review_relation(relation.id, action=OntologyReviewAction.approve)
-    ontology_service.publish_build(build.id)
-
+    draft = ontology_service.create_draft_node(
+        OntologyGraphDraftNodeRequest(name="Alpha", entity_type="initiative")
+    )
+    existing_node = next(entity for entity in draft.entities if entity.name == "Alpha")
     draft = ontology_service.create_draft_node(
         OntologyGraphDraftNodeRequest(name="Control Tower", entity_type="capability")
     )
     added_node = next(entity for entity in draft.entities if entity.name == "Control Tower")
-    existing_node = draft.entities[0]
     draft = ontology_service.create_draft_relation(
         OntologyGraphDraftRelationRequest(
             source_entity_id=existing_node.id,
@@ -296,17 +457,16 @@ def test_graph_draft_round_trip_publish_and_reset(
     assert draft.has_changes is True
     assert any(relation.relation_type == "monitors" for relation in draft.relations)
 
-    preview = ontology_service.preview_publish(build.id)
-    assert preview.diff_summary["entities_added"] >= 1
-    assert preview.diff_summary["relations_added"] >= 1
-
     publish = ontology_service.publish_graph_draft(
         OntologyDraftPublishRequest(build_id=build.id)
     )
-    assert publish.version.version_number == 2
+    assert publish.version.version_number == 1
     graph = ontology_service.get_graph()
     assert any(entity.name == "Control Tower" for entity in graph.entities)
     assert any(relation.relation_type == "monitors" for relation in graph.relations)
+    with get_app_container().database_manager.session() as session:
+        assert session.query(OntologyEntityFactORM).count() == 0
+        assert session.query(OntologyRelationFactORM).count() == 0
 
     reset = ontology_service.reset_graph_draft()
     assert reset.has_changes is False

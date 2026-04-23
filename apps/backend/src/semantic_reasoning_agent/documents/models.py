@@ -2,50 +2,44 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+DocumentIngestionMode = Literal["ontology", "retrieval", "both"]
+
+
 @dataclass(frozen=True)
 class DocumentIngestionOptions:
-    pdf_mode: str = "fast"
-    output_format: str = "markdown"
-    use_llm: bool = False
-    force_ocr: bool = False
-    strip_existing_ocr: bool = False
-    extract_images: bool = True
+    ingestion_mode: DocumentIngestionMode = "both"
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "pdf_mode": self.pdf_mode,
-            "output_format": self.output_format,
-            "use_llm": self.use_llm,
-            "force_ocr": self.force_ocr,
-            "strip_existing_ocr": self.strip_existing_ocr,
-            "extract_images": self.extract_images,
+            "ingestion_mode": self.ingestion_mode,
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any] | None) -> "DocumentIngestionOptions":
         if not payload:
             return cls()
-        pdf_mode = str(payload.get("pdf_mode") or "fast").lower()
-        if pdf_mode not in {"fast", "accurate"}:
-            pdf_mode = "fast"
-        output_format = str(payload.get("output_format") or "markdown").lower()
-        if output_format not in {"markdown", "html", "json", "chunks"}:
-            output_format = "markdown"
-        return cls(
-            pdf_mode=pdf_mode,
-            output_format=output_format,
-            use_llm=bool(payload.get("use_llm", False)),
-            force_ocr=bool(payload.get("force_ocr", False)),
-            strip_existing_ocr=bool(payload.get("strip_existing_ocr", False)),
-            extract_images=bool(payload.get("extract_images", True)),
-        )
+        ingestion_mode = str(payload.get("ingestion_mode") or "both").lower()
+        if ingestion_mode not in {"ontology", "retrieval", "both"}:
+            ingestion_mode = "both"
+        return cls(ingestion_mode=ingestion_mode)  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class ConvertedDocument:
+    document_type: str
+    title: str
+    markdown: str
+    converter_name: str
+    converter_version: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -113,7 +107,9 @@ class IndexedChunk:
     source_url: str
     parser_version: str
     created_at: datetime
-    embedding: dict[str, int]
+    embedding: list[float] | dict[str, int]
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
     page_number: int | None = None
     section_title: str | None = None
     heading_path: str | None = None

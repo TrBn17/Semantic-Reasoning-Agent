@@ -14,11 +14,12 @@ Responsibilities:
 from __future__ import annotations
 
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from semantic_reasoning_agent.core.config import Settings
 from semantic_reasoning_agent.domain.contracts.evidence import (
@@ -29,8 +30,13 @@ from semantic_reasoning_agent.domain.contracts.evidence import (
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import (
     DocumentChunkORM,
+    OntologySearchIndexORM,
+    OntologyEntityFactORM,
     OntologyEntityORM,
+    OntologyEntityTypeDefinitionORM,
+    OntologyRelationFactORM,
     OntologyRelationORM,
+    OntologyRelationTypeDefinitionORM,
     OntologyVersionORM,
     SearchToolConfigORM,
 )
@@ -59,6 +65,7 @@ if TYPE_CHECKING:
 
 TOOL_NAME_DOCS = "supersearch.docs"
 TOOL_NAME_GRAPH = "supersearch.graph"
+RouteDecision = Literal["graph", "sql_facts", "hybrid"]
 
 
 class SearchToolConfigNotFoundError(LookupError):
@@ -69,8 +76,16 @@ class SearchToolConfigInvalidError(ValueError):
     """Raised when a create/update payload fails cross-field validation."""
 
 
+class SearchToolSystemManagedError(ValueError):
+    """Raised when a system-managed config cannot be directly mutated."""
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+DEFAULT_DOCS_SYSTEM_KEY = "workspace_default_rag"
+DEFAULT_GRAPH_SYSTEM_KEY = "workspace_default_ontology_search"
 
 
 class SearchToolConfigService:
@@ -93,7 +108,13 @@ class SearchToolConfigService:
 
     def create(self, payload: SearchToolConfigCreateRequest) -> SearchToolConfigResponse:
         workspace_id = payload.workspace_id or self._settings.default_workspace_id
+        self.ensure_workspace_defaults(workspace_id)
         self._validate_payload_for_type(payload)
+        embedding_provider, embedding_model = self._resolve_embedding_fields(
+            workspace_id,
+            embedding_provider=payload.embedding_provider or payload.provider,
+            embedding_model=payload.embedding_model or payload.model,
+        )
         config_id = str(uuid4())
         now = _utc_now()
         with self._database_manager.session() as session:
@@ -114,9 +135,13 @@ class SearchToolConfigService:
                 tool_type=payload.tool_type,
                 name=payload.name.strip(),
                 description=payload.description or "",
-                provider=payload.provider,
-                model=payload.model,
+                provider=payload.provider or embedding_provider,
+                model=payload.model or embedding_model,
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
                 default_top_k=payload.default_top_k,
+                system_key=None,
+                is_system=False,
                 collection_target=payload.collection_target,
                 document_ids=list(payload.document_ids or []),
                 bm25_enabled=bool(payload.bm25_enabled),
@@ -141,8 +166,13 @@ class SearchToolConfigService:
         workspace_id: str | None = None,
     ) -> SearchToolConfigResponse:
         workspace_id = workspace_id or self._settings.default_workspace_id
+        self.ensure_workspace_defaults(workspace_id)
         with self._database_manager.session() as session:
             orm = self._require_orm(session, config_id, workspace_id)
+            if orm.is_system:
+                raise SearchToolSystemManagedError(
+                    f"Search tool config '{orm.name}' is system-managed. Duplicate it to customize."
+                )
             if payload.name is not None:
                 new_name = payload.name.strip()
                 if new_name != orm.name:
@@ -165,6 +195,18 @@ class SearchToolConfigService:
                 orm.provider = payload.provider
             if payload.model is not None:
                 orm.model = payload.model
+            if payload.embedding_provider is not None or payload.embedding_model is not None:
+                embedding_provider, embedding_model = self._resolve_embedding_fields(
+                    workspace_id,
+                    embedding_provider=payload.embedding_provider or orm.embedding_provider,
+                    embedding_model=payload.embedding_model or orm.embedding_model,
+                )
+                orm.embedding_provider = embedding_provider
+                orm.embedding_model = embedding_model
+                if payload.provider is None:
+                    orm.provider = embedding_provider
+                if payload.model is None:
+                    orm.model = embedding_model
             if payload.default_top_k is not None:
                 orm.default_top_k = payload.default_top_k
             if payload.collection_target is not None:
@@ -190,14 +232,66 @@ class SearchToolConfigService:
             session.flush()
             return self._to_response(orm)
 
+    def duplicate(
+        self,
+        config_id: str,
+        *,
+        workspace_id: str | None = None,
+    ) -> SearchToolConfigResponse:
+        workspace_id = workspace_id or self._settings.default_workspace_id
+        self.ensure_workspace_defaults(workspace_id)
+        now = _utc_now()
+        with self._database_manager.session() as session:
+            source = self._require_orm(session, config_id, workspace_id)
+            duplicate_name = self._next_duplicate_name(
+                session,
+                workspace_id=workspace_id,
+                tool_type=source.tool_type,
+                base_name=source.name,
+            )
+            duplicated = SearchToolConfigORM(
+                id=str(uuid4()),
+                workspace_id=workspace_id,
+                tool_type=source.tool_type,
+                name=duplicate_name,
+                description=source.description or "",
+                system_key=None,
+                is_system=False,
+                provider=source.provider,
+                model=source.model,
+                embedding_provider=source.embedding_provider,
+                embedding_model=source.embedding_model,
+                default_top_k=source.default_top_k,
+                collection_target=source.collection_target,
+                document_ids=list(source.document_ids or []),
+                bm25_enabled=bool(source.bm25_enabled),
+                fusion_strategy=source.fusion_strategy,
+                ontology_scope=source.ontology_scope,
+                ontology_version_id=source.ontology_version_id,
+                graph_search_type=source.graph_search_type,
+                reranker=source.reranker,
+                config_metadata=dict(source.config_metadata or {}),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(duplicated)
+            session.flush()
+            return self._to_response(duplicated)
+
     def delete(self, config_id: str, *, workspace_id: str | None = None) -> None:
         workspace_id = workspace_id or self._settings.default_workspace_id
+        self.ensure_workspace_defaults(workspace_id)
         with self._database_manager.session() as session:
             orm = self._require_orm(session, config_id, workspace_id)
+            if orm.is_system:
+                raise SearchToolSystemManagedError(
+                    f"Search tool config '{orm.name}' is system-managed and cannot be deleted."
+                )
             session.delete(orm)
 
     def get(self, config_id: str, *, workspace_id: str | None = None) -> SearchToolConfigResponse:
         workspace_id = workspace_id or self._settings.default_workspace_id
+        self.ensure_workspace_defaults(workspace_id)
         with self._database_manager.session() as session:
             orm = self._require_orm(session, config_id, workspace_id)
             return self._to_response(orm)
@@ -209,6 +303,7 @@ class SearchToolConfigService:
         tool_type: str | None = None,
     ) -> list[SearchToolConfigResponse]:
         workspace_id = workspace_id or self._settings.default_workspace_id
+        self.ensure_workspace_defaults(workspace_id)
         with self._database_manager.session() as session:
             statement = select(SearchToolConfigORM).where(
                 SearchToolConfigORM.workspace_id == workspace_id
@@ -216,7 +311,9 @@ class SearchToolConfigService:
             if tool_type:
                 statement = statement.where(SearchToolConfigORM.tool_type == tool_type)
             statement = statement.order_by(
-                SearchToolConfigORM.tool_type, SearchToolConfigORM.name
+                SearchToolConfigORM.is_system.desc(),
+                SearchToolConfigORM.tool_type,
+                SearchToolConfigORM.name,
             )
             configs = session.scalars(statement).all()
             return [self._to_response(config) for config in configs]
@@ -231,6 +328,7 @@ class SearchToolConfigService:
         workspace_id: str | None = None,
     ) -> SearchToolRunResponse:
         workspace_id = workspace_id or self._settings.default_workspace_id
+        self.ensure_workspace_defaults(workspace_id)
         started = time.perf_counter()
         with self._database_manager.session() as session:
             orm = self._require_orm(session, config_id, workspace_id)
@@ -241,13 +339,13 @@ class SearchToolConfigService:
         call_id = uuid4()
 
         readiness_reason: str | None = None
-        if not self._model_config_service.is_ready(
-            config.provider, config.model, config.workspace_id
-        ):
-            readiness_reason = (
-                f"Provider '{config.provider}' / model '{config.model}' is not ready. "
-                "Configure it in workspace settings."
-            )
+        ready, ready_reason = self._model_config_service.embedding_backend_status(
+            config.embedding_provider,
+            config.embedding_model,
+            config.workspace_id,
+        )
+        if not ready:
+            readiness_reason = ready_reason
 
         try:
             if tool_type == "docs":
@@ -292,8 +390,8 @@ class SearchToolConfigService:
             error_message=readiness_reason,
             latency_ms=latency_ms,
             meta=ToolMetaSchema(
-                provider=config.provider,
-                provider_version=config.model,
+                provider=config.embedding_provider,
+                provider_version=config.embedding_model,
                 trace_id=str(call_id),
             ),
         )
@@ -309,7 +407,11 @@ class SearchToolConfigService:
         top_k = payload.top_k or config.default_top_k
         bm25_enabled = payload.bm25_enabled if payload.bm25_enabled is not None else config.bm25_enabled
         fusion = payload.fusion_strategy or config.fusion_strategy
-        document_ids = list(config.document_ids) if config.collection_target == "documents" else None
+        document_ids = (
+            list(payload.document_ids)
+            if payload.document_ids is not None
+            else list(config.document_ids) if config.collection_target == "documents" else None
+        )
         captured_at = _utc_now()
 
         semantic_evidence: list[Evidence] = []
@@ -319,6 +421,8 @@ class SearchToolConfigService:
                 workspace_id=config.workspace_id,
                 document_ids=document_ids,
                 top_k=max(top_k * 2, top_k),
+                embedding_provider=config.embedding_provider,
+                embedding_model=config.embedding_model,
             )
             semantic_evidence = [
                 retrieval_result_to_evidence(
@@ -444,6 +548,15 @@ class SearchToolConfigService:
     ) -> list[Evidence]:
         top_k = payload.top_k or config.default_top_k
         reranker = payload.reranker or config.reranker
+        route = self._decide_graph_route(config, payload.query)
+        semantic_evidence = self._run_graph_semantic_index(config, payload, call_id, top_k)
+        if semantic_evidence and route == "graph":
+            return semantic_evidence
+
+        if route == "sql_facts":
+            return self._run_graph_facts_sql(config, payload, call_id, top_k)
+
+        graph_evidence: list[Evidence] = []
 
         if self._graphiti_gateway is not None and self._graphiti_gateway.is_enabled():
             from semantic_reasoning_agent.infrastructure.graphiti.graphiti_mapper import (
@@ -461,7 +574,7 @@ class SearchToolConfigService:
             evidence: list[Evidence] = []
             for match in matches:
                 if match.kind == "edge":
-                    evidence.append(
+                    graph_evidence.append(
                         map_edge_to_evidence(
                             match.item,
                             workspace_id=config.workspace_id,
@@ -470,7 +583,7 @@ class SearchToolConfigService:
                         )
                     )
                 else:
-                    evidence.append(
+                    graph_evidence.append(
                         map_node_to_evidence(
                             match.item,
                             workspace_id=config.workspace_id,
@@ -478,11 +591,117 @@ class SearchToolConfigService:
                             score=match.score,
                         )
                     )
-            if evidence:
-                return evidence
+            if graph_evidence and route == "graph":
+                return graph_evidence
             # Fall through to SQL fallback when Graphiti returns nothing.
+        if not graph_evidence:
+            graph_evidence = self._run_graph_sql_fallback(config, payload, call_id, top_k)
+            if route == "graph":
+                return graph_evidence
 
-        return self._run_graph_sql_fallback(config, payload, call_id, top_k)
+        facts_evidence = self._run_graph_facts_sql(config, payload, call_id, top_k)
+        merged = semantic_evidence + graph_evidence + facts_evidence if route == "hybrid" else semantic_evidence + graph_evidence
+        merged.sort(key=lambda item: item.score, reverse=True)
+        return merged[:top_k]
+
+    def _run_graph_facts_sql(
+        self,
+        config: SearchToolConfigResponse,
+        payload: SearchToolRunRequest,
+        call_id: UUID,
+        top_k: int,
+    ) -> list[Evidence]:
+        version_id = self._resolve_ontology_version_id(config)
+        if version_id is None:
+            return []
+        query_lower = payload.query.lower()
+        captured_at = _utc_now()
+        with self._database_manager.session() as session:
+            entity_facts = session.scalars(
+                select(OntologyEntityFactORM).where(
+                    OntologyEntityFactORM.workspace_id == config.workspace_id,
+                    OntologyEntityFactORM.version_id == version_id,
+                )
+            ).all()
+            relation_facts = session.scalars(
+                select(OntologyRelationFactORM).where(
+                    OntologyRelationFactORM.workspace_id == config.workspace_id,
+                    OntologyRelationFactORM.version_id == version_id,
+                )
+            ).all()
+        evidence: list[Evidence] = []
+        for fact in entity_facts:
+            score = _keyword_score(
+                query_lower,
+                [fact.metric_key, fact.value_text, fact.unit, str(fact.value_num) if fact.value_num is not None else None],
+                aliases=[],
+            )
+            if score <= 0:
+                continue
+            evidence.append(_entity_fact_to_evidence(fact, score, call_id, captured_at))
+        for fact in relation_facts:
+            score = _keyword_score(
+                query_lower,
+                [fact.metric_key, fact.value_text, fact.unit, str(fact.value_num) if fact.value_num is not None else None],
+                aliases=[],
+            )
+            if score <= 0:
+                continue
+            evidence.append(_relation_fact_to_evidence(fact, score, call_id, captured_at))
+        evidence.sort(key=lambda item: item.score, reverse=True)
+        return evidence[:top_k]
+
+    def _decide_graph_route(self, config: SearchToolConfigResponse, query: str) -> RouteDecision:
+        query_lower = query.lower()
+        version_id = self._resolve_ontology_version_id(config)
+        if version_id is None:
+            return "graph"
+
+        rules: list[dict] = []
+        config_rules = (config.config_metadata or {}).get("query_rules", [])
+        if isinstance(config_rules, list):
+            rules.extend([item for item in config_rules if isinstance(item, dict)])
+        with self._database_manager.session() as session:
+            entity_types = session.scalars(
+                select(OntologyEntityTypeDefinitionORM).where(
+                    OntologyEntityTypeDefinitionORM.workspace_id == config.workspace_id,
+                    OntologyEntityTypeDefinitionORM.version_id == version_id,
+                )
+            ).all()
+            relation_types = session.scalars(
+                select(OntologyRelationTypeDefinitionORM).where(
+                    OntologyRelationTypeDefinitionORM.workspace_id == config.workspace_id,
+                    OntologyRelationTypeDefinitionORM.version_id == version_id,
+                )
+            ).all()
+        for item in entity_types:
+            rules.extend([rule for rule in (item.query_rules or []) if isinstance(rule, dict)])
+        for item in relation_types:
+            rules.extend([rule for rule in (item.query_rules or []) if isinstance(rule, dict)])
+        if not rules:
+            return "graph"
+
+        route_scores: dict[RouteDecision, float] = defaultdict(float)
+        for rule in rules:
+            route_raw = str(rule.get("query_route") or "").strip().lower()
+            route: RouteDecision
+            if route_raw == "sql_facts":
+                route = "sql_facts"
+            elif route_raw == "hybrid":
+                route = "hybrid"
+            elif route_raw == "graph":
+                route = "graph"
+            else:
+                continue
+            triggers = [str(item).lower() for item in rule.get("trigger_keywords", []) if str(item).strip()]
+            intents = [str(item).lower() for item in rule.get("intent_tags", []) if str(item).strip()]
+            score = _keyword_score(query_lower, triggers + intents, aliases=[])
+            if score <= 0:
+                continue
+            route_scores[route] += score
+        if not route_scores:
+            return "graph"
+        return max(route_scores.items(), key=lambda item: item[1])[0]
 
     def _run_graph_sql_fallback(
         self,
@@ -546,6 +765,350 @@ class SearchToolConfigService:
             )
             return latest.id if latest else None
 
+    def _run_graph_semantic_index(
+        self,
+        config: SearchToolConfigResponse,
+        payload: SearchToolRunRequest,
+        call_id: UUID,
+        top_k: int,
+    ) -> list[Evidence]:
+        version_id = self._resolve_ontology_version_id(config)
+        if version_id is None:
+            return []
+        self._ensure_ontology_index(
+            workspace_id=config.workspace_id,
+            version_id=version_id,
+            embedding_provider=config.embedding_provider,
+            embedding_model=config.embedding_model,
+        )
+        query_embedding = self._retrieval_service._embed_text(  # noqa: SLF001
+            payload.query,
+            workspace_id=config.workspace_id,
+            provider=config.embedding_provider,
+            model=config.embedding_model,
+        )
+        with self._database_manager.session() as session:
+            rows = session.scalars(
+                select(OntologySearchIndexORM).where(
+                    OntologySearchIndexORM.workspace_id == config.workspace_id,
+                    OntologySearchIndexORM.version_id == version_id,
+                    OntologySearchIndexORM.embedding_provider == config.embedding_provider,
+                    OntologySearchIndexORM.embedding_model == config.embedding_model,
+                )
+            ).all()
+        captured_at = _utc_now()
+        evidence: list[Evidence] = []
+        for row in rows:
+            score = self._retrieval_service._cosine_similarity(query_embedding.values, row.embedding)  # noqa: SLF001
+            if score <= 0:
+                continue
+            evidence.append(
+                Evidence(
+                    evidence_id=uuid4(),
+                    source_type="graph_edge" if row.item_type.startswith("relation") else "graph_node",
+                    title=row.title,
+                    content=excerpt(row.content),
+                    citation_anchor=CitationAnchor(
+                        anchor_type="graph_ref",
+                        label=row.item_type,
+                        locator=f"{row.item_type}:{row.item_id}",
+                    ),
+                    provenance=Provenance(
+                        workspace_id=row.workspace_id,
+                        source_id=row.item_id,
+                        tool_call_id=call_id,
+                        captured_at=captured_at,
+                        model=config.embedding_model,
+                    ),
+                    entity_ids=(row.item_id,) if row.item_type.startswith("entity") else (),
+                    relation_ids=(row.item_id,) if row.item_type.startswith("relation") else (),
+                    score=float(score),
+                )
+            )
+        evidence.sort(key=lambda item: item.score, reverse=True)
+        return evidence[:top_k]
+
+    def ensure_workspace_defaults(self, workspace_id: str) -> None:
+        defaults = self._model_config_service.get_workspace_search_defaults(workspace_id)
+        now = _utc_now()
+        with self._database_manager.session() as session:
+            self._upsert_system_config(
+                session,
+                workspace_id=workspace_id,
+                tool_type="docs",
+                system_key=DEFAULT_DOCS_SYSTEM_KEY,
+                name="Workspace RAG",
+                description="System-managed default RAG tool for workspace documents.",
+                embedding_provider=defaults.embedding_provider,
+                embedding_model=defaults.embedding_model,
+                default_top_k=5,
+                collection_target="workspace",
+                bm25_enabled=True,
+                fusion_strategy="hybrid_rrf",
+                created_at=now,
+            )
+            graph_config = self._upsert_system_config(
+                session,
+                workspace_id=workspace_id,
+                tool_type="graph",
+                system_key=DEFAULT_GRAPH_SYSTEM_KEY,
+                name="Workspace Ontology Search",
+                description="System-managed default ontology search tool for the published graph.",
+                embedding_provider=defaults.embedding_provider,
+                embedding_model=defaults.embedding_model,
+                default_top_k=5,
+                ontology_scope="published",
+                graph_search_type="combined",
+                reranker="rrf",
+                created_at=now,
+            )
+            version_id = graph_config.ontology_version_id
+        if version_id:
+            self._ensure_ontology_index(
+                workspace_id=workspace_id,
+                version_id=version_id,
+                embedding_provider=defaults.embedding_provider,
+                embedding_model=defaults.embedding_model,
+            )
+
+    def _upsert_system_config(
+        self,
+        session,  # noqa: ANN001
+        *,
+        workspace_id: str,
+        tool_type: str,
+        system_key: str,
+        name: str,
+        description: str,
+        embedding_provider: str,
+        embedding_model: str,
+        default_top_k: int,
+        created_at: datetime,
+        collection_target: str = "workspace",
+        bm25_enabled: bool = False,
+        fusion_strategy: str = "semantic_only",
+        ontology_scope: str = "published",
+        graph_search_type: str = "combined",
+        reranker: str = "rrf",
+    ) -> SearchToolConfigORM:
+        existing = session.scalar(
+            select(SearchToolConfigORM).where(
+                SearchToolConfigORM.workspace_id == workspace_id,
+                SearchToolConfigORM.system_key == system_key,
+            )
+        )
+        resolved_version_id = None
+        if tool_type == "graph":
+            resolved_version_id = self._latest_ontology_version_id(session, workspace_id)
+        if existing is None:
+            existing = SearchToolConfigORM(
+                id=str(uuid4()),
+                workspace_id=workspace_id,
+                tool_type=tool_type,
+                name=name,
+                description=description,
+                system_key=system_key,
+                is_system=True,
+                provider=embedding_provider,
+                model=embedding_model,
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                default_top_k=default_top_k,
+                collection_target=collection_target,
+                document_ids=[],
+                bm25_enabled=bm25_enabled,
+                fusion_strategy=fusion_strategy,
+                ontology_scope=ontology_scope,
+                ontology_version_id=resolved_version_id,
+                graph_search_type=graph_search_type,
+                reranker=reranker,
+                config_metadata={},
+                created_at=created_at,
+                updated_at=created_at,
+            )
+            session.add(existing)
+        else:
+            existing.name = name
+            existing.description = description
+            existing.is_system = True
+            existing.provider = embedding_provider
+            existing.model = embedding_model
+            existing.embedding_provider = embedding_provider
+            existing.embedding_model = embedding_model
+            existing.default_top_k = default_top_k
+            if tool_type == "docs":
+                existing.collection_target = collection_target
+                existing.bm25_enabled = bm25_enabled
+                existing.fusion_strategy = fusion_strategy
+            else:
+                existing.ontology_scope = ontology_scope
+                existing.ontology_version_id = resolved_version_id
+                existing.graph_search_type = graph_search_type
+                existing.reranker = reranker
+            existing.updated_at = created_at
+        session.flush()
+        return existing
+
+    def _ensure_ontology_index(
+        self,
+        *,
+        workspace_id: str,
+        version_id: str,
+        embedding_provider: str,
+        embedding_model: str,
+    ) -> None:
+        with self._database_manager.session() as session:
+            existing = session.scalar(
+                select(OntologySearchIndexORM).where(
+                    OntologySearchIndexORM.workspace_id == workspace_id,
+                    OntologySearchIndexORM.version_id == version_id,
+                    OntologySearchIndexORM.embedding_provider == embedding_provider,
+                    OntologySearchIndexORM.embedding_model == embedding_model,
+                )
+            )
+            if existing is not None:
+                return
+        self._rebuild_ontology_index(
+            workspace_id=workspace_id,
+            version_id=version_id,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
+        )
+
+    def _rebuild_ontology_index(
+        self,
+        *,
+        workspace_id: str,
+        version_id: str,
+        embedding_provider: str,
+        embedding_model: str,
+    ) -> None:
+        now = _utc_now()
+        with self._database_manager.session() as session:
+            session.execute(
+                delete(OntologySearchIndexORM).where(
+                    OntologySearchIndexORM.workspace_id == workspace_id,
+                    OntologySearchIndexORM.version_id == version_id,
+                    OntologySearchIndexORM.embedding_provider == embedding_provider,
+                    OntologySearchIndexORM.embedding_model == embedding_model,
+                )
+            )
+            entities = session.scalars(
+                select(OntologyEntityORM).where(
+                    OntologyEntityORM.workspace_id == workspace_id,
+                    OntologyEntityORM.version_id == version_id,
+                )
+            ).all()
+            relations = session.scalars(
+                select(OntologyRelationORM).where(
+                    OntologyRelationORM.workspace_id == workspace_id,
+                    OntologyRelationORM.version_id == version_id,
+                )
+            ).all()
+            entity_facts = session.scalars(
+                select(OntologyEntityFactORM).where(
+                    OntologyEntityFactORM.workspace_id == workspace_id,
+                    OntologyEntityFactORM.version_id == version_id,
+                )
+            ).all()
+            relation_facts = session.scalars(
+                select(OntologyRelationFactORM).where(
+                    OntologyRelationFactORM.workspace_id == workspace_id,
+                    OntologyRelationFactORM.version_id == version_id,
+                )
+            ).all()
+            items: list[tuple[str, str, str, str]] = []
+            items.extend(
+                (
+                    "entity",
+                    entity.id,
+                    entity.name,
+                    " ".join(filter(None, [entity.name, entity.entity_type, *(entity.aliases or [])])),
+                )
+                for entity in entities
+            )
+            items.extend(
+                (
+                    "relation",
+                    relation.id,
+                    relation.relation_type,
+                    " ".join(
+                        filter(None, [relation.relation_type, relation.evidence_text])
+                    ),
+                )
+                for relation in relations
+            )
+            items.extend(
+                (
+                    "entity_fact",
+                    fact.id,
+                    f"Fact: {fact.metric_key}",
+                    " ".join(
+                        filter(
+                            None,
+                            [
+                                fact.metric_key,
+                                fact.value_text,
+                                str(fact.value_num) if fact.value_num is not None else None,
+                                fact.unit,
+                            ],
+                        )
+                    ),
+                )
+                for fact in entity_facts
+            )
+            items.extend(
+                (
+                    "relation_fact",
+                    fact.id,
+                    f"Fact: {fact.metric_key}",
+                    " ".join(
+                        filter(
+                            None,
+                            [
+                                fact.metric_key,
+                                fact.value_text,
+                                str(fact.value_num) if fact.value_num is not None else None,
+                                fact.unit,
+                            ],
+                        )
+                    ),
+                )
+                for fact in relation_facts
+            )
+            for item_type, item_id, title, content in items:
+                embedding = self._retrieval_service.embed_text(
+                    content,
+                    workspace_id=workspace_id,
+                    provider=embedding_provider,
+                    model=embedding_model,
+                )
+                session.add(
+                    OntologySearchIndexORM(
+                        id=str(uuid4()),
+                        workspace_id=workspace_id,
+                        version_id=version_id,
+                        item_type=item_type,
+                        item_id=item_id,
+                        title=title,
+                        content=content,
+                        embedding=embedding,
+                        embedding_provider=embedding_provider,
+                        embedding_model=embedding_model,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+    @staticmethod
+    def _latest_ontology_version_id(session, workspace_id: str) -> str | None:  # noqa: ANN001
+        latest = session.scalar(
+            select(OntologyVersionORM)
+            .where(OntologyVersionORM.workspace_id == workspace_id)
+            .order_by(OntologyVersionORM.version_number.desc())
+        )
+        return latest.id if latest else None
+
     # ---------------- Helpers ----------------
 
     def _validate_payload_for_type(self, payload: SearchToolConfigCreateRequest) -> None:
@@ -571,6 +1134,10 @@ class SearchToolConfigService:
                 raise SearchToolConfigInvalidError(
                     "ontology_scope='version' requires ontology_version_id."
                 )
+        if not (orm.embedding_provider or "").strip():
+            raise SearchToolConfigInvalidError("embedding_provider is required.")
+        if not (orm.embedding_model or "").strip():
+            raise SearchToolConfigInvalidError("embedding_model is required.")
 
     def _require_orm(
         self,
@@ -590,24 +1157,66 @@ class SearchToolConfigService:
             )
         return orm
 
+    def _resolve_embedding_fields(
+        self,
+        workspace_id: str,
+        *,
+        embedding_provider: str | None,
+        embedding_model: str | None,
+    ) -> tuple[str, str]:
+        defaults = self._model_config_service.get_workspace_search_defaults(workspace_id)
+        resolved_provider = (embedding_provider or defaults.embedding_provider or "").strip()
+        resolved_model = (embedding_model or defaults.embedding_model or "").strip()
+        if not resolved_provider or not resolved_model:
+            raise SearchToolConfigInvalidError(
+                "Search tool configs require embedding_provider and embedding_model."
+            )
+        return resolved_provider, resolved_model
+
+    @staticmethod
+    def _next_duplicate_name(
+        session,  # noqa: ANN001
+        *,
+        workspace_id: str,
+        tool_type: str,
+        base_name: str,
+    ) -> str:
+        attempt = f"{base_name} Copy"
+        suffix = 2
+        while session.scalar(
+            select(SearchToolConfigORM).where(
+                SearchToolConfigORM.workspace_id == workspace_id,
+                SearchToolConfigORM.tool_type == tool_type,
+                SearchToolConfigORM.name == attempt,
+            )
+        ):
+            attempt = f"{base_name} Copy {suffix}"
+            suffix += 1
+        return attempt
+
     def _to_response(self, orm: SearchToolConfigORM) -> SearchToolConfigResponse:
-        ready = self._model_config_service.is_ready(
-            orm.provider, orm.model, orm.workspace_id
+        ready, reason = self._model_config_service.embedding_backend_status(
+            orm.embedding_provider,
+            orm.embedding_model,
+            orm.workspace_id,
         )
-        reason = (
-            "Ready to run."
-            if ready
-            else f"Provider '{orm.provider}' / model '{orm.model}' is not ready."
-        )
+        if not ready:
+            reason = f"Embedding backend not ready: {reason}"
         return SearchToolConfigResponse(
             id=orm.id,
             workspace_id=orm.workspace_id,
             tool_type=orm.tool_type,  # type: ignore[arg-type]
             name=orm.name,
             description=orm.description or "",
-            provider=orm.provider,
-            model=orm.model,
+            provider=orm.provider or orm.embedding_provider,
+            model=orm.model or orm.embedding_model,
+            tool_name=TOOL_NAME_DOCS if orm.tool_type == "docs" else TOOL_NAME_GRAPH,
+            embedding_provider=orm.embedding_provider,
+            embedding_model=orm.embedding_model,
             default_top_k=orm.default_top_k,
+            system_key=orm.system_key,
+            is_system=bool(orm.is_system),
+            assignable_slots=["rag"] if orm.tool_type == "docs" else ["ontology_search"],
             collection_target=orm.collection_target,  # type: ignore[arg-type]
             document_ids=list(orm.document_ids or []),
             bm25_enabled=bool(orm.bm25_enabled),
@@ -735,10 +1344,71 @@ def _relation_to_evidence(
     )
 
 
+def _entity_fact_to_evidence(
+    fact: OntologyEntityFactORM,
+    score: float,
+    call_id: UUID,
+    captured_at: datetime,
+) -> Evidence:
+    content = f"{fact.metric_key}={fact.value_num if fact.value_num is not None else fact.value_text}"
+    if fact.unit:
+        content = f"{content} {fact.unit}"
+    return Evidence(
+        evidence_id=uuid4(),
+        source_type="graph_node",
+        title=f"Fact: {fact.metric_key}",
+        content=content,
+        citation_anchor=CitationAnchor(
+            anchor_type="graph_ref",
+            label="entity_fact",
+            locator=f"ontology-entity-fact:{fact.id}",
+        ),
+        provenance=Provenance(
+            workspace_id=fact.workspace_id,
+            source_id=fact.id,
+            tool_call_id=call_id,
+            captured_at=captured_at,
+        ),
+        entity_ids=(fact.entity_id,),
+        score=float(score),
+    )
+
+
+def _relation_fact_to_evidence(
+    fact: OntologyRelationFactORM,
+    score: float,
+    call_id: UUID,
+    captured_at: datetime,
+) -> Evidence:
+    content = f"{fact.metric_key}={fact.value_num if fact.value_num is not None else fact.value_text}"
+    if fact.unit:
+        content = f"{content} {fact.unit}"
+    return Evidence(
+        evidence_id=uuid4(),
+        source_type="graph_edge",
+        title=f"Fact: {fact.metric_key}",
+        content=content,
+        citation_anchor=CitationAnchor(
+            anchor_type="graph_ref",
+            label="relation_fact",
+            locator=f"ontology-relation-fact:{fact.id}",
+        ),
+        provenance=Provenance(
+            workspace_id=fact.workspace_id,
+            source_id=fact.id,
+            tool_call_id=call_id,
+            captured_at=captured_at,
+        ),
+        relation_ids=(fact.relation_id,),
+        score=float(score),
+    )
+
+
 __all__ = [
     "SearchToolConfigService",
     "SearchToolConfigNotFoundError",
     "SearchToolConfigInvalidError",
+    "SearchToolSystemManagedError",
     "TOOL_NAME_DOCS",
     "TOOL_NAME_GRAPH",
 ]

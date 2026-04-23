@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -36,16 +36,6 @@ class OntologyBuildORM(Base):
         cascade="all, delete-orphan",
         order_by="OntologyBuildStepORM.name",
     )
-    entities: Mapped[list["OntologyCandidateEntityORM"]] = relationship(
-        back_populates="build",
-        cascade="all, delete-orphan",
-        order_by="OntologyCandidateEntityORM.canonical_name",
-    )
-    relations: Mapped[list["OntologyCandidateRelationORM"]] = relationship(
-        back_populates="build",
-        cascade="all, delete-orphan",
-        order_by="OntologyCandidateRelationORM.relation_type",
-    )
 
 
 class OntologyBuildStepORM(Base):
@@ -60,65 +50,11 @@ class OntologyBuildStepORM(Base):
     name: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), index=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     build: Mapped[OntologyBuildORM] = relationship(back_populates="steps")
-
-
-class OntologyCandidateEntityORM(Base):
-    __tablename__ = "ontology_candidate_entities"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    build_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("ontology_builds.id", ondelete="CASCADE"),
-        index=True,
-    )
-    document_id: Mapped[str] = mapped_column(String(64), index=True)
-    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
-    name: Mapped[str] = mapped_column(String(255))
-    canonical_name: Mapped[str] = mapped_column(String(255))
-    resolution_key: Mapped[str] = mapped_column(String(255), index=True)
-    entity_type: Mapped[str] = mapped_column(String(64))
-    confidence: Mapped[float] = mapped_column(Float)
-    status: Mapped[str] = mapped_column(String(32), index=True)
-    source_chunk_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    evidence_text: Mapped[str] = mapped_column(Text)
-    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
-    aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
-    merged_into_entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-
-    build: Mapped[OntologyBuildORM] = relationship(back_populates="entities")
-
-
-class OntologyCandidateRelationORM(Base):
-    __tablename__ = "ontology_candidate_relations"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    build_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("ontology_builds.id", ondelete="CASCADE"),
-        index=True,
-    )
-    document_id: Mapped[str] = mapped_column(String(64), index=True)
-    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
-    source_entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    target_entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    source_name: Mapped[str] = mapped_column(String(255))
-    target_name: Mapped[str] = mapped_column(String(255))
-    relation_type: Mapped[str] = mapped_column(String(64))
-    confidence: Mapped[float] = mapped_column(Float)
-    status: Mapped[str] = mapped_column(String(32), index=True)
-    source_chunk_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    evidence_text: Mapped[str] = mapped_column(Text)
-    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-
-    build: Mapped[OntologyBuildORM] = relationship(back_populates="relations")
 
 
 class OntologyVersionORM(Base):
@@ -167,6 +103,7 @@ class OntologyEntityTypeDefinitionORM(Base):
     name: Mapped[str] = mapped_column(String(128), index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     attributes: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    query_rules: Mapped[list[dict]] = mapped_column(JSON, default=list)
     examples: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -186,6 +123,7 @@ class OntologyRelationTypeDefinitionORM(Base):
     name: Mapped[str] = mapped_column(String(128), index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     attributes: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    query_rules: Mapped[list[dict]] = mapped_column(JSON, default=list)
     allowed_source_targets: Mapped[list[dict]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -206,6 +144,7 @@ class OntologyEntityORM(Base):
     name: Mapped[str] = mapped_column(String(255))
     entity_type: Mapped[str] = mapped_column(String(64))
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    query_rules: Mapped[list[dict]] = mapped_column(JSON, default=list)
     source_build_id: Mapped[str] = mapped_column(String(64), index=True)
     source_document_id: Mapped[str] = mapped_column(String(64), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -231,6 +170,7 @@ class OntologyRelationORM(Base):
     source_document_id: Mapped[str] = mapped_column(String(64), index=True)
     evidence_text: Mapped[str] = mapped_column(Text)
     provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    query_rules: Mapped[list[dict]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     version: Mapped[OntologyVersionORM] = relationship(back_populates="relations")
@@ -249,3 +189,41 @@ class OntologyGraphDraftORM(Base):
     relation_type_patches: Mapped[list[dict]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class OntologyEntityFactORM(Base):
+    __tablename__ = "ontology_entity_facts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    version_id: Mapped[str] = mapped_column(String(64), index=True)
+    entity_id: Mapped[str] = mapped_column(String(64), index=True)
+    metric_key: Mapped[str] = mapped_column(String(128), index=True)
+    value_num: Mapped[float | None] = mapped_column(Float, nullable=True)
+    value_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_bool: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    source_document_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_chunk_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class OntologyRelationFactORM(Base):
+    __tablename__ = "ontology_relation_facts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    version_id: Mapped[str] = mapped_column(String(64), index=True)
+    relation_id: Mapped[str] = mapped_column(String(64), index=True)
+    metric_key: Mapped[str] = mapped_column(String(128), index=True)
+    value_num: Mapped[float | None] = mapped_column(Float, nullable=True)
+    value_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_bool: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    source_document_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_chunk_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

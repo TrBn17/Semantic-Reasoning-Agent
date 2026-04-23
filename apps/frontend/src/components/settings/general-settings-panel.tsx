@@ -2,7 +2,6 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,33 +35,37 @@ export function GeneralSettingsPanel() {
 
   return (
     <div className="space-y-6">
-      <SettingSection
-        title={t.generalSettings.workspace.title}
-        description={t.generalSettings.workspace.description}
-      >
+      <SettingSection title={t.generalSettings.workspace.title}>
         <SettingRow
           label={t.generalSettings.workspace.nameLabel}
-          description={data.workspace.id}
           control={<span className="text-sm font-medium">{data.workspace.name}</span>}
         />
         <SettingRow
           label={t.generalSettings.workspace.readyProvidersLabel}
-          description={t.generalSettings.workspace.readyProvidersDescription}
           control={
             <Badge variant={providerCount > 0 ? "success" : "warning"}>
               {providerCount} / {totalProviders}
             </Badge>
           }
         />
+        <SettingRow
+          label="Search embeddings"
+          control={
+            <div className="flex items-center gap-2 text-sm">
+              <span className="font-medium">
+                {data.search_defaults.embedding_provider} / {data.search_defaults.embedding_model}
+              </span>
+              <Badge variant={data.search_defaults.ready ? "success" : "warning"}>
+                {data.search_defaults.ready ? "ready" : "blocked"}
+              </Badge>
+            </div>
+          }
+        />
       </SettingSection>
 
-      <SettingSection
-        title={t.generalSettings.appearance.title}
-        description={t.generalSettings.appearance.description}
-      >
+      <SettingSection title={t.generalSettings.appearance.title}>
         <SettingRow
           label={t.generalSettings.appearance.languageLabel}
-          description={t.generalSettings.appearance.languageDescription}
           control={
             <div className="inline-flex rounded-md border bg-muted/40 p-0.5">
               <Button
@@ -94,15 +97,8 @@ export function GeneralSettingsPanel() {
 
 function ThemeRow() {
   const { t } = useI18n();
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
+  const { theme, setTheme } = useTheme();
   const current = theme ?? "system";
-  const effective = mounted ? (resolvedTheme ?? current) : current;
 
   const options = [
     {
@@ -125,11 +121,6 @@ function ThemeRow() {
   return (
     <SettingRow
       label={t.generalSettings.appearance.themeLabel}
-      description={
-        mounted
-          ? `${t.generalSettings.appearance.themeAppliedPrefix} ${effective}`
-          : t.generalSettings.appearance.themeLoading
-      }
       control={
         <div className="inline-flex rounded-md border bg-muted/40 p-0.5">
           {options.map((option) => {

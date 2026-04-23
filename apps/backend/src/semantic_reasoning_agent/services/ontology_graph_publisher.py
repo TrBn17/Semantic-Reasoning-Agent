@@ -132,7 +132,7 @@ class OntologyGraphPublisher:
                 continue
             try:
                 self._graphiti_gateway.ingest_episode(
-                    name=f"ontology-chunk-{chunk.chunk_id}",
+                    name=f"ontology-doc-{chunk.document_id}",
                     episode_body=body[:120_000],
                     source_description=chunk.document_title or chunk.document_id,
                     workspace_id=snapshot.workspace_id,

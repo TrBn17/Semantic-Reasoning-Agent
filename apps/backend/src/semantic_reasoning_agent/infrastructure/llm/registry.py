@@ -85,6 +85,22 @@ def build_adapter_registry(
             base_url=openrouter_base_url,
         )
 
+    cloudflare_api_key, cloudflare_base_url = resolve_credentials(
+        "cloudflare",
+        env_api_key=cfg.cloudflare_api_key,
+        env_base_url=(
+            f"https://api.cloudflare.com/client/v4/accounts/{cfg.cloudflare_account_id}/ai/v1"
+            if cfg.cloudflare_account_id
+            else None
+        ),
+    )
+    if cloudflare_api_key and cloudflare_base_url:
+        adapters["cloudflare"] = OpenAIAdapter(
+            provider="cloudflare",
+            api_key=cloudflare_api_key,
+            base_url=cloudflare_base_url,
+        )
+
     gemini_api_key, _gemini_base_url = resolve_credentials(
         "gemini",
         env_api_key=cfg.google_api_key,

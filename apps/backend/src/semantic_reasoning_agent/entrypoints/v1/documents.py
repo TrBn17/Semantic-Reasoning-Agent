@@ -34,9 +34,7 @@ async def upload_document(
     title: str | None = Form(default=None),
     workspace_id: str | None = Form(default=None),
     tags: str | None = Form(default=None),
-    pdf_mode: str | None = Form(default=None),
-    output_format: str | None = Form(default=None),
-    extract_images: bool | None = Form(default=None),
+    ingestion_mode: str | None = Form(default=None),
     document_service: DocumentService = Depends(get_document_service),
 ) -> DocumentResponse:
     try:
@@ -49,9 +47,7 @@ async def upload_document(
             title=title,
             workspace_id=workspace_id,
             tags=parsed_tags,
-            pdf_mode=pdf_mode,
-            output_format=output_format,
-            extract_images=extract_images,
+            ingestion_mode=ingestion_mode,
             content_type=file.content_type,
         )
     except UnsupportedDocumentTypeError as exc:

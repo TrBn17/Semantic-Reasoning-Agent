@@ -5,17 +5,17 @@ from typing import Protocol
 from semantic_reasoning_agent.domain.ontology.models import (
     ExtractionResult,
     OntologyNarrative,
-    OntologySourceChunk,
+    OntologyDocument,
 )
 
 
 class OntologyExtractorPort(Protocol):
-    def classify_document_domain(self, chunks: list[OntologySourceChunk]) -> str:
+    def classify_document_domain(self, document: OntologyDocument) -> str:
         ...
 
     def extract_ontology_candidates(
         self,
-        chunks: list[OntologySourceChunk],
+        document: OntologyDocument,
         workspace_id: str | None = None,
         provider: str | None = None,
         model: str | None = None,
@@ -24,7 +24,7 @@ class OntologyExtractorPort(Protocol):
 
     def summarize_ontology(
         self,
-        chunks: list[OntologySourceChunk],
+        document: OntologyDocument,
         *,
         workspace_id: str | None = None,
         provider: str | None = None,

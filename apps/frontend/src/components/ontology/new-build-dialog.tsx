@@ -25,8 +25,8 @@ import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
 import { useSettingsModelsQuery } from "@/shared/hooks/use-settings-models-query";
 import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
-import { parseModelValue } from "@/shared/utils/model-value";
 import { rankItems } from "@/shared/utils/fuzzy";
+import { parseModelValue } from "@/shared/utils/model-value";
 
 export function NewBuildDialog() {
   const { t } = useI18n();
@@ -43,30 +43,29 @@ export function NewBuildDialog() {
   });
   const { data: models = [] } = useSettingsModelsQuery();
 
-  const indexedDocuments = useMemo(
-    () => {
-      const indexed = (documents ?? []).filter((document) => document.status === "indexed");
-      if (!search.trim()) return indexed;
-      return rankItems(indexed, search, (document) => [
-        document.title,
-        document.filename,
-        document.document_type,
-        document.source_url,
-        document.tags.join(" "),
-      ]).map(({ item }) => item);
-    },
-    [documents, search],
-  );
+  const indexedDocuments = useMemo(() => {
+    const indexed = (documents ?? []).filter((document) => document.status === "indexed");
+    if (!search.trim()) return indexed;
+    return rankItems(indexed, search, (document) => [
+      document.title,
+      document.filename,
+      document.document_type,
+      document.source_url,
+      document.tags.join(" "),
+    ]).map(({ item }) => item);
+  }, [documents, search]);
+
+  const selectedDocument = indexedDocuments.find((document) => document.id === documentId);
+
   const ontologyModels = useMemo(
     () =>
-      models
-        .sort((a, b) => {
-          if (a.supports_structured_output !== b.supports_structured_output) {
-            return a.supports_structured_output ? -1 : 1;
-          }
-          if (a.ready !== b.ready) return a.ready ? -1 : 1;
-          return a.label.localeCompare(b.label);
-        }),
+      models.sort((a, b) => {
+        if (a.supports_structured_output !== b.supports_structured_output) {
+          return a.supports_structured_output ? -1 : 1;
+        }
+        if (a.ready !== b.ready) return a.ready ? -1 : 1;
+        return a.label.localeCompare(b.label);
+      }),
     [models],
   );
 
@@ -100,13 +99,13 @@ export function NewBuildDialog() {
           {t.ontologyUi.newBuild}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-3xl" closeLabel={t.common.accessibility.closeDialog}>
+      <DialogContent className="max-w-2xl" closeLabel={t.common.accessibility.closeDialog}>
         <DialogHeader>
           <DialogTitle>{t.ontologyUi.runOntologyExtraction}</DialogTitle>
           <DialogDescription>{t.ontologyUi.runOntologyExtractionDescription}</DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="space-y-5">
           <div className="space-y-3">
             <Label>{t.ontologyUi.indexedDocument}</Label>
             <div className="relative">
@@ -118,8 +117,8 @@ export function NewBuildDialog() {
                 className="pl-9"
               />
             </div>
-            <ScrollArea className="h-72 rounded-xl border">
-              <div className="space-y-1 p-2">
+            <ScrollArea className="h-64 rounded-2xl border">
+              <div className="space-y-2 p-2">
                 {indexedDocuments.map((document) => {
                   const selected = documentId === document.id;
                   return (
@@ -127,31 +126,36 @@ export function NewBuildDialog() {
                       key={document.id}
                       type="button"
                       onClick={() => setDocumentId(document.id)}
-                      className={`w-full rounded-xl px-3 py-3 text-left transition ${
-                        selected ? "bg-primary/10 text-primary" : "hover:bg-muted"
+                      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+                        selected
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-transparent bg-muted/25 hover:border-border hover:bg-muted/50"
                       }`}
                     >
                       <div className="font-medium">{document.title}</div>
-                      <div className="text-xs text-muted-foreground">{document.filename}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {document.filename} - {document.document_type}
+                      </div>
                     </button>
                   );
                 })}
-                {indexedDocuments.length === 0 && (
+                {indexedDocuments.length === 0 ? (
                   <div className="px-3 py-6 text-sm text-muted-foreground">
                     {t.ontologyUi.noIndexedDocumentsMatch}
                   </div>
-                )}
+                ) : null}
               </div>
             </ScrollArea>
           </div>
 
-          <div className="min-w-0 space-y-3 overflow-hidden">
+          <div className="space-y-3">
             <Label>{t.ontologyUi.extractionModel}</Label>
             <div className="rounded-2xl border bg-muted/20 p-4">
               <ModelCombobox
                 models={ontologyModels}
                 value={modelSelection}
                 onChange={setModelSelection}
+                onlyReady
                 collapseOnSelect
                 labels={{
                   providerPlaceholder: t.agentsSettings.picker.providerPlaceholder,
@@ -168,6 +172,16 @@ export function NewBuildDialog() {
               />
             </div>
           </div>
+
+          {(documentId || modelSelection) && (
+            <div className="rounded-2xl border bg-card p-4 text-sm">
+              <p className="font-medium">Selection</p>
+              <div className="mt-2 space-y-1 text-muted-foreground">
+                <p>Document: {selectedDocument?.title ?? t.ontologyUi.pickDocument}</p>
+                <p>Model: {parseModelValue(modelSelection)?.model ?? t.ontologyUi.pickExtractionModel}</p>
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

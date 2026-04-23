@@ -1,43 +1,42 @@
 from datetime import datetime, timezone
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import asdict, is_dataclass
 from uuid import uuid4
 
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings
 from semantic_reasoning_agent.domain.contracts.published_ontology_snapshot import PublishedOntologySnapshot
 from semantic_reasoning_agent.infrastructure.graphiti.graphiti_gateway import GraphitiGateway
+from semantic_reasoning_agent.infrastructure.storage import build_object_store
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import (
+    DocumentArtifactORM,
     DocumentChunkORM,
     DocumentORM,
     OntologyBuildORM,
     OntologyBuildStepORM,
-    OntologyCandidateEntityORM,
-    OntologyCandidateRelationORM,
     OntologyEntityORM,
+    OntologyEntityFactORM,
     OntologyEntityTypeDefinitionORM,
     OntologyGraphDraftORM,
     OntologyRelationORM,
+    OntologyRelationFactORM,
     OntologyRelationTypeDefinitionORM,
     OntologyVersionORM,
 )
-from semantic_reasoning_agent.domain.ontology.models import ExtractedEntity, ExtractedRelation
-from semantic_reasoning_agent.domain.ontology.models import OntologySourceChunk
+from semantic_reasoning_agent.domain.ontology.models import OntologyDocument
 from semantic_reasoning_agent.domain.ontology.pipeline_steps import ONTOLOGY_BUILD_STEP_NAMES
+from semantic_reasoning_agent.ports.object_store import ObjectStorePort
 from semantic_reasoning_agent.ports.ontology_extractor import OntologyExtractorPort
 from semantic_reasoning_agent.schemas.documents import DocumentStatus
 from semantic_reasoning_agent.schemas.ontology import (
     OntologyBuildCreateRequest,
     OntologyBuildResponse,
     OntologyBuildStatus,
-    OntologyCandidateEntityUpdateRequest,
     OntologyBuildStepResponse,
-    OntologyCandidateEntityResponse,
-    OntologyCandidateRelationResponse,
-    OntologyCandidateRelationUpdateRequest,
     OntologyEntityTypeDefinitionResponse,
     OntologyEntityResponse,
     OntologyEntityTypeDefinitionUpdateRequest,
@@ -55,8 +54,6 @@ from semantic_reasoning_agent.schemas.ontology import (
     OntologyPublishPreviewResponse,
     OntologyPublishResponse,
     OntologyRelationResponse,
-    OntologyReviewAction,
-    OntologyReviewStatus,
     OntologyStepStatus,
     OntologyVersionResponse,
 )
@@ -73,10 +70,6 @@ def utc_now() -> datetime:
 
 class OntologyBuildNotFoundError(ValueError):
     """Raised when an ontology build id does not exist."""
-
-
-class OntologyCandidateNotFoundError(ValueError):
-    """Raised when an ontology candidate id does not exist."""
 
 
 class OntologyBuildError(ValueError):
@@ -103,6 +96,7 @@ class OntologyService:
         task_dispatcher: TaskDispatcher,
         graphiti_gateway: GraphitiGateway,
         ontology_extractor: OntologyExtractorPort,
+        object_store: ObjectStorePort | None = None,
     ) -> None:
         self._settings = settings
         self._database_manager = database_manager
@@ -110,6 +104,7 @@ class OntologyService:
         self._graphiti_gateway = graphiti_gateway
         self._graph_publisher = OntologyGraphPublisher(graphiti_gateway)
         self._ontology_extractor = ontology_extractor
+        self._object_store = object_store or build_object_store(settings)
 
     def create_build(self, request: OntologyBuildCreateRequest) -> OntologyBuildResponse:
         with self._database_manager.session() as session:
@@ -180,197 +175,6 @@ class OntologyService:
                 raise OntologyBuildError("Only failed ontology builds can be deleted.")
             session.delete(build)
 
-    def list_build_entities(
-        self,
-        build_id: str,
-        status: OntologyReviewStatus | None = None,
-    ) -> list[OntologyCandidateEntityResponse]:
-        self._ensure_build_exists(build_id)
-        with self._database_manager.session() as session:
-            statement = select(OntologyCandidateEntityORM).where(
-                OntologyCandidateEntityORM.build_id == build_id
-            )
-            if status is not None:
-                statement = statement.where(OntologyCandidateEntityORM.status == status.value)
-            entities = session.scalars(statement).all()
-            entities.sort(key=lambda entity: entity.canonical_name.lower())
-            return [self._to_candidate_entity_schema(entity) for entity in entities]
-
-    def list_build_relations(
-        self,
-        build_id: str,
-        status: OntologyReviewStatus | None = None,
-    ) -> list[OntologyCandidateRelationResponse]:
-        self._ensure_build_exists(build_id)
-        with self._database_manager.session() as session:
-            statement = select(OntologyCandidateRelationORM).where(
-                OntologyCandidateRelationORM.build_id == build_id
-            )
-            if status is not None:
-                statement = statement.where(OntologyCandidateRelationORM.status == status.value)
-            relations = session.scalars(statement).all()
-            relations.sort(
-                key=lambda relation: (
-                    relation.relation_type,
-                    relation.source_name.lower(),
-                    relation.target_name.lower(),
-                )
-            )
-            return [self._to_candidate_relation_schema(relation) for relation in relations]
-
-    def review_entity(
-        self,
-        entity_id: str,
-        action: OntologyReviewAction,
-    ) -> OntologyCandidateEntityResponse:
-        with self._database_manager.session() as session:
-            entity = session.get(OntologyCandidateEntityORM, entity_id)
-            if entity is None:
-                raise OntologyCandidateNotFoundError(f"Ontology entity candidate '{entity_id}' was not found.")
-            entity.status = self._status_from_action(action)
-            entity.updated_at = utc_now()
-            build = session.get(OntologyBuildORM, entity.build_id)
-            if build is not None:
-                build.updated_at = utc_now()
-        return self.get_entity(entity_id)
-
-    def review_relation(
-        self,
-        relation_id: str,
-        action: OntologyReviewAction,
-    ) -> OntologyCandidateRelationResponse:
-        with self._database_manager.session() as session:
-            relation = session.get(OntologyCandidateRelationORM, relation_id)
-            if relation is None:
-                raise OntologyCandidateNotFoundError(
-                    f"Ontology relation candidate '{relation_id}' was not found."
-                )
-            relation.status = self._status_from_action(action)
-            relation.updated_at = utc_now()
-            build = session.get(OntologyBuildORM, relation.build_id)
-            if build is not None:
-                build.updated_at = utc_now()
-        return self.get_relation(relation_id)
-
-    def get_entity(self, entity_id: str) -> OntologyCandidateEntityResponse:
-        with self._database_manager.session() as session:
-            entity = session.get(OntologyCandidateEntityORM, entity_id)
-            if entity is None:
-                raise OntologyCandidateNotFoundError(f"Ontology entity candidate '{entity_id}' was not found.")
-            return self._to_candidate_entity_schema(entity)
-
-    def get_relation(self, relation_id: str) -> OntologyCandidateRelationResponse:
-        with self._database_manager.session() as session:
-            relation = session.get(OntologyCandidateRelationORM, relation_id)
-            if relation is None:
-                raise OntologyCandidateNotFoundError(
-                    f"Ontology relation candidate '{relation_id}' was not found."
-                )
-            return self._to_candidate_relation_schema(relation)
-
-    def update_entity(
-        self,
-        entity_id: str,
-        request: OntologyCandidateEntityUpdateRequest,
-    ) -> OntologyCandidateEntityResponse:
-        with self._database_manager.session() as session:
-            entity = session.get(OntologyCandidateEntityORM, entity_id)
-            if entity is None:
-                raise OntologyCandidateNotFoundError(f"Ontology entity candidate '{entity_id}' was not found.")
-            payload = request.model_dump(exclude_unset=True)
-            if "name" in payload:
-                entity.name = payload["name"]
-            if "canonical_name" in payload:
-                entity.canonical_name = payload["canonical_name"]
-            if "resolution_key" in payload:
-                entity.resolution_key = payload["resolution_key"]
-            if "entity_type" in payload:
-                entity.entity_type = payload["entity_type"]
-            if "aliases" in payload:
-                entity.aliases = sorted(set(payload["aliases"] or []))
-            if "evidence_text" in payload:
-                entity.evidence_text = payload["evidence_text"]
-            if "confidence" in payload and payload["confidence"] is not None:
-                entity.confidence = float(payload["confidence"])
-            if "status" in payload and payload["status"] is not None:
-                entity.status = payload["status"].value
-            entity.updated_at = utc_now()
-        return self.get_entity(entity_id)
-
-    def update_relation(
-        self,
-        relation_id: str,
-        request: OntologyCandidateRelationUpdateRequest,
-    ) -> OntologyCandidateRelationResponse:
-        with self._database_manager.session() as session:
-            relation = session.get(OntologyCandidateRelationORM, relation_id)
-            if relation is None:
-                raise OntologyCandidateNotFoundError(
-                    f"Ontology relation candidate '{relation_id}' was not found."
-                )
-            payload = request.model_dump(exclude_unset=True)
-            if "source_entity_id" in payload:
-                relation.source_entity_id = payload["source_entity_id"]
-            if "target_entity_id" in payload:
-                relation.target_entity_id = payload["target_entity_id"]
-            if "source_name" in payload:
-                relation.source_name = payload["source_name"]
-            if "target_name" in payload:
-                relation.target_name = payload["target_name"]
-            if "relation_type" in payload:
-                relation.relation_type = payload["relation_type"]
-            if "evidence_text" in payload:
-                relation.evidence_text = payload["evidence_text"]
-            if "confidence" in payload and payload["confidence"] is not None:
-                relation.confidence = float(payload["confidence"])
-            if "status" in payload and payload["status"] is not None:
-                relation.status = payload["status"].value
-            relation.updated_at = utc_now()
-        return self.get_relation(relation_id)
-
-    def preview_publish(self, build_id: str) -> OntologyPublishPreviewResponse:
-        snapshot, diff_summary = self._build_publish_snapshot(build_id=build_id, persist=False)
-        return OntologyPublishPreviewResponse(
-            workspace_id=snapshot.workspace_id,
-            build=self.get_build(build_id),
-            version=snapshot.version,
-            entity_type_definitions=snapshot.entity_type_definitions,
-            relation_type_definitions=snapshot.relation_type_definitions,
-            entities=snapshot.entities,
-            relations=snapshot.relations,
-            diff_summary=diff_summary,
-        )
-
-    def publish_build(self, build_id: str) -> OntologyPublishResponse:
-        build_response = self.get_build(build_id)
-        if build_response.status not in {
-            OntologyBuildStatus.completed,
-            OntologyBuildStatus.published,
-        }:
-            raise OntologyPublishError(
-                f"Ontology build '{build_id}' must complete before it can be published."
-            )
-
-        snapshot, _ = self._build_publish_snapshot(build_id=build_id)
-        graphiti_chunks = self._load_graphiti_chunks_for_snapshot(snapshot)
-        try:
-            self._graph_publisher.publish(snapshot, document_chunks=graphiti_chunks)
-        except OntologyGraphPublisherError as exc:
-            raise OntologyPublishError(str(exc)) from exc
-
-        with self._database_manager.session() as session:
-            build = session.get(OntologyBuildORM, build_id)
-            if build is None:
-                raise OntologyBuildNotFoundError(f"Ontology build '{build_id}' was not found.")
-            build.status = OntologyBuildStatus.published.value
-            build.published_version_id = snapshot.version.id
-            build.updated_at = utc_now()
-
-        return OntologyPublishResponse(
-            build=self.get_build(build_id),
-            version=snapshot.version,
-        )
-
     def get_graph(self, workspace_id: str | None = None) -> OntologyGraphResponse:
         resolved_workspace_id = workspace_id or self._settings.default_workspace_id
         return self._get_relational_graph(resolved_workspace_id)
@@ -409,6 +213,7 @@ class OntologyService:
             "entity_type": request.entity_type,
             "resolution_key": request.resolution_key or self._slugify(request.name),
             "aliases": sorted(set(request.aliases or [])),
+            "query_rules": self._serialize_query_rules(request.query_rules),
             "source_document_id": request.source_document_id or "draft",
             "source_build_id": request.source_build_id or "draft",
         }
@@ -460,6 +265,7 @@ class OntologyService:
             "relation_type": request.relation_type,
             "confidence": float(request.confidence),
             "evidence_text": request.evidence_text,
+            "query_rules": self._serialize_query_rules(request.query_rules),
             "source_document_id": request.source_document_id or "draft",
             "source_build_id": request.source_build_id or "draft",
             "provenance": {"source": "draft_editor"},
@@ -556,18 +362,17 @@ class OntologyService:
 
     def process_build(self, build_id: str) -> None:
         build = self._get_build_record(build_id)
-        chunks = self._get_document_chunks(build.document_id)
-        if not chunks:
+        document = self._get_document_markdown(build.document_id)
+        if not document.markdown.strip():
             raise OntologyBuildError(
-                f"Document '{build.document_id}' does not have indexed chunks for ontology extraction."
+                f"Document '{build.document_id}' does not have markdown content for ontology extraction."
             )
 
         self._reset_build(build_id)
         self._mark_build_running(build_id)
         try:
-            extraction_run_id = str(uuid4())
             self._mark_step_running(build_id, "classify_document_domain")
-            preliminary_domain = self._ontology_extractor.classify_document_domain(chunks)
+            preliminary_domain = self._ontology_extractor.classify_document_domain(document)
             classify_detail = (
                 "Document domain classification is deferred to ontology extraction."
                 if preliminary_domain == "pending"
@@ -586,7 +391,7 @@ class OntologyService:
 
             self._mark_step_running(build_id, "extract_entities")
             extraction = self._ontology_extractor.extract_ontology_candidates(
-                chunks,
+                document,
                 workspace_id=build.workspace_id,
                 provider=build.extraction_provider,
                 model=build.extraction_model,
@@ -608,7 +413,7 @@ class OntologyService:
                     domain=resolved_domain,
                 )
             narrative = self._ontology_extractor.summarize_ontology(
-                chunks,
+                document,
                 workspace_id=build.workspace_id,
                 provider=build.extraction_provider,
                 model=build.extraction_model,
@@ -619,28 +424,35 @@ class OntologyService:
                 ontology_title=narrative.title,
                 ontology_summary=narrative.summary,
             )
-            entity_id_map = self._replace_candidate_entities(
-                build,
-                extraction.entities,
-                extraction_run_id=extraction_run_id,
-            )
             self._mark_step_completed(
                 build_id,
                 "extract_entities",
                 detail=f"Extracted {len(extraction.entities)} candidate entities.",
+                metadata={
+                    "safe_trace": {
+                        **(extraction.trace or {}),
+                        "domain": resolved_domain,
+                        "chunk_count": len((extraction.trace or {}).get("chunks", [])),
+                        "errors": (extraction.trace or {}).get("errors", []),
+                        "entity_count": len(extraction.entities),
+                    }
+                },
             )
 
             self._mark_step_running(build_id, "extract_relations")
-            self._replace_candidate_relations(
-                build,
-                extraction.relations,
-                entity_id_map,
-                extraction_run_id=extraction_run_id,
-            )
             self._mark_step_completed(
                 build_id,
                 "extract_relations",
                 detail=f"Extracted {len(extraction.relations)} candidate relations.",
+                metadata={
+                    "safe_trace": {
+                        **(extraction.trace or {}),
+                        "domain": resolved_domain,
+                        "chunk_count": len((extraction.trace or {}).get("chunks", [])),
+                        "errors": (extraction.trace or {}).get("errors", []),
+                        "relation_count": len(extraction.relations),
+                    }
+                },
             )
 
             self._mark_step_running(build_id, "resolve_entities")
@@ -655,8 +467,8 @@ class OntologyService:
                 build_id,
                 "build_graph_upsert_plan",
                 detail=(
-                    "Review queue is ready with "
-                    f"{len(extraction.entities)} entities and {len(extraction.relations)} relations."
+                    "Candidate persistence is disabled. "
+                    f"Extraction finished with {len(extraction.entities)} entities and {len(extraction.relations)} relations."
                 ),
             )
 
@@ -725,20 +537,26 @@ class OntologyService:
                 published_version_id=build.published_version_id,
             )
 
-    def _get_document_chunks(self, document_id: str) -> list[OntologySourceChunk]:
+    def _get_document_markdown(self, document_id: str) -> OntologyDocument:
         with self._database_manager.session() as session:
-            chunks = session.scalars(
-                select(DocumentChunkORM)
-                .where(DocumentChunkORM.document_id == document_id)
-                .order_by(DocumentChunkORM.chunk_index)
-            ).all()
-            return [
-                OntologySourceChunk(
-                    chunk_id=chunk.chunk_id,
-                    text=chunk.text,
+            artifact = session.scalar(
+                select(DocumentArtifactORM)
+                .where(
+                    DocumentArtifactORM.document_id == document_id,
+                    DocumentArtifactORM.artifact_type == "markdown",
                 )
-                for chunk in chunks
-            ]
+                .order_by(desc(DocumentArtifactORM.created_at))
+            )
+        if artifact is None:
+            return OntologyDocument(document_id=document_id, markdown="")
+        markdown_bytes = self._object_store.get_document_binary(document_id, artifact.object_key)
+        if markdown_bytes:
+            markdown = markdown_bytes.decode("utf-8")
+        else:
+            inline_text = (artifact.metadata_json or {}).get("inline_text")
+            markdown = inline_text if isinstance(inline_text, str) else ""
+        markdown = markdown[: self._settings.ontology_markdown_char_limit]
+        return OntologyDocument(document_id=document_id, markdown=markdown)
 
     def _reset_build(self, build_id: str) -> None:
         with self._database_manager.session() as session:
@@ -753,21 +571,12 @@ class OntologyService:
             build.started_at = None
             build.finished_at = None
             build.updated_at = utc_now()
-            session.execute(
-                delete(OntologyCandidateRelationORM).where(
-                    OntologyCandidateRelationORM.build_id == build_id
-                )
-            )
-            session.execute(
-                delete(OntologyCandidateEntityORM).where(
-                    OntologyCandidateEntityORM.build_id == build_id
-                )
-            )
             for step in session.scalars(
                 select(OntologyBuildStepORM).where(OntologyBuildStepORM.build_id == build_id)
             ).all():
                 step.status = OntologyStepStatus.pending.value
                 step.detail = None
+                step.metadata_json = {}
                 step.started_at = None
                 step.finished_at = None
 
@@ -846,6 +655,7 @@ class OntologyService:
                         name=name,
                         status=OntologyStepStatus.pending.value,
                         detail=None,
+                        metadata_json={},
                         started_at=None,
                         finished_at=None,
                     )
@@ -854,15 +664,18 @@ class OntologyService:
                     failure_reached = True
                     step.status = OntologyStepStatus.failed.value
                     step.detail = error_message
+                    step.metadata_json = {}
                     step.started_at = timestamp
                     step.finished_at = timestamp
                 elif failure_reached:
                     step.status = OntologyStepStatus.pending.value
                     step.detail = None
+                    step.metadata_json = {}
                     step.started_at = None
                     step.finished_at = None
                 else:
                     step.status = OntologyStepStatus.completed.value
+                    step.metadata_json = {}
                     step.started_at = timestamp
                     step.finished_at = timestamp
 
@@ -874,8 +687,15 @@ class OntologyService:
             step.started_at = now
             step.finished_at = None
             step.detail = None
+            step.metadata_json = {}
 
-    def _mark_step_completed(self, build_id: str, name: str, detail: str | None = None) -> None:
+    def _mark_step_completed(
+        self,
+        build_id: str,
+        name: str,
+        detail: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         with self._database_manager.session() as session:
             step = self._get_step(session, build_id, name)
             now = utc_now()
@@ -884,6 +704,7 @@ class OntologyService:
                 step.started_at = now
             step.finished_at = now
             step.detail = detail
+            step.metadata_json = metadata or {}
 
     def _active_step_name(self, build_id: str) -> str:
         with self._database_manager.session() as session:
@@ -929,94 +750,6 @@ class OntologyService:
             return str(message)
         return None
 
-    def _replace_candidate_entities(
-        self,
-        build: OntologyBuildORM,
-        entities: list[ExtractedEntity],
-        *,
-        extraction_run_id: str,
-    ) -> dict[str, str]:
-        entity_id_map: dict[str, str] = {}
-        with self._database_manager.session() as session:
-            session.execute(
-                delete(OntologyCandidateEntityORM).where(
-                    OntologyCandidateEntityORM.build_id == build.id
-                )
-            )
-            timestamp = utc_now()
-            for entity in entities:
-                entity_id = str(uuid4())
-                entity_id_map[entity.resolution_key] = entity_id
-                session.add(
-                    OntologyCandidateEntityORM(
-                        id=entity_id,
-                        build_id=build.id,
-                        document_id=build.document_id,
-                        workspace_id=build.workspace_id,
-                        name=entity.name,
-                        canonical_name=entity.canonical_name,
-                        resolution_key=entity.resolution_key,
-                        entity_type=entity.entity_type,
-                        confidence=entity.confidence,
-                        status=OntologyReviewStatus.pending_review.value,
-                        source_chunk_id=entity.source_chunk_id,
-                        evidence_text=entity.evidence_text,
-                        provenance={
-                            **entity.provenance,
-                            "run_id": extraction_run_id,
-                            "build_id": build.id,
-                            "prompt_version": self._settings.ontology_prompt_version,
-                        },
-                        aliases=sorted(entity.aliases),
-                        merged_into_entity_id=None,
-                        created_at=timestamp,
-                        updated_at=timestamp,
-                    )
-                )
-        return entity_id_map
-
-    def _replace_candidate_relations(
-        self,
-        build: OntologyBuildORM,
-        relations: list[ExtractedRelation],
-        entity_id_map: dict[str, str],
-        *,
-        extraction_run_id: str,
-    ) -> None:
-        with self._database_manager.session() as session:
-            session.execute(
-                delete(OntologyCandidateRelationORM).where(
-                    OntologyCandidateRelationORM.build_id == build.id
-                )
-            )
-            timestamp = utc_now()
-            for relation in relations:
-                session.add(
-                    OntologyCandidateRelationORM(
-                        id=str(uuid4()),
-                        build_id=build.id,
-                        document_id=build.document_id,
-                        workspace_id=build.workspace_id,
-                        source_entity_id=entity_id_map.get(relation.source_resolution_key),
-                        target_entity_id=entity_id_map.get(relation.target_resolution_key),
-                        source_name=relation.source_name,
-                        target_name=relation.target_name,
-                        relation_type=relation.relation_type,
-                        confidence=relation.confidence,
-                        status=OntologyReviewStatus.pending_review.value,
-                        source_chunk_id=relation.source_chunk_id,
-                        evidence_text=relation.evidence_text,
-                        provenance={
-                            **relation.provenance,
-                            "run_id": extraction_run_id,
-                            "build_id": build.id,
-                            "prompt_version": self._settings.ontology_prompt_version,
-                        },
-                        created_at=timestamp,
-                        updated_at=timestamp,
-                    )
-                )
-
     def _build_publish_snapshot(
         self,
         *,
@@ -1029,12 +762,7 @@ class OntologyService:
             build = None
             if build_id is not None:
                 build = session.scalar(
-                    select(OntologyBuildORM)
-                    .options(
-                        selectinload(OntologyBuildORM.entities),
-                        selectinload(OntologyBuildORM.relations),
-                    )
-                    .where(OntologyBuildORM.id == build_id)
+                    select(OntologyBuildORM).where(OntologyBuildORM.id == build_id)
                 )
                 if build is None:
                     raise OntologyBuildNotFoundError(f"Ontology build '{build_id}' was not found.")
@@ -1057,68 +785,6 @@ class OntologyService:
                 "relations_updated": 0,
                 "relations_deleted": 0,
             }
-
-            approved_entities_by_candidate_id: dict[str, OntologyCandidateEntityORM] = {}
-            if build is not None:
-                approved_entities = [
-                    entity
-                    for entity in build.entities
-                    if entity.status == OntologyReviewStatus.approved.value
-                    and entity.merged_into_entity_id is None
-                ]
-                approved_entities_by_candidate_id = {entity.id: entity for entity in approved_entities}
-                for entity in approved_entities:
-                    is_update = entity.resolution_key in entity_records
-                    entity_records[entity.resolution_key] = {
-                        "id": entity_records.get(entity.resolution_key, {}).get("id", entity.id),
-                        "resolution_key": entity.resolution_key,
-                        "name": entity.canonical_name,
-                        "entity_type": entity.entity_type,
-                        "aliases": sorted(set(entity.aliases or [])),
-                        "source_build_id": build.id,
-                        "source_document_id": build.document_id,
-                    }
-                    diff_summary["entities_updated" if is_update else "entities_added"] += 1
-                    entity_type_records[entity.entity_type] = {
-                        "id": entity_type_records.get(entity.entity_type, {}).get("id") or f"entity-type:{entity.entity_type}",
-                        "name": entity.entity_type,
-                        "description": f"Derived entity type for {entity.entity_type}.",
-                        "attributes": deepcopy(entity_type_records.get(entity.entity_type, {}).get("attributes", [])),
-                        "examples": self._append_example(
-                            entity_type_records.get(entity.entity_type, {}).get("examples", []),
-                            entity.canonical_name,
-                        ),
-                    }
-                for relation in build.relations:
-                    if relation.status != OntologyReviewStatus.approved.value:
-                        continue
-                    source_candidate = approved_entities_by_candidate_id.get(relation.source_entity_id or "")
-                    target_candidate = approved_entities_by_candidate_id.get(relation.target_entity_id or "")
-                    if source_candidate is None or target_candidate is None:
-                        continue
-                    logical_key = (
-                        source_candidate.resolution_key,
-                        target_candidate.resolution_key,
-                        relation.relation_type,
-                    )
-                    is_update = logical_key in relation_records
-                    relation_records[logical_key] = {
-                        "source_resolution_key": source_candidate.resolution_key,
-                        "target_resolution_key": target_candidate.resolution_key,
-                        "relation_type": relation.relation_type,
-                        "confidence": relation.confidence,
-                        "source_build_id": build.id,
-                        "source_document_id": build.document_id,
-                        "evidence_text": relation.evidence_text,
-                        "provenance": relation.provenance or {},
-                    }
-                    diff_summary["relations_updated" if is_update else "relations_added"] += 1
-                    self._ensure_relation_type_record(
-                        relation_type_records,
-                        relation.relation_type,
-                        source_candidate.entity_type,
-                        target_candidate.entity_type,
-                    )
 
             if draft is not None:
                 self._apply_draft_to_mutable_records(
@@ -1184,6 +850,7 @@ class OntologyService:
                     name=record["name"],
                     entity_type=record["entity_type"],
                     aliases=record.get("aliases", []),
+                    query_rules=record.get("query_rules", []),
                     source_build_id=record.get("source_build_id", build.id if build else "draft"),
                     source_document_id=record.get("source_document_id", build.document_id if build else "draft"),
                     created_at=version_timestamp,
@@ -1201,6 +868,7 @@ class OntologyService:
                             name=record["name"],
                             entity_type=record["entity_type"],
                             aliases=record.get("aliases", []),
+                            query_rules=record.get("query_rules", []),
                             source_build_id=record.get("source_build_id", build.id if build else "draft"),
                             source_document_id=record.get("source_document_id", build.document_id if build else "draft"),
                             created_at=version_timestamp,
@@ -1216,6 +884,7 @@ class OntologyService:
                     name=record["name"],
                     description=record.get("description"),
                     attributes=record.get("attributes", []),
+                    query_rules=record.get("query_rules", []),
                     examples=record.get("examples", []),
                     created_at=version_timestamp,
                 )
@@ -1231,6 +900,7 @@ class OntologyService:
                             name=row.name,
                             description=row.description,
                             attributes=row.attributes,
+                            query_rules=row.query_rules,
                             examples=row.examples,
                             created_at=version_timestamp,
                         )
@@ -1245,6 +915,7 @@ class OntologyService:
                     name=record["name"],
                     description=record.get("description"),
                     attributes=record.get("attributes", []),
+                    query_rules=record.get("query_rules", []),
                     allowed_source_targets=record.get("allowed_source_targets", []),
                     created_at=version_timestamp,
                 )
@@ -1260,6 +931,7 @@ class OntologyService:
                             name=row.name,
                             description=row.description,
                             attributes=row.attributes,
+                            query_rules=row.query_rules,
                             allowed_source_targets=row.allowed_source_targets,
                             created_at=version_timestamp,
                         )
@@ -1283,6 +955,7 @@ class OntologyService:
                     source_document_id=record.get("source_document_id", build.document_id if build else "draft"),
                     evidence_text=record.get("evidence_text", ""),
                     provenance=record.get("provenance", {}),
+                    query_rules=record.get("query_rules", []),
                     created_at=version_timestamp,
                 )
                 if persist:
@@ -1302,9 +975,21 @@ class OntologyService:
                             source_document_id=row.source_document_id,
                             evidence_text=row.evidence_text,
                             provenance=row.provenance,
+                            query_rules=row.query_rules,
                             created_at=version_timestamp,
                         )
                     )
+
+            if persist:
+                self._replace_published_facts(
+                    session=session,
+                    workspace_id=resolved_workspace_id,
+                    version_id=version_id,
+                    entity_records=entity_records,
+                    relation_records=relation_records,
+                    published_entity_ids=published_entity_ids,
+                    relation_rows=published_relations,
+                )
 
             if persist and draft is not None:
                 session.delete(draft)
@@ -1332,16 +1017,50 @@ class OntologyService:
             rows = session.scalars(
                 select(DocumentChunkORM).where(DocumentChunkORM.document_id.in_(doc_ids))
             ).all()
-        return [
-            GraphitiDocumentChunk(
-                chunk_id=row.chunk_id,
-                document_id=row.document_id,
-                document_title=row.document_title,
-                text=row.text,
-                created_at=row.created_at,
+            artifacts = session.scalars(
+                select(DocumentArtifactORM).where(
+                    DocumentArtifactORM.document_id.in_(doc_ids),
+                    DocumentArtifactORM.artifact_type == "markdown",
+                )
+            ).all()
+            documents = session.scalars(select(DocumentORM).where(DocumentORM.id.in_(doc_ids))).all()
+        if rows:
+            return [
+                GraphitiDocumentChunk(
+                    chunk_id=row.chunk_id,
+                    document_id=row.document_id,
+                    document_title=row.document_title,
+                    text=row.text,
+                    created_at=row.created_at,
+                )
+                for row in rows
+            ]
+
+        artifact_map = {artifact.document_id: artifact for artifact in artifacts}
+        title_map = {document.id: document.title for document in documents}
+        fallback_chunks: list[GraphitiDocumentChunk] = []
+        for doc_id in doc_ids:
+            artifact = artifact_map.get(doc_id)
+            if artifact is None:
+                continue
+            content = self._object_store.get_document_binary(doc_id, artifact.object_key)
+            if content:
+                text = content.decode("utf-8")
+            else:
+                inline_text = (artifact.metadata_json or {}).get("inline_text")
+                text = inline_text if isinstance(inline_text, str) else ""
+            if not text.strip():
+                continue
+            fallback_chunks.append(
+                GraphitiDocumentChunk(
+                    chunk_id=f"{doc_id}-markdown",
+                    document_id=doc_id,
+                    document_title=title_map.get(doc_id) or doc_id,
+                    text=text[:120_000],
+                    created_at=artifact.created_at,
+                )
             )
-            for row in rows
-        ]
+        return fallback_chunks
 
     def _get_relational_graph(self, workspace_id: str) -> OntologyGraphResponse:
         snapshot, draft_summary = self._build_workspace_snapshot(
@@ -1462,6 +1181,7 @@ class OntologyService:
                 "name": entity.name,
                 "entity_type": entity.entity_type,
                 "aliases": list(entity.aliases),
+                "query_rules": [rule.model_dump() for rule in entity.query_rules],
                 "source_build_id": entity.source_build_id,
                 "source_document_id": entity.source_document_id,
             }
@@ -1488,6 +1208,7 @@ class OntologyService:
                 "source_document_id": relation.source_document_id,
                 "evidence_text": relation.evidence_text,
                 "provenance": deepcopy(relation.provenance),
+                "query_rules": [rule.model_dump() for rule in relation.query_rules],
             }
         return records
 
@@ -1501,6 +1222,10 @@ class OntologyService:
                 "attributes": [
                     entry.model_dump() if hasattr(entry, "model_dump") else deepcopy(entry)
                     for entry in item.attributes
+                ],
+                "query_rules": [
+                    entry.model_dump() if hasattr(entry, "model_dump") else deepcopy(entry)
+                    for entry in item.query_rules
                 ],
                 "examples": list(item.examples),
             }
@@ -1517,6 +1242,10 @@ class OntologyService:
                 "attributes": [
                     entry.model_dump() if hasattr(entry, "model_dump") else deepcopy(entry)
                     for entry in item.attributes
+                ],
+                "query_rules": [
+                    entry.model_dump() if hasattr(entry, "model_dump") else deepcopy(entry)
+                    for entry in item.query_rules
                 ],
                 "allowed_source_targets": [
                     entry.model_dump() if hasattr(entry, "model_dump") else deepcopy(entry)
@@ -1557,6 +1286,7 @@ class OntologyService:
                 "name": patch["name"],
                 "entity_type": patch["entity_type"],
                 "aliases": list(patch.get("aliases", [])),
+                "query_rules": deepcopy(patch.get("query_rules", [])),
                 "source_build_id": patch.get("source_build_id", "draft"),
                 "source_document_id": patch.get("source_document_id", "draft"),
             }
@@ -1606,6 +1336,7 @@ class OntologyService:
                 "source_document_id": patch.get("source_document_id", "draft"),
                 "evidence_text": patch.get("evidence_text", ""),
                 "provenance": deepcopy(patch.get("provenance", {"source": "draft_editor"})),
+                "query_rules": deepcopy(patch.get("query_rules", [])),
             }
             if diff_summary is not None:
                 diff_summary["relations_updated" if is_update else "relations_added"] += 1
@@ -1626,6 +1357,7 @@ class OntologyService:
                 "name": target_name,
                 "description": patch.get("description"),
                 "attributes": deepcopy(patch.get("attributes", [])),
+                "query_rules": deepcopy(patch.get("query_rules", [])),
                 "examples": list(patch.get("examples", [])),
             }
 
@@ -1639,6 +1371,7 @@ class OntologyService:
                 "name": target_name,
                 "description": patch.get("description"),
                 "attributes": deepcopy(patch.get("attributes", [])),
+                "query_rules": deepcopy(patch.get("query_rules", [])),
                 "allowed_source_targets": deepcopy(patch.get("allowed_source_targets", [])),
             }
 
@@ -1654,6 +1387,7 @@ class OntologyService:
                 name=str(record["name"]),
                 description=record.get("description"),
                 attributes=record.get("attributes", []),
+                query_rules=record.get("query_rules", []),
                 examples=record.get("examples", []),
             )
             for name, record in sorted(records.items())
@@ -1671,6 +1405,7 @@ class OntologyService:
                 name=str(record["name"]),
                 description=record.get("description"),
                 attributes=record.get("attributes", []),
+                query_rules=record.get("query_rules", []),
                 allowed_source_targets=record.get("allowed_source_targets", []),
             )
             for name, record in sorted(records.items())
@@ -1692,6 +1427,7 @@ class OntologyService:
                 name=str(record["name"]),
                 entity_type=str(record["entity_type"]),
                 aliases=list(record.get("aliases", [])),
+                query_rules=record.get("query_rules", []),
                 source_build_id=str(record.get("source_build_id", "draft")),
                 source_document_id=str(record.get("source_document_id", "draft")),
             )
@@ -1725,6 +1461,7 @@ class OntologyService:
                     source_document_id=str(record.get("source_document_id", "draft")),
                     evidence_text=str(record.get("evidence_text", "")),
                     provenance=deepcopy(record.get("provenance", {})),
+                    query_rules=record.get("query_rules", []),
                 )
             )
         return responses
@@ -1790,6 +1527,7 @@ class OntologyService:
                     "entity_type": entity.entity_type,
                     "resolution_key": entity.resolution_key,
                     "aliases": list(entity.aliases),
+                    "query_rules": [rule.model_dump() for rule in entity.query_rules],
                     "source_document_id": entity.source_document_id,
                     "source_build_id": entity.source_build_id,
                 }
@@ -1806,6 +1544,7 @@ class OntologyService:
                     "relation_type": relation.relation_type,
                     "confidence": relation.confidence,
                     "evidence_text": relation.evidence_text,
+                    "query_rules": [rule.model_dump() for rule in relation.query_rules],
                     "source_document_id": relation.source_document_id,
                     "source_build_id": relation.source_build_id,
                 }
@@ -1852,6 +1591,7 @@ class OntologyService:
                 "name": relation_type,
                 "description": f"Derived relation type for {relation_type}.",
                 "attributes": [],
+                "query_rules": [],
                 "allowed_source_targets": [],
             },
         )
@@ -1905,17 +1645,12 @@ class OntologyService:
                 name=name,
                 status=OntologyStepStatus.pending.value,
                 detail=None,
+                metadata_json={},
                 started_at=None,
                 finished_at=None,
             )
             for name in ONTOLOGY_BUILD_STEP_NAMES
         ]
-
-    @staticmethod
-    def _status_from_action(action: OntologyReviewAction) -> str:
-        if action == OntologyReviewAction.approve:
-            return OntologyReviewStatus.approved.value
-        return OntologyReviewStatus.rejected.value
 
     @staticmethod
     def _get_step(session, build_id: str, name: str) -> OntologyBuildStepORM:
@@ -1937,84 +1672,14 @@ class OntologyService:
         builds: list[OntologyBuildORM],
     ) -> list[OntologyBuildResponse]:
         build_ids = [build.id for build in builds]
-        counts = self._load_build_counts(session, build_ids)
         steps_by_build = self._load_build_steps(session, build_ids)
         return [
             self._to_build_schema(
                 build,
-                entity_count=counts[build.id][0],
-                relation_count=counts[build.id][1],
-                pending_entity_count=counts[build.id][2],
-                pending_relation_count=counts[build.id][3],
                 steps=steps_by_build.get(build.id, []),
             )
             for build in builds
         ]
-
-    def _load_build_counts(
-        self,
-        session,
-        build_ids: list[str],
-    ) -> dict[str, tuple[int, int, int, int]]:
-        if not build_ids:
-            return {}
-
-        entity_counts = dict(
-            session.execute(
-                select(
-                    OntologyCandidateEntityORM.build_id,
-                    func.count(OntologyCandidateEntityORM.id),
-                )
-                .where(OntologyCandidateEntityORM.build_id.in_(build_ids))
-                .group_by(OntologyCandidateEntityORM.build_id)
-            ).all()
-        )
-        relation_counts = dict(
-            session.execute(
-                select(
-                    OntologyCandidateRelationORM.build_id,
-                    func.count(OntologyCandidateRelationORM.id),
-                )
-                .where(OntologyCandidateRelationORM.build_id.in_(build_ids))
-                .group_by(OntologyCandidateRelationORM.build_id)
-            ).all()
-        )
-        pending_entity_counts = dict(
-            session.execute(
-                select(
-                    OntologyCandidateEntityORM.build_id,
-                    func.count(OntologyCandidateEntityORM.id),
-                )
-                .where(
-                    OntologyCandidateEntityORM.build_id.in_(build_ids),
-                    OntologyCandidateEntityORM.status == OntologyReviewStatus.pending_review.value,
-                )
-                .group_by(OntologyCandidateEntityORM.build_id)
-            ).all()
-        )
-        pending_relation_counts = dict(
-            session.execute(
-                select(
-                    OntologyCandidateRelationORM.build_id,
-                    func.count(OntologyCandidateRelationORM.id),
-                )
-                .where(
-                    OntologyCandidateRelationORM.build_id.in_(build_ids),
-                    OntologyCandidateRelationORM.status == OntologyReviewStatus.pending_review.value,
-                )
-                .group_by(OntologyCandidateRelationORM.build_id)
-            ).all()
-        )
-
-        return {
-            build_id: (
-                int(entity_counts.get(build_id, 0)),
-                int(relation_counts.get(build_id, 0)),
-                int(pending_entity_counts.get(build_id, 0)),
-                int(pending_relation_counts.get(build_id, 0)),
-            )
-            for build_id in build_ids
-        }
 
     def _load_build_steps(
         self,
@@ -2037,12 +1702,9 @@ class OntologyService:
         self,
         build: OntologyBuildORM,
         *,
-        entity_count: int,
-        relation_count: int,
-        pending_entity_count: int,
-        pending_relation_count: int,
         steps: list[OntologyBuildStepORM],
     ) -> OntologyBuildResponse:
+        entity_count, relation_count = self._counts_from_steps(steps)
         return OntologyBuildResponse(
             id=build.id,
             document_id=build.document_id,
@@ -2062,12 +1724,190 @@ class OntologyService:
             published_version_id=build.published_version_id,
             entity_count=entity_count,
             relation_count=relation_count,
-            pending_entity_count=pending_entity_count,
-            pending_relation_count=pending_relation_count,
-            entity_type_definitions=self._build_candidate_entity_type_definitions(build),
-            relation_type_definitions=self._build_candidate_relation_type_definitions(build),
+            pending_entity_count=0,
+            pending_relation_count=0,
+            entity_type_definitions=[],
+            relation_type_definitions=[],
             steps=[self._to_step_schema(step) for step in steps],
         )
+
+    @staticmethod
+    def _counts_from_steps(steps: list[OntologyBuildStepORM]) -> tuple[int, int]:
+        entity_count = 0
+        relation_count = 0
+        for step in steps:
+            metadata = step.metadata_json or {}
+            trace = metadata.get("safe_trace") if isinstance(metadata, dict) else None
+            if not isinstance(trace, dict):
+                continue
+            if step.name == "extract_entities":
+                value = trace.get("entity_count")
+                if isinstance(value, int):
+                    entity_count = value
+            if step.name == "extract_relations":
+                value = trace.get("relation_count")
+                if isinstance(value, int):
+                    relation_count = value
+        return entity_count, relation_count
+
+    @classmethod
+    def _serialize_query_rules(cls, rules: list[object] | None) -> list[dict]:
+        payload: list[dict] = []
+        for rule in rules or []:
+            if is_dataclass(rule):
+                candidate = asdict(rule)
+            elif hasattr(rule, "__dict__"):
+                candidate = deepcopy(getattr(rule, "__dict__", {}))
+            elif isinstance(rule, dict):
+                candidate = deepcopy(rule)
+            else:
+                continue
+            if not isinstance(candidate, dict):
+                continue
+            route = str(candidate.get("query_route") or "").strip().lower()
+            if route not in {"graph", "sql_facts", "hybrid"}:
+                continue
+            scope = str(candidate.get("scope") or "entity_type").strip()
+            rule_id = str(candidate.get("rule_id") or "").strip() or f"rule:{scope}:{route}:{len(payload)+1}"
+            payload.append(
+                {
+                    "rule_id": rule_id,
+                    "scope": scope,
+                    "query_route": route,
+                    "trigger_keywords": [str(x) for x in candidate.get("trigger_keywords", []) if str(x).strip()],
+                    "intent_tags": [str(x) for x in candidate.get("intent_tags", []) if str(x).strip()],
+                    "required_fields": [str(x) for x in candidate.get("required_fields", []) if str(x).strip()],
+                    "aggregation": str(candidate.get("aggregation") or "latest"),
+                    "confidence_threshold": candidate.get("confidence_threshold"),
+                    "fallback_route": candidate.get("fallback_route"),
+                    "metadata": candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {},
+                }
+            )
+        return payload
+
+    @classmethod
+    def _merge_rule_dicts(cls, existing: list[dict] | None, incoming: list[object] | None) -> list[dict]:
+        merged: dict[str, dict] = {str(item.get("rule_id")): deepcopy(item) for item in (existing or []) if isinstance(item, dict) and item.get("rule_id")}
+        for item in cls._serialize_query_rules(incoming):
+            merged[str(item["rule_id"])] = item
+        return list(merged.values())
+
+    @staticmethod
+    def _fact_dicts(facts: list[dict] | None) -> list[dict]:
+        return [deepcopy(fact) for fact in (facts or []) if isinstance(fact, dict)]
+
+    @classmethod
+    def _serialize_facts(cls, facts: list[object] | None) -> list[dict]:
+        payload: list[dict] = []
+        for fact in facts or []:
+            if is_dataclass(fact):
+                candidate = asdict(fact)
+            elif hasattr(fact, "__dict__"):
+                candidate = deepcopy(getattr(fact, "__dict__", {}))
+            elif isinstance(fact, dict):
+                candidate = deepcopy(fact)
+            else:
+                continue
+            if not isinstance(candidate, dict):
+                continue
+            metric_key = str(candidate.get("metric_key") or "").strip()
+            if not metric_key:
+                continue
+            payload.append(
+                {
+                    "metric_key": metric_key,
+                    "value_num": candidate.get("value_num"),
+                    "value_text": candidate.get("value_text"),
+                    "value_bool": candidate.get("value_bool"),
+                    "unit": candidate.get("unit"),
+                    "observed_at": candidate.get("observed_at"),
+                    "source_chunk_id": candidate.get("source_chunk_id"),
+                    "metadata": candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {},
+                }
+            )
+        return payload
+
+    @staticmethod
+    def _parse_observed_at(value: object) -> datetime | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        return None
+
+    def _replace_published_facts(
+        self,
+        *,
+        session,  # noqa: ANN001
+        workspace_id: str,
+        version_id: str,
+        entity_records: dict[str, dict],
+        relation_records: dict[tuple[str, str, str], dict],
+        published_entity_ids: dict[str, str],
+        relation_rows: list[OntologyRelationResponse],
+    ) -> None:
+        session.execute(delete(OntologyEntityFactORM).where(OntologyEntityFactORM.version_id == version_id))
+        session.execute(delete(OntologyRelationFactORM).where(OntologyRelationFactORM.version_id == version_id))
+
+        for resolution_key, record in entity_records.items():
+            entity_id = published_entity_ids.get(resolution_key)
+            if entity_id is None:
+                continue
+            for fact in self._fact_dicts(record.get("facts", [])):
+                session.add(
+                    OntologyEntityFactORM(
+                        id=str(uuid4()),
+                        workspace_id=workspace_id,
+                        version_id=version_id,
+                        entity_id=entity_id,
+                        metric_key=str(fact.get("metric_key")),
+                        value_num=fact.get("value_num"),
+                        value_text=fact.get("value_text"),
+                        value_bool=fact.get("value_bool"),
+                        unit=fact.get("unit"),
+                        observed_at=self._parse_observed_at(fact.get("observed_at")),
+                        source_document_id=record.get("source_document_id"),
+                        source_chunk_id=fact.get("source_chunk_id"),
+                        metadata_json=fact.get("metadata", {}),
+                        created_at=utc_now(),
+                    )
+                )
+
+        entity_key_by_id = {entity_id: key for key, entity_id in published_entity_ids.items()}
+        relation_id_by_key: dict[tuple[str, str, str], str] = {}
+        for relation in relation_rows:
+            source_key = entity_key_by_id.get(relation.source_entity_id)
+            target_key = entity_key_by_id.get(relation.target_entity_id)
+            if source_key and target_key:
+                relation_id_by_key[(source_key, target_key, relation.relation_type)] = relation.id
+        for logical_key, record in relation_records.items():
+            relation_id = relation_id_by_key.get(logical_key)
+            if relation_id is None:
+                continue
+            for fact in self._fact_dicts(record.get("facts", [])):
+                session.add(
+                    OntologyRelationFactORM(
+                        id=str(uuid4()),
+                        workspace_id=workspace_id,
+                        version_id=version_id,
+                        relation_id=relation_id,
+                        metric_key=str(fact.get("metric_key")),
+                        value_num=fact.get("value_num"),
+                        value_text=fact.get("value_text"),
+                        value_bool=fact.get("value_bool"),
+                        unit=fact.get("unit"),
+                        observed_at=self._parse_observed_at(fact.get("observed_at")),
+                        source_document_id=record.get("source_document_id"),
+                        source_chunk_id=fact.get("source_chunk_id"),
+                        metadata_json=fact.get("metadata", {}),
+                        created_at=utc_now(),
+                    )
+                )
 
     @staticmethod
     def _to_step_schema(step: OntologyBuildStepORM) -> OntologyBuildStepResponse:
@@ -2076,55 +1916,9 @@ class OntologyService:
             name=step.name,
             status=step.status,
             detail=step.detail,
+            metadata=step.metadata_json or {},
             started_at=step.started_at,
             finished_at=step.finished_at,
-        )
-
-    @staticmethod
-    def _to_candidate_entity_schema(
-        entity: OntologyCandidateEntityORM,
-    ) -> OntologyCandidateEntityResponse:
-        return OntologyCandidateEntityResponse(
-            id=entity.id,
-            build_id=entity.build_id,
-            document_id=entity.document_id,
-            workspace_id=entity.workspace_id,
-            name=entity.name,
-            canonical_name=entity.canonical_name,
-            resolution_key=entity.resolution_key,
-            entity_type=entity.entity_type,
-            confidence=entity.confidence,
-            status=entity.status,
-            source_chunk_id=entity.source_chunk_id,
-            evidence_text=entity.evidence_text,
-            provenance=entity.provenance or {},
-            aliases=entity.aliases or [],
-            merged_into_entity_id=entity.merged_into_entity_id,
-            created_at=entity.created_at,
-            updated_at=entity.updated_at,
-        )
-
-    @staticmethod
-    def _to_candidate_relation_schema(
-        relation: OntologyCandidateRelationORM,
-    ) -> OntologyCandidateRelationResponse:
-        return OntologyCandidateRelationResponse(
-            id=relation.id,
-            build_id=relation.build_id,
-            document_id=relation.document_id,
-            workspace_id=relation.workspace_id,
-            source_entity_id=relation.source_entity_id,
-            target_entity_id=relation.target_entity_id,
-            source_name=relation.source_name,
-            target_name=relation.target_name,
-            relation_type=relation.relation_type,
-            confidence=relation.confidence,
-            status=relation.status,
-            source_chunk_id=relation.source_chunk_id,
-            evidence_text=relation.evidence_text,
-            provenance=relation.provenance or {},
-            created_at=relation.created_at,
-            updated_at=relation.updated_at,
         )
 
     def _to_version_schema(self, version: OntologyVersionORM) -> OntologyVersionResponse:
@@ -2153,6 +1947,7 @@ class OntologyService:
             name=entity_type.name,
             description=entity_type.description,
             attributes=entity_type.attributes or [],
+            query_rules=entity_type.query_rules or [],
             examples=entity_type.examples or [],
             created_at=entity_type.created_at,
         )
@@ -2168,6 +1963,7 @@ class OntologyService:
             name=relation_type.name,
             description=relation_type.description,
             attributes=relation_type.attributes or [],
+            query_rules=relation_type.query_rules or [],
             allowed_source_targets=relation_type.allowed_source_targets or [],
             created_at=relation_type.created_at,
         )
@@ -2182,6 +1978,7 @@ class OntologyService:
             name=entity.name,
             entity_type=entity.entity_type,
             aliases=entity.aliases or [],
+            query_rules=entity.query_rules or [],
             source_build_id=entity.source_build_id,
             source_document_id=entity.source_document_id,
             created_at=entity.created_at,
@@ -2201,6 +1998,7 @@ class OntologyService:
             source_document_id=relation.source_document_id,
             evidence_text=relation.evidence_text,
             provenance=relation.provenance or {},
+            query_rules=relation.query_rules or [],
             created_at=relation.created_at,
         )
 
@@ -2209,129 +2007,3 @@ class OntologyService:
         if step.name in ONTOLOGY_BUILD_STEP_NAMES:
             return ONTOLOGY_BUILD_STEP_NAMES.index(step.name)
         return len(ONTOLOGY_BUILD_STEP_NAMES)
-
-    @staticmethod
-    def _build_candidate_entity_type_definitions(
-        build: OntologyBuildORM,
-    ) -> list[OntologyEntityTypeDefinitionResponse]:
-        entity_examples = OntologyService._collect_entity_examples(build.entities)
-        return [
-            OntologyEntityTypeDefinitionResponse(
-                id=f"{build.id}:entity_type:{entity_type}",
-                workspace_id=build.workspace_id,
-                name=entity_type,
-                description=f"Derived entity type for {entity_type}.",
-                examples=examples[:3],
-                created_at=build.updated_at,
-            )
-            for entity_type, examples in sorted(entity_examples.items())
-        ]
-
-    @staticmethod
-    def _build_candidate_relation_type_definitions(
-        build: OntologyBuildORM,
-    ) -> list[OntologyRelationTypeDefinitionResponse]:
-        allowed_pairs = OntologyService._collect_relation_allowed_pairs(
-            entities=build.entities,
-            relations=build.relations,
-        )
-        return [
-            OntologyRelationTypeDefinitionResponse(
-                id=f"{build.id}:relation_type:{relation_type}",
-                workspace_id=build.workspace_id,
-                name=relation_type,
-                description=f"Derived relation type for {relation_type}.",
-                allowed_source_targets=[
-                    {
-                        "source_entity_type": source_type,
-                        "target_entity_type": target_type,
-                    }
-                    for source_type, target_type in sorted(pairs)
-                ],
-                created_at=build.updated_at,
-            )
-            for relation_type, pairs in sorted(allowed_pairs.items())
-        ]
-
-    @staticmethod
-    def _build_entity_type_definitions(
-        *,
-        workspace_id: str,
-        version_id: str,
-        entities: list[OntologyCandidateEntityORM],
-        created_at: datetime,
-    ) -> list[OntologyEntityTypeDefinitionORM]:
-        entity_examples = OntologyService._collect_entity_examples(entities)
-        return [
-            OntologyEntityTypeDefinitionORM(
-                id=str(uuid4()),
-                version_id=version_id,
-                workspace_id=workspace_id,
-                name=entity_type,
-                description=f"Derived entity type for {entity_type}.",
-                attributes=[],
-                examples=examples[:3],
-                created_at=created_at,
-            )
-            for entity_type, examples in sorted(entity_examples.items())
-        ]
-
-    @staticmethod
-    def _build_relation_type_definitions(
-        *,
-        workspace_id: str,
-        version_id: str,
-        entities: list[OntologyCandidateEntityORM],
-        relations: list[OntologyCandidateRelationORM],
-        created_at: datetime,
-    ) -> list[OntologyRelationTypeDefinitionORM]:
-        allowed_pairs = OntologyService._collect_relation_allowed_pairs(
-            entities=entities,
-            relations=relations,
-        )
-        return [
-            OntologyRelationTypeDefinitionORM(
-                id=str(uuid4()),
-                version_id=version_id,
-                workspace_id=workspace_id,
-                name=relation_type,
-                description=f"Derived relation type for {relation_type}.",
-                attributes=[],
-                allowed_source_targets=[
-                    {
-                        "source_entity_type": source_type,
-                        "target_entity_type": target_type,
-                    }
-                    for source_type, target_type in sorted(pairs)
-                ],
-                created_at=created_at,
-            )
-            for relation_type, pairs in sorted(allowed_pairs.items())
-        ]
-
-    @staticmethod
-    def _collect_entity_examples(
-        entities: list[OntologyCandidateEntityORM],
-    ) -> dict[str, list[str]]:
-        entity_examples: dict[str, list[str]] = defaultdict(list)
-        for entity in entities:
-            if entity.canonical_name not in entity_examples[entity.entity_type]:
-                entity_examples[entity.entity_type].append(entity.canonical_name)
-        return entity_examples
-
-    @staticmethod
-    def _collect_relation_allowed_pairs(
-        *,
-        entities: list[OntologyCandidateEntityORM],
-        relations: list[OntologyCandidateRelationORM],
-    ) -> dict[str, set[tuple[str, str]]]:
-        entity_types_by_candidate_id = {
-            entity.id: entity.entity_type for entity in entities if entity.id is not None
-        }
-        allowed_pairs: dict[str, set[tuple[str, str]]] = defaultdict(set)
-        for relation in relations:
-            source_type = entity_types_by_candidate_id.get(relation.source_entity_id or "")
-            target_type = entity_types_by_candidate_id.get(relation.target_entity_id or "")
-            if source_type and target_type:
-                allowed_pairs[relation.relation_type].add((source_type, target_type))
-        return allowed_pairs

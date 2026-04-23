@@ -14,8 +14,15 @@ from semantic_reasoning_agent.documents.errors import (
     DocumentProcessingError,
     UnsupportedDocumentTypeError,
 )
-from semantic_reasoning_agent.documents.models import DocumentIngestionOptions, ParsedDocument
-from semantic_reasoning_agent.documents.parsers.registry import DocumentParserRegistry
+from semantic_reasoning_agent.documents.chunking import MarkdownChunker
+from semantic_reasoning_agent.documents.converters import MarkdownConverterService
+from semantic_reasoning_agent.documents.models import (
+    ConvertedDocument,
+    DocumentIngestionMode,
+    DocumentIngestionOptions,
+)
+from semantic_reasoning_agent.domain.contracts.llm import LLMMessage
+from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.infrastructure.storage import build_object_store
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import (
@@ -26,6 +33,7 @@ from semantic_reasoning_agent.persistence.models import (
     DocumentORM,
 )
 from semantic_reasoning_agent.ports.object_store import ObjectStorePort
+from semantic_reasoning_agent.ports.task_model_resolver import TaskModelResolverPort
 from semantic_reasoning_agent.schemas.documents import (
     DocumentArtifactResponse,
     DocumentExtractRequest,
@@ -47,32 +55,40 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-PIPELINE_JOB_NAMES = [
-    "parse_document",
-    "store_artifacts",
-    "build_chunks",
-    "index_chunks",
-]
+BASE_JOB_NAMES = ("convert_markdown", "store_artifacts")
+RETRIEVAL_JOB_NAMES = ("build_chunks", "index_chunks")
+
+
+def _pipeline_job_names(ingestion_mode: DocumentIngestionMode) -> tuple[str, ...]:
+    if ingestion_mode in {"retrieval", "both"}:
+        return BASE_JOB_NAMES + RETRIEVAL_JOB_NAMES
+    return BASE_JOB_NAMES
 
 
 class DocumentService:
-    """Orchestrates document upload, Marker conversion, artifact storage, and indexing."""
+    """Orchestrates upload, markdown conversion, artifacts, and retrieval indexing."""
 
     def __init__(
         self,
         settings: Settings,
-        parser_registry: DocumentParserRegistry,
+        markdown_converter: MarkdownConverterService,
+        markdown_chunker: MarkdownChunker,
         retrieval_service: RetrievalService,
         database_manager: DatabaseManager,
         task_dispatcher: TaskDispatcher,
         object_store: ObjectStorePort | None = None,
+        model_config_service: TaskModelResolverPort | None = None,
+        adapter_registry: AdapterRegistry | None = None,
     ) -> None:
         self._settings = settings
-        self._parser_registry = parser_registry
+        self._markdown_converter = markdown_converter
+        self._markdown_chunker = markdown_chunker
         self._retrieval_service = retrieval_service
         self._database_manager = database_manager
         self._task_dispatcher = task_dispatcher
         self._object_store = object_store or build_object_store(settings)
+        self._model_config_service = model_config_service
+        self._adapter_registry = adapter_registry
 
     def list_documents(self) -> list[DocumentResponse]:
         with self._database_manager.session() as session:
@@ -87,58 +103,29 @@ class DocumentService:
             return self._to_document_schema(document)
 
     def get_ingestion_capabilities(self) -> DocumentIngestionCapabilitiesResponse:
-        supported_types = sorted(self._parser_registry.supported_types())
-        marker_supported_types = sorted(
-            document_type for document_type in supported_types if document_type != "csv"
-        )
-        csv_supported_types = ["csv"] if "csv" in supported_types else []
+        supported_types = sorted(self._markdown_converter.supported_types())
         return DocumentIngestionCapabilitiesResponse(
             supported_types=supported_types,
-            marker_supported_types=marker_supported_types,
-            csv_supported_types=csv_supported_types,
             default_options=DocumentIngestionOptionsResponse(
-                pdf_mode=self._settings.pdf_parser_default_mode,
-                output_format="markdown",
-                use_llm=False,
-                force_ocr=self._settings.pdf_parser_default_mode == "accurate",
-                strip_existing_ocr=False,
-                extract_images=True,
+                ingestion_mode="both",
             ),
-            pdf_mode_options=[
+            ingestion_mode_options=[
                 DocumentOptionChoice(
-                    value="fast",
-                    label="Fast",
-                    description="Lower latency with lightweight extraction and fallback support.",
+                    value="ontology",
+                    label="Ontology only",
+                    description="Convert to markdown and keep ontology pipeline independent from retrieval.",
                 ),
                 DocumentOptionChoice(
-                    value="accurate",
-                    label="Accurate",
-                    description="Force OCR-heavy extraction for scanned or layout-sensitive PDFs.",
-                ),
-            ],
-            output_format_options=[
-                DocumentOptionChoice(
-                    value="markdown",
-                    label="Markdown",
-                    description="Best default for chunking, citations, and downstream artifacts.",
+                    value="retrieval",
+                    label="Retrieval only",
+                    description="Convert to markdown, chunk and embed into vector storage.",
                 ),
                 DocumentOptionChoice(
-                    value="html",
-                    label="HTML",
-                    description="Preserve more layout semantics in Marker output.",
-                ),
-                DocumentOptionChoice(
-                    value="json",
-                    label="JSON",
-                    description="Prefer structured renderer output for debugging or inspection.",
-                ),
-                DocumentOptionChoice(
-                    value="chunks",
-                    label="Chunks",
-                    description="Emit chunk-oriented output for ingestion-focused workflows.",
+                    value="both",
+                    label="Both",
+                    description="Run ontology-ready markdown and retrieval chunk/index in parallel.",
                 ),
             ],
-            supports_extract_images=True,
         )
 
     def get_document_jobs(self, document_id: str) -> list[DocumentJobResponse]:
@@ -166,26 +153,21 @@ class DocumentService:
         title: str | None = None,
         workspace_id: str | None = None,
         tags: list[str] | None = None,
-        pdf_mode: str | None = None,
-        output_format: str | None = None,
-        extract_images: bool | None = None,
+        ingestion_mode: str | None = None,
         content_type: str | None = None,
     ) -> DocumentResponse:
         if not content:
             raise DocumentProcessingError("Uploaded file is empty.")
-        if not self._parser_registry.supports(filename):
+        if not self._markdown_converter.supports(filename):
             raise UnsupportedDocumentTypeError(
                 f"Unsupported document type '{Path(filename).suffix.lower().lstrip('.')}'. "
-                "Supported types: pdf, docx, xlsx, pptx, html, epub, image, csv."
+                + "Supported types: "
+                + ", ".join(self._markdown_converter.supported_types())
+                + "."
             )
 
         document_type = Path(filename).suffix.lower().lstrip(".")
-        ingestion_options = self._resolve_ingestion_options(
-            document_type,
-            pdf_mode=pdf_mode,
-            output_format=output_format,
-            extract_images=extract_images,
-        )
+        ingestion_options = self._resolve_ingestion_options(ingestion_mode=ingestion_mode)
         document_id = str(uuid4())
         resolved_workspace_id = workspace_id or self._settings.default_workspace_id
         timestamp = utc_now()
@@ -206,6 +188,7 @@ class DocumentService:
             chunk_count=0,
             tags=tags or [],
             ingestion_options=ingestion_options.to_dict(),
+            ingestion_mode=ingestion_options.ingestion_mode,
             source_url=stored_object.public_url,
             source_object_key=stored_object.object_key,
             source_content_type=stored_object.content_type,
@@ -217,7 +200,9 @@ class DocumentService:
         )
         with self._database_manager.session() as session:
             session.add(document)
-            session.add_all(self._build_job_records(document_id))
+            session.add_all(
+                self._build_job_records(document_id, ingestion_mode=ingestion_options.ingestion_mode)
+            )
 
         self._queue_document(document_id)
         return self.get_document(document_id)
@@ -244,18 +229,11 @@ class DocumentService:
         payload: DocumentExtractRequest,
     ) -> DocumentExtractionRunResponse:
         document = self._get_document_record(document_id)
-        parser = self._parser_registry.get_parser(document.filename)
-        extractor = getattr(parser, "extract_structured", None)
-        if extractor is None:
+        markdown = self._latest_artifact_text(document.id, "markdown")
+        if not markdown:
             raise DocumentProcessingError(
-                f"Structured extraction is not supported for '{document.document_type}'."
+                "Structured extraction requires a markdown artifact. Reprocess the document first."
             )
-
-        binary_content = self._object_store.get_document_binary(
-            document.id,
-            document.source_object_key,
-            fallback_content=document.binary_content,
-        )
         run_id = str(uuid4())
         now = utc_now()
         with self._database_manager.session() as session:
@@ -276,31 +254,17 @@ class DocumentService:
             )
 
         try:
-            existing_markdown = self._latest_artifact_text(document.id, "markdown")
-            result = extractor(
-                document.filename,
-                binary_content,
+            result_json = self._extract_json_from_markdown(
+                markdown=markdown,
                 schema_json=payload.extraction_schema,
                 use_llm=payload.use_llm,
-                force_ocr=payload.force_ocr,
-                strip_existing_ocr=payload.strip_existing_ocr,
-                existing_markdown=existing_markdown,
+                workspace_id=document.workspace_id,
             )
-            if result.markdown:
-                self._store_artifact(
-                    document_id=document.id,
-                    workspace_id=document.workspace_id,
-                    artifact_type="extraction_markdown",
-                    artifact_name=f"{run_id}.md",
-                    content=result.markdown.encode("utf-8"),
-                    content_type="text/markdown",
-                    metadata={"extraction_run_id": run_id},
-                )
             self._update_extraction_run(
                 run_id,
                 status="completed",
-                result_json=result.result,
-                parser_version=result.parser_version,
+                result_json=result_json,
+                parser_version=document.parser_version,
                 error_message=None,
             )
         except Exception as exc:
@@ -331,49 +295,56 @@ class DocumentService:
 
     def process_document(self, document_id: str) -> None:
         document = self._get_document_record(document_id)
-        self._reset_jobs(document_id)
-        self._retrieval_service.remove_document(document_id)
         options = DocumentIngestionOptions.from_dict(document.ingestion_options)
+        self._reset_jobs(document_id, ingestion_mode=options.ingestion_mode)
+        self._retrieval_service.remove_document(document_id)
 
         try:
-            self._mark_job_running(document_id, "parse_document")
+            self._mark_job_running(document_id, "convert_markdown")
             binary_content = self._object_store.get_document_binary(
                 document.id,
                 document.source_object_key,
                 fallback_content=document.binary_content,
             )
-            parsed_document = self._parser_registry.parse(
+            converted_document = self._markdown_converter.convert(
                 document.filename,
                 binary_content,
-                document.title,
-                options=options,
+                title=document.title,
+                content_type=document.source_content_type,
             )
-            self._mark_job_completed(document_id, "parse_document")
+            self._mark_job_completed(document_id, "convert_markdown")
             self._update_document_state(
                 document_id,
                 status=DocumentStatus.parsed.value,
-                parser_version=parsed_document.parser_version,
+                parser_version=converted_document.converter_version,
                 error_message=None,
             )
 
             self._mark_job_running(document_id, "store_artifacts")
-            self._replace_artifacts(document, parsed_document)
+            self._replace_artifacts(document, converted_document)
             self._mark_job_completed(document_id, "store_artifacts")
 
-            self._mark_job_running(document_id, "build_chunks")
-            chunk_count = len(parsed_document.chunks)
-            self._mark_job_completed(document_id, "build_chunks")
+            chunk_count = 0
+            if options.ingestion_mode in {"retrieval", "both"}:
+                self._mark_job_running(document_id, "build_chunks")
+                parsed_chunks = self._markdown_chunker.split(converted_document.markdown)
+                chunk_count = len(parsed_chunks)
+                self._mark_job_completed(document_id, "build_chunks")
 
-            self._mark_job_running(document_id, "index_chunks")
-            document_schema = self._to_document_schema(document)
-            indexed_chunks = self._retrieval_service.prepare_document_chunks(document_schema, parsed_document)
-            self._retrieval_service.upsert_chunks(document_id, indexed_chunks)
-            self._mark_job_completed(document_id, "index_chunks")
+                self._mark_job_running(document_id, "index_chunks")
+                document_schema = self._to_document_schema(document)
+                indexed_chunks = self._retrieval_service.prepare_chunks(
+                    document_schema,
+                    parsed_chunks,
+                    parser_version=converted_document.converter_version,
+                )
+                self._retrieval_service.upsert_chunks(document_id, indexed_chunks)
+                self._mark_job_completed(document_id, "index_chunks")
 
             self._update_document_state(
                 document_id,
                 status=DocumentStatus.indexed.value,
-                parser_version=parsed_document.parser_version,
+                parser_version=converted_document.converter_version,
                 chunk_count=chunk_count,
                 error_message=None,
             )
@@ -384,37 +355,13 @@ class DocumentService:
             self._mark_failed(document_id, self._active_job_name(document_id), str(exc))
             raise DocumentProcessingError(str(exc)) from exc
 
-    def _resolve_ingestion_options(
-        self,
-        document_type: str,
-        *,
-        pdf_mode: str | None,
-        output_format: str | None,
-        extract_images: bool | None,
-    ) -> DocumentIngestionOptions:
-        requested_format = (output_format or "markdown").lower()
-        if requested_format not in {"markdown", "html", "json", "chunks"}:
+    def _resolve_ingestion_options(self, *, ingestion_mode: str | None) -> DocumentIngestionOptions:
+        mode = str(ingestion_mode or "both").lower()
+        if mode not in {"ontology", "retrieval", "both"}:
             raise DocumentProcessingError(
-                "output_format must be one of 'markdown', 'html', 'json', or 'chunks'."
+                "ingestion_mode must be one of 'ontology', 'retrieval', or 'both'."
             )
-        resolved_extract_images = True if extract_images is None else extract_images
-        if document_type == "csv":
-            return DocumentIngestionOptions()
-        if document_type != "pdf":
-            return DocumentIngestionOptions(
-                output_format=requested_format,
-                extract_images=resolved_extract_images,
-            )
-        requested_mode = (pdf_mode or self._settings.pdf_parser_default_mode).lower()
-        if requested_mode not in {"fast", "accurate"}:
-            raise DocumentProcessingError("pdf_mode must be either 'fast' or 'accurate'.")
-        return DocumentIngestionOptions(
-            pdf_mode=requested_mode,
-            output_format=requested_format,
-            force_ocr=requested_mode == "accurate",
-            use_llm=requested_mode == "accurate" and self._settings.marker_use_llm_in_accurate,
-            extract_images=resolved_extract_images,
-        )
+        return DocumentIngestionOptions(ingestion_mode=mode)  # type: ignore[arg-type]
 
     def _mark_failed(self, document_id: str, failed_job: str, error_message: str) -> None:
         timestamp = utc_now()
@@ -450,6 +397,7 @@ class DocumentService:
                 chunk_count=document.chunk_count,
                 tags=document.tags,
                 ingestion_options=document.ingestion_options or {},
+                ingestion_mode=document.ingestion_mode,
                 source_url=document.source_url,
                 source_object_key=document.source_object_key,
                 source_content_type=document.source_content_type,
@@ -469,6 +417,7 @@ class DocumentService:
             row = session.get(DocumentORM, document_id)
             if row is None:
                 raise DocumentNotFoundError(f"Document '{document_id}' was not found.")
+            options = DocumentIngestionOptions.from_dict(row.ingestion_options)
             row.status = DocumentStatus.uploaded.value
             row.error_message = None
             row.chunk_count = 0
@@ -477,7 +426,9 @@ class DocumentService:
             session.execute(delete(DocumentJobORM).where(DocumentJobORM.document_id == document_id))
             session.execute(delete(DocumentArtifactORM).where(DocumentArtifactORM.document_id == document_id))
             session.execute(delete(DocumentExtractionRunORM).where(DocumentExtractionRunORM.document_id == document_id))
-            session.add_all(self._build_job_records(document_id))
+            session.add_all(
+                self._build_job_records(document_id, ingestion_mode=options.ingestion_mode)
+            )
 
     def _queue_document(self, document_id: str) -> None:
         try:
@@ -485,17 +436,34 @@ class DocumentService:
         except Exception as exc:
             raise DocumentProcessingError(f"Failed to queue document '{document_id}' for ingestion.") from exc
 
-    def _reset_jobs(self, document_id: str) -> None:
+    def _reset_jobs(self, document_id: str, *, ingestion_mode: DocumentIngestionMode) -> None:
         with self._database_manager.session() as session:
             jobs = session.scalars(select(DocumentJobORM).where(DocumentJobORM.document_id == document_id)).all()
             if not jobs:
-                session.add_all(self._build_job_records(document_id))
+                session.add_all(self._build_job_records(document_id, ingestion_mode=ingestion_mode))
                 return
+            active_jobs = set(_pipeline_job_names(ingestion_mode))
             for job in jobs:
+                if job.name not in active_jobs:
+                    session.delete(job)
+                    continue
                 job.status = JobStatus.pending.value
                 job.started_at = None
                 job.finished_at = None
                 job.error_message = None
+            for name in active_jobs:
+                if not any(job.name == name for job in jobs):
+                    session.add(
+                        DocumentJobORM(
+                            id=f"{document_id}:{name}",
+                            document_id=document_id,
+                            name=name,
+                            status=JobStatus.pending.value,
+                            started_at=None,
+                            finished_at=None,
+                            error_message=None,
+                        )
+                    )
 
     def _mark_job_running(self, document_id: str, name: str) -> None:
         with self._database_manager.session() as session:
@@ -537,49 +505,37 @@ class DocumentService:
             if chunk_count is not None:
                 row.chunk_count = chunk_count
 
-    def _replace_artifacts(self, document: DocumentORM, parsed_document: ParsedDocument) -> None:
+    def _replace_artifacts(self, document: DocumentORM, converted_document: ConvertedDocument) -> None:
         with self._database_manager.session() as session:
             session.execute(delete(DocumentArtifactORM).where(DocumentArtifactORM.document_id == document.id))
-        artifacts = list(parsed_document.artifacts)
-        if not artifacts:
-            markdown = "\n\n".join(chunk.text for chunk in parsed_document.chunks if chunk.text.strip())
-            if markdown:
-                artifacts.append(
-                    type("InlineArtifact", (), {
-                        "artifact_type": "markdown",
-                        "name": "document.md",
-                        "content": markdown.encode("utf-8"),
-                        "content_type": "text/markdown",
-                        "metadata": {},
-                    })()
-                )
-            artifacts.append(
-                type("InlineArtifact", (), {
-                    "artifact_type": "normalized_json",
-                    "name": "document.json",
-                    "content": json.dumps(
-                        {
-                            "document_type": parsed_document.document_type,
-                            "parser_name": parsed_document.parser_name,
-                            "parser_version": parsed_document.parser_version,
-                            "chunks": [chunk.text for chunk in parsed_document.chunks],
-                        },
-                        ensure_ascii=False,
-                    ).encode("utf-8"),
-                    "content_type": "application/json",
-                    "metadata": {},
-                })()
-            )
-        for artifact in artifacts:
+        markdown = converted_document.markdown.strip()
+        if markdown:
             self._store_artifact(
                 document_id=document.id,
                 workspace_id=document.workspace_id,
-                artifact_type=artifact.artifact_type,
-                artifact_name=artifact.name,
-                content=artifact.content,
-                content_type=artifact.content_type,
-                metadata=artifact.metadata,
+                artifact_type="markdown",
+                artifact_name="document.md",
+                content=markdown.encode("utf-8"),
+                content_type="text/markdown",
+                metadata={"inline_text": markdown},
             )
+        self._store_artifact(
+            document_id=document.id,
+            workspace_id=document.workspace_id,
+            artifact_type="normalized_json",
+            artifact_name="document.json",
+            content=json.dumps(
+                {
+                    "document_type": converted_document.document_type,
+                    "converter_name": converted_document.converter_name,
+                    "converter_version": converted_document.converter_version,
+                    "metadata": converted_document.metadata,
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            content_type="application/json",
+            metadata={},
+        )
 
     def _store_artifact(
         self,
@@ -629,7 +585,84 @@ class DocumentService:
             if artifact is None:
                 return None
         content = self._object_store.get_document_binary(document_id, artifact.object_key)
-        return content.decode("utf-8") if content else None
+        if content:
+            return content.decode("utf-8")
+        inline_text = (artifact.metadata_json or {}).get("inline_text")
+        if isinstance(inline_text, str):
+            return inline_text
+        return None
+
+    def _extract_json_from_markdown(
+        self,
+        *,
+        markdown: str,
+        schema_json: dict[str, object],
+        use_llm: bool,
+        workspace_id: str,
+    ) -> dict[str, object]:
+        text = markdown.strip()
+        if not text:
+            return {"schema": schema_json, "items": []}
+
+        if use_llm:
+            payload = self._extract_json_with_llm(
+                markdown=text,
+                schema_json=schema_json,
+                workspace_id=workspace_id,
+            )
+            if payload is not None:
+                return payload
+
+        lines = [line.strip("-* \t") for line in text.splitlines() if line.strip()]
+        return {
+            "schema": schema_json,
+            "items": lines[:20],
+            "source": "heuristic",
+        }
+
+    def _extract_json_with_llm(
+        self,
+        *,
+        markdown: str,
+        schema_json: dict[str, object],
+        workspace_id: str,
+    ) -> dict[str, object] | None:
+        if self._model_config_service is None or self._adapter_registry is None:
+            return None
+        provider = self._settings.ontology_llm_provider
+        model = self._settings.ontology_llm_model
+        if not provider or not model:
+            return None
+        if not self._model_config_service.is_ready(provider, model, workspace_id):
+            return None
+        adapter = self._adapter_registry.get(provider)
+        if adapter is None:
+            return None
+
+        prompt = (
+            "Extract structured JSON from markdown.\n"
+            "Return strict JSON object with keys: schema, result.\n"
+            f"Target schema:\n{json.dumps(schema_json, ensure_ascii=False)}\n\n"
+            f"Markdown:\n{markdown[:50000]}"
+        )
+        response = adapter.run(
+            messages=[LLMMessage(role="user", content=prompt)],
+            tools=(),
+            tool_choice="none",
+            max_tokens=2000,
+            temperature=0,
+            model=model,
+        )
+        content = (response.content or "").strip()
+        if not content:
+            return None
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
 
     def _update_extraction_run(
         self,
@@ -651,16 +684,23 @@ class DocumentService:
             run.updated_at = utc_now()
 
     def _active_job_name(self, document_id: str) -> str:
+        document = self._get_document_record(document_id)
+        ingestion_mode = DocumentIngestionOptions.from_dict(document.ingestion_options).ingestion_mode
+        job_order = _pipeline_job_names(ingestion_mode)
         with self._database_manager.session() as session:
             jobs = session.scalars(select(DocumentJobORM).where(DocumentJobORM.document_id == document_id)).all()
-            for name in reversed(PIPELINE_JOB_NAMES):
+            for name in reversed(job_order):
                 for job in jobs:
                     if job.name == name and job.status == JobStatus.running.value:
                         return name
-        return PIPELINE_JOB_NAMES[0]
+        return job_order[0]
 
     @staticmethod
-    def _build_job_records(document_id: str) -> list[DocumentJobORM]:
+    def _build_job_records(
+        document_id: str,
+        *,
+        ingestion_mode: DocumentIngestionMode,
+    ) -> list[DocumentJobORM]:
         return [
             DocumentJobORM(
                 id=f"{document_id}:{name}",
@@ -671,7 +711,7 @@ class DocumentService:
                 finished_at=None,
                 error_message=None,
             )
-            for name in PIPELINE_JOB_NAMES
+            for name in _pipeline_job_names(ingestion_mode)
         ]
 
     @staticmethod
@@ -685,7 +725,11 @@ class DocumentService:
         jobs = session.scalars(select(DocumentJobORM).where(DocumentJobORM.document_id == document_id)).all()
         job_map = {job.name: job for job in jobs}
         failure_reached = False
-        for name in PIPELINE_JOB_NAMES:
+        document = session.get(DocumentORM, document_id)
+        ingestion_mode = DocumentIngestionOptions.from_dict(
+            document.ingestion_options if document else {}
+        ).ingestion_mode
+        for name in _pipeline_job_names(ingestion_mode):
             job = job_map.get(name)
             if job is None:
                 job = DocumentJobORM(
@@ -728,6 +772,7 @@ class DocumentService:
             chunk_count=document.chunk_count,
             tags=document.tags or [],
             ingestion_options=document.ingestion_options or {},
+            ingestion_mode=document.ingestion_mode,
             source_url=document.source_url,
             source_object_key=document.source_object_key,
             source_content_type=document.source_content_type,
@@ -782,9 +827,10 @@ class DocumentService:
 
     @staticmethod
     def _job_sort_key(job: DocumentJobORM) -> int:
-        if job.name in PIPELINE_JOB_NAMES:
-            return PIPELINE_JOB_NAMES.index(job.name)
-        return len(PIPELINE_JOB_NAMES)
+        ordered_jobs = list(BASE_JOB_NAMES) + list(RETRIEVAL_JOB_NAMES)
+        if job.name in ordered_jobs:
+            return ordered_jobs.index(job.name)
+        return len(ordered_jobs)
 
     @staticmethod
     def _get_job(session, document_id: str, name: str) -> DocumentJobORM:

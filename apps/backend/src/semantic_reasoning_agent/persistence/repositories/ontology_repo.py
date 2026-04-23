@@ -5,8 +5,8 @@ from sqlalchemy import select
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import (
     OntologyBuildORM,
-    OntologyCandidateEntityORM,
-    OntologyCandidateRelationORM,
+    OntologyEntityTypeDefinitionORM,
+    OntologyRelationTypeDefinitionORM,
 )
 
 
@@ -29,8 +29,8 @@ class OntologyRepository:
     def list_used_entity_types(self, workspace_id: str) -> list[str]:
         with self._database_manager.session() as session:
             rows = session.scalars(
-                select(OntologyCandidateEntityORM.entity_type)
-                .where(OntologyCandidateEntityORM.workspace_id == workspace_id)
+                select(OntologyEntityTypeDefinitionORM.name)
+                .where(OntologyEntityTypeDefinitionORM.workspace_id == workspace_id)
                 .distinct()
             ).all()
             return sorted(filter(None, rows))
@@ -38,8 +38,8 @@ class OntologyRepository:
     def list_used_relation_types(self, workspace_id: str) -> list[str]:
         with self._database_manager.session() as session:
             rows = session.scalars(
-                select(OntologyCandidateRelationORM.relation_type)
-                .where(OntologyCandidateRelationORM.workspace_id == workspace_id)
+                select(OntologyRelationTypeDefinitionORM.name)
+                .where(OntologyRelationTypeDefinitionORM.workspace_id == workspace_id)
                 .distinct()
             ).all()
             return sorted(filter(None, rows))

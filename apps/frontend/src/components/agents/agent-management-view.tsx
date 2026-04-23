@@ -26,8 +26,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { ToolDndBoard } from "@/components/agents/tool-dnd-board";
-import { getCapabilityCatalog, listCapabilityTools } from "@/shared/api/agent-capabilities";
+import { ToolSlotBoard } from "@/components/agents/tool-slot-board";
+import { getCapabilityCatalog } from "@/shared/api/agent-capabilities";
 import {
   createAgentProfile,
   listAgentProfiles,
@@ -36,6 +36,7 @@ import {
 } from "@/shared/api/agent-profiles";
 import { listDocuments } from "@/shared/api/documents";
 import { createKnowledgePack, listKnowledgePacks, updateKnowledgePack } from "@/shared/api/knowledge-packs";
+import { listSearchTools } from "@/shared/api/search-tools";
 import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
 import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
@@ -45,6 +46,7 @@ import type {
   EvidencePolicySchema,
   KnowledgePackResponse,
   ToolPolicySchema,
+  AgentProfileToolAssignment,
 } from "@/shared/api/types";
 
 type ProfileDraft = {
@@ -54,6 +56,7 @@ type ProfileDraft = {
   toolPolicyMode: string;
   allowedTools: string[];
   blockedTools: string[];
+  toolAssignments: AgentProfileToolAssignment[];
   knowledgePackIds: string[];
   allowedSources: string[];
   allowModelOnlyFallback: boolean;
@@ -83,6 +86,7 @@ function makeProfileDraft(profile: AgentProfileResponse): ProfileDraft {
     toolPolicyMode: profile.tool_policy.mode,
     allowedTools: [...profile.tool_policy.allowed_tools],
     blockedTools: [...profile.tool_policy.blocked_tools],
+    toolAssignments: [...profile.tool_assignments],
     knowledgePackIds: [...profile.knowledge_pack_ids],
     allowedSources: [...profile.evidence_policy.allowed_sources],
     allowModelOnlyFallback: profile.evidence_policy.allow_model_only_fallback,
@@ -127,9 +131,9 @@ export function AgentManagementView() {
     queryKey: queryKeys.capabilities.catalog(),
     queryFn: getCapabilityCatalog,
   });
-  const { data: capabilityTools = [] } = useQuery({
-    queryKey: queryKeys.capabilities.tools(),
-    queryFn: listCapabilityTools,
+  const { data: searchTools = [] } = useQuery({
+    queryKey: queryKeys.searchTools.list(workspaceId),
+    queryFn: () => listSearchTools({ workspaceId: workspaceId ?? undefined }),
   });
   const { data: knowledgePacks = [] } = useQuery({
     queryKey: queryKeys.knowledgePacks.list(workspaceId),
@@ -147,6 +151,29 @@ export function AgentManagementView() {
   const [editingPack, setEditingPack] = useState<KnowledgePackResponse | null>(null);
   const [knowledgePackDraft, setKnowledgePackDraft] = useState<KnowledgePackDraft>(makeKnowledgePackDraft());
 
+  const selectedProfile = useMemo(
+    () => profiles?.find((item) => item.id === selectedProfileId) ?? null,
+    [profiles, selectedProfileId],
+  );
+  const selectedPreset = useMemo(
+    () => capabilityCatalog?.presets.find((item) => item.preset === profileDraft?.capabilityPreset) ?? null,
+    [capabilityCatalog?.presets, profileDraft?.capabilityPreset],
+  );
+  const defaultToolAssignments = useMemo(
+    () =>
+      searchTools
+        .filter((tool) => tool.is_system)
+        .flatMap((tool) =>
+          tool.assignable_slots.slice(0, 1).map((slot, index) => ({
+            slot,
+            tool_name: tool.tool_name,
+            config_id: tool.id,
+            enabled: true,
+            position: slot === "rag" ? 0 : 1 + index,
+          })),
+        ),
+    [searchTools],
+  );
   useEffect(() => {
     const selected =
       profiles?.find((item) => item.id === selectedProfileId) ??
@@ -156,22 +183,12 @@ export function AgentManagementView() {
     if (!selected) return;
     setSelectedProfileId(selected.id);
     setPreferredAgentProfileId(selected.id);
-    setProfileDraft(makeProfileDraft(selected));
-  }, [preferredAgentProfileId, profiles, selectedProfileId, setPreferredAgentProfileId]);
-
-  const selectedProfile = useMemo(
-    () => profiles?.find((item) => item.id === selectedProfileId) ?? null,
-    [profiles, selectedProfileId],
-  );
-  const selectedPreset = useMemo(
-    () => capabilityCatalog?.presets.find((item) => item.preset === profileDraft?.capabilityPreset) ?? null,
-    [capabilityCatalog?.presets, profileDraft?.capabilityPreset],
-  );
-  const profileToolSummary = useMemo(() => {
-    if (!profileDraft || !selectedPreset) return [];
-    return capabilityTools.filter((tool) => selectedPreset.allowed_tool_families.includes(tool.family));
-  }, [capabilityTools, profileDraft, selectedPreset]);
-
+    const nextDraft = makeProfileDraft(selected);
+    if (nextDraft.toolAssignments.length === 0 && defaultToolAssignments.length > 0) {
+      nextDraft.toolAssignments = defaultToolAssignments;
+    }
+    setProfileDraft(nextDraft);
+  }, [defaultToolAssignments, preferredAgentProfileId, profiles, selectedProfileId, setPreferredAgentProfileId]);
   const createProfileMutation = useMutation({
     mutationFn: () => {
       if (!workspaceId) {
@@ -191,6 +208,7 @@ export function AgentManagementView() {
           allow_model_only_fallback: true,
         },
         task_models: [],
+        tool_assignments: defaultToolAssignments,
       });
     },
     onSuccess: async (profile) => {
@@ -214,6 +232,7 @@ export function AgentManagementView() {
         allow_chat_model_override: true,
         capability_preset: profileDraft.capabilityPreset,
         tool_policy: buildToolPolicy(profileDraft),
+        tool_assignments: profileDraft.toolAssignments,
         knowledge_pack_ids: profileDraft.knowledgePackIds,
         evidence_policy: buildEvidencePolicy(profileDraft),
       });
@@ -318,7 +337,11 @@ export function AgentManagementView() {
                   onClick={() => {
                     setSelectedProfileId(profile.id);
                     setPreferredAgentProfileId(profile.id);
-                    setProfileDraft(makeProfileDraft(profile));
+                    const nextDraft = makeProfileDraft(profile);
+                    if (nextDraft.toolAssignments.length === 0 && defaultToolAssignments.length > 0) {
+                      nextDraft.toolAssignments = defaultToolAssignments;
+                    }
+                    setProfileDraft(nextDraft);
                   }}
                   className={`w-full rounded-2xl border p-4 text-left transition ${
                     selectedProfileId === profile.id
@@ -462,32 +485,12 @@ export function AgentManagementView() {
                   </div>
                 </div>
 
-                <ToolDndBoard
-                  paletteTools={profileToolSummary}
-                  allowedToolNames={profileDraft.allowedTools}
-                  blockedToolNames={profileDraft.blockedTools}
-                  onAllowedChange={(names) =>
-                    setProfileDraft((current) => (current ? { ...current, allowedTools: names } : current))
+                <ToolSlotBoard
+                  tools={searchTools}
+                  assignments={profileDraft.toolAssignments}
+                  onChange={(toolAssignments) =>
+                    setProfileDraft((current) => (current ? { ...current, toolAssignments } : current))
                   }
-                  onBlockedChange={(names) =>
-                    setProfileDraft((current) => (current ? { ...current, blockedTools: names } : current))
-                  }
-                  labels={{
-                    lanePalette: t.agentManagement.lanePalette,
-                    lanePaletteHint: t.agentManagement.lanePaletteHint,
-                    laneAllowed: t.agentManagement.laneAllowed,
-                    laneAllowedHint: t.agentManagement.laneAllowedHint,
-                    laneBlocked: t.agentManagement.laneBlocked,
-                    laneBlockedHint: t.agentManagement.laneBlockedHint,
-                    searchToolsPlaceholder: t.agentManagement.searchToolsPlaceholder,
-                    riskFilter: t.agentManagement.riskFilter,
-                    riskAll: t.agentManagement.riskAll,
-                    riskLow: t.agentManagement.riskLow,
-                    riskMedium: t.agentManagement.riskMedium,
-                    riskHigh: t.agentManagement.riskHigh,
-                    removeFromLane: t.agentManagement.removeFromLane,
-                    noCatalogTools: t.agentManagement.noCatalogTools,
-                  }}
                 />
               </CardContent>
             </Card>

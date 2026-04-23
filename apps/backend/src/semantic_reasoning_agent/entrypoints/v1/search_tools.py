@@ -15,6 +15,7 @@ from semantic_reasoning_agent.schemas.search_tools import (
 from semantic_reasoning_agent.services.search_tool_service import (
     SearchToolConfigInvalidError,
     SearchToolConfigNotFoundError,
+    SearchToolSystemManagedError,
     SearchToolConfigService,
 )
 
@@ -89,6 +90,8 @@ def update_search_tool(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SearchToolConfigInvalidError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except SearchToolSystemManagedError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.delete(
@@ -104,6 +107,26 @@ def delete_search_tool(
 ) -> None:
     try:
         service.delete(config_id, workspace_id=workspace_id)
+    except SearchToolConfigNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except SearchToolSystemManagedError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{config_id}/duplicate",
+    response_model=SearchToolConfigResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Duplicate a super-search config",
+    openapi_extra=PUBLIC_ROUTE,
+)
+def duplicate_search_tool(
+    config_id: str,
+    workspace_id: str | None = Query(default=None),
+    service: SearchToolConfigService = Depends(get_search_tool_service),
+) -> SearchToolConfigResponse:
+    try:
+        return service.duplicate(config_id, workspace_id=workspace_id)
     except SearchToolConfigNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

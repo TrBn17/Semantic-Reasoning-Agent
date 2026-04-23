@@ -41,3 +41,13 @@ class ProviderSecretORM(Base):
     secret_value: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class WorkspaceSearchSettingsORM(Base):
+    __tablename__ = "workspace_search_settings"
+
+    workspace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    embedding_provider: Mapped[str] = mapped_column(String(64))
+    embedding_model: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

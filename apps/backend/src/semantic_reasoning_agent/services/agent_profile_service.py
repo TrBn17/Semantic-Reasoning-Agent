@@ -8,7 +8,11 @@ from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
 from semantic_reasoning_agent.persistence.database import DatabaseManager
-from semantic_reasoning_agent.persistence.models import AgentProfileORM, AgentProfileTaskModelORM
+from semantic_reasoning_agent.persistence.models import (
+    AgentProfileORM,
+    AgentProfileTaskModelORM,
+    SearchToolConfigORM,
+)
 from semantic_reasoning_agent.schemas.agent_capabilities import (
     EvidencePolicySchema,
     ToolPolicySchema,
@@ -17,6 +21,7 @@ from semantic_reasoning_agent.schemas.agent_profiles import (
     AgentProfileCreateRequest,
     AgentProfileResponse,
     AgentProfileTaskModelAssignment,
+    AgentProfileToolAssignment,
     AgentProfileUpdateRequest,
 )
 from semantic_reasoning_agent.services.agent_capability_service import (
@@ -31,6 +36,10 @@ def utc_now() -> datetime:
 
 class AgentProfileNotFoundError(ValueError):
     """Raised when an agent profile id does not exist."""
+
+
+class AgentProfileValidationError(ValueError):
+    """Raised when an agent profile payload violates tool binding rules."""
 
 
 class AgentProfileService:
@@ -74,6 +83,11 @@ class AgentProfileService:
                     tool_policy=payload.tool_policy,
                     knowledge_pack_ids=payload.knowledge_pack_ids,
                     evidence_policy=payload.evidence_policy,
+                ),
+                tool_assignments=self._normalize_tool_assignments(
+                    payload.tool_assignments,
+                    workspace_id=payload.workspace_id,
+                    tool_policy=payload.tool_policy,
                 ),
                 created_at=now,
                 updated_at=now,
@@ -121,6 +135,21 @@ class AgentProfileService:
                 knowledge_pack_ids=payload.knowledge_pack_ids,
                 evidence_policy=payload.evidence_policy,
             )
+            effective_tool_policy = payload.tool_policy or ToolPolicySchema.model_validate(
+                (profile.policy_config or {}).get("tool_policy") or {}
+            )
+            if payload.tool_assignments is not None:
+                profile.tool_assignments = self._normalize_tool_assignments(
+                    payload.tool_assignments,
+                    workspace_id=profile.workspace_id,
+                    tool_policy=effective_tool_policy,
+                )
+            elif payload.tool_policy is not None:
+                profile.tool_assignments = self._normalize_tool_assignments(
+                    profile.tool_assignments or [],
+                    workspace_id=profile.workspace_id,
+                    tool_policy=effective_tool_policy,
+                )
             profile.updated_at = utc_now()
 
             if payload.task_models is not None:
@@ -187,8 +216,8 @@ class AgentProfileService:
                 profile.is_default = False
                 profile.updated_at = now
 
-    @staticmethod
-    def _to_schema(profile: AgentProfileORM) -> AgentProfileResponse:
+    @classmethod
+    def _to_schema(cls, profile: AgentProfileORM) -> AgentProfileResponse:
         capability = resolve_capability_config(profile.policy_config)
         return AgentProfileResponse(
             id=profile.id,
@@ -212,6 +241,95 @@ class AgentProfileService:
                 )
                 for task_model in profile.task_models
             ],
+            tool_assignments=cls._read_tool_assignments(profile.tool_assignments),
             created_at=profile.created_at,
             updated_at=profile.updated_at,
         )
+
+    def _normalize_tool_assignments(
+        self,
+        assignments: list,
+        *,
+        workspace_id: str,
+        tool_policy: ToolPolicySchema | None,
+    ) -> list[dict]:
+        normalized: list[dict] = []
+        blocked_tools = set((tool_policy or ToolPolicySchema()).blocked_tools)
+        allow_mode = (tool_policy or ToolPolicySchema()).mode == "allowlist"
+        allowlist = set((tool_policy or ToolPolicySchema()).allowed_tools)
+        config_ids = [
+            item.config_id
+            for item in (
+                AgentProfileToolAssignment.model_validate(entry) for entry in (assignments or [])
+            )
+            if item.config_id
+        ]
+        config_lookup = self._load_search_tool_configs(workspace_id, config_ids)
+        seen_slots: set[str] = set()
+        for entry in assignments or []:
+            item = AgentProfileToolAssignment.model_validate(entry)
+            config = config_lookup.get(item.config_id or "")
+            if item.slot in {"rag", "ontology_search"}:
+                if item.slot in seen_slots:
+                    raise AgentProfileValidationError(
+                        f"Only one tool assignment is allowed for slot '{item.slot}'."
+                    )
+                seen_slots.add(item.slot)
+            if item.config_id and config is None:
+                raise AgentProfileValidationError(
+                    f"Search tool config '{item.config_id}' was not found in workspace '{workspace_id}'."
+                )
+            resolved_tool_name = (
+                "supersearch.docs"
+                if config is not None and config.tool_type == "docs"
+                else "supersearch.graph"
+                if config is not None and config.tool_type == "graph"
+                else item.tool_name
+            )
+            if item.config_id and resolved_tool_name != item.tool_name:
+                raise AgentProfileValidationError(
+                    f"Tool assignment '{item.slot}' must use tool '{config.tool_name}'."
+                )
+            if resolved_tool_name in blocked_tools:
+                raise AgentProfileValidationError(
+                    f"Tool '{resolved_tool_name}' is blocked by the current tool policy."
+                )
+            if allow_mode and allowlist and resolved_tool_name not in allowlist:
+                raise AgentProfileValidationError(
+                    f"Tool '{resolved_tool_name}' is not allowlisted by the current tool policy."
+                )
+            normalized.append(
+                AgentProfileToolAssignment(
+                    slot=item.slot,
+                    tool_name=resolved_tool_name,
+                    config_id=item.config_id,
+                    enabled=item.enabled,
+                    position=item.position,
+                ).model_dump()
+            )
+        normalized.sort(key=lambda item: (int(item.get("position", 0)), str(item.get("slot", ""))))
+        return normalized
+
+    def _load_search_tool_configs(
+        self,
+        workspace_id: str,
+        config_ids: list[str],
+    ) -> dict[str, SearchToolConfigORM]:
+        if not config_ids:
+            return {}
+        with self._database_manager.session() as session:
+            rows = session.scalars(
+                select(SearchToolConfigORM).where(
+                    SearchToolConfigORM.workspace_id == workspace_id,
+                    SearchToolConfigORM.id.in_(config_ids),
+                )
+            ).all()
+            return {row.id: row for row in rows}
+
+    @staticmethod
+    def _read_tool_assignments(assignments: list[dict] | None) -> list[AgentProfileToolAssignment]:
+        return [
+            AgentProfileToolAssignment.model_validate(item)
+            for item in (assignments or [])
+            if isinstance(item, dict)
+        ]

@@ -12,20 +12,26 @@ from .documents import (
     DocumentExtractionRunORM,
     DocumentJobORM,
     DocumentORM,
+    OntologySearchIndexORM,
 )
 from .ontology import (
     OntologyBuildORM,
     OntologyBuildStepORM,
-    OntologyCandidateEntityORM,
-    OntologyCandidateRelationORM,
     OntologyEntityORM,
     OntologyEntityTypeDefinitionORM,
+    OntologyEntityFactORM,
     OntologyGraphDraftORM,
     OntologyRelationORM,
+    OntologyRelationFactORM,
     OntologyRelationTypeDefinitionORM,
     OntologyVersionORM,
 )
-from .providers import ProviderConfigORM, ProviderSecretORM, TaskModelConfigORM
+from .providers import (
+    ProviderConfigORM,
+    ProviderSecretORM,
+    TaskModelConfigORM,
+    WorkspaceSearchSettingsORM,
+)
 from .search_tools import SearchToolConfigORM
 from .runtime_audit import (
     EvidenceBundleORM,
@@ -50,19 +56,21 @@ __all__ = [
     "DocumentChunkORM",
     "DocumentArtifactORM",
     "DocumentExtractionRunORM",
+    "OntologySearchIndexORM",
     "OntologyBuildORM",
     "OntologyBuildStepORM",
-    "OntologyCandidateEntityORM",
-    "OntologyCandidateRelationORM",
     "OntologyEntityORM",
     "OntologyEntityTypeDefinitionORM",
+    "OntologyEntityFactORM",
     "OntologyGraphDraftORM",
     "OntologyRelationORM",
+    "OntologyRelationFactORM",
     "OntologyRelationTypeDefinitionORM",
     "OntologyVersionORM",
     "ProviderConfigORM",
     "ProviderSecretORM",
     "TaskModelConfigORM",
+    "WorkspaceSearchSettingsORM",
     "SearchToolConfigORM",
     "TaskRunORM",
     "TaskRunStepORM",

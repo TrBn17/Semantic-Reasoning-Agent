@@ -20,12 +20,10 @@ class EmergentSchema:
 
 
 class OntologySchemaRegistry:
-    """Reads emergent entity/relation types from past candidate rows.
+    """Reads emergent entity/relation types from published ontology state.
 
-    No hardcoded vocabulary. The schema for each workspace is exactly the
-    union of `entity_type` strings already stored in
-    OntologyCandidateEntityORM (and equivalent for relations). Types are
-    free-text columns, so anything an LLM proposed in a prior build counts.
+    No hardcoded vocabulary. The schema for each workspace is the union of
+    entity/relation type names already published for that workspace.
     """
 
     def __init__(self, ontology_repo: OntologyRepository) -> None:

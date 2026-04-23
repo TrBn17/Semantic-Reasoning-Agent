@@ -60,9 +60,21 @@ export interface ConversationResponse {
   uses_model_override: boolean;
   effective_agent_name?: string | null;
   effective_tool_names: string[];
+  effective_tool_bindings: ConversationToolBinding[];
   created_at: string;
   updated_at: string;
   messages: Message[];
+}
+
+export interface ConversationToolBinding {
+  slot: string;
+  tool_name: string;
+  config_id?: string | null;
+  label: string;
+  enabled: boolean;
+  position: number;
+  is_system: boolean;
+  system_key?: string | null;
 }
 
 export interface ConversationModelSelectionRequest {
@@ -225,8 +237,11 @@ export interface AgentProfileTaskModelAssignment {
 }
 
 export interface AgentProfileToolAssignment {
+  slot: string;
   tool_name: string;
+  config_id?: string | null;
   enabled: boolean;
+  position: number;
 }
 
 export interface ToolPolicySchema {
@@ -353,6 +368,13 @@ export interface SettingsProviderResponse {
   values: SettingsProviderFieldValue[];
 }
 
+export interface WorkspaceSearchDefaultsResponse {
+  embedding_provider: string;
+  embedding_model: string;
+  ready: boolean;
+  reason: string;
+}
+
 export type SettingsUseCase =
   | "chat_default"
   | "retrieval_answer_default"
@@ -386,11 +408,16 @@ export interface SettingsProviderUpdate {
 export interface SettingsResponse {
   workspace: WorkspaceSummary;
   providers: SettingsProviderResponse[];
+  search_defaults: WorkspaceSearchDefaultsResponse;
 }
 
 export interface SettingsUpdateRequest {
   workspace_id: string;
   providers: SettingsProviderUpdate[];
+  search_defaults?: {
+    embedding_provider: string;
+    embedding_model: string;
+  } | null;
 }
 
 export interface KnowledgePackResponse {
@@ -430,6 +457,7 @@ export interface DocumentResponse {
   chunk_count: number;
   tags: string[];
   ingestion_options: Record<string, unknown>;
+  ingestion_mode: "ontology" | "retrieval" | "both";
   source_url: string;
   created_at: string;
   updated_at: string;
@@ -443,6 +471,20 @@ export interface DocumentJobResponse {
   started_at?: string | null;
   finished_at?: string | null;
   error_message?: string | null;
+}
+
+export interface DocumentArtifactResponse {
+  id: string;
+  document_id: string;
+  workspace_id: string;
+  artifact_type: string;
+  name: string;
+  object_key: string;
+  public_url: string;
+  content_type: string;
+  size_bytes: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface DocumentReprocessResponse {
@@ -467,22 +509,13 @@ export interface DocumentOptionChoice {
 }
 
 export interface DocumentIngestionOptionsResponse {
-  pdf_mode: string;
-  output_format: string;
-  use_llm: boolean;
-  force_ocr: boolean;
-  strip_existing_ocr: boolean;
-  extract_images: boolean;
+  ingestion_mode: "ontology" | "retrieval" | "both";
 }
 
 export interface DocumentIngestionCapabilitiesResponse {
   supported_types: string[];
-  marker_supported_types: string[];
-  csv_supported_types: string[];
   default_options: DocumentIngestionOptionsResponse;
-  pdf_mode_options: DocumentOptionChoice[];
-  output_format_options: DocumentOptionChoice[];
-  supports_extract_images: boolean;
+  ingestion_mode_options: DocumentOptionChoice[];
 }
 
 export interface RetrievalResult {
@@ -527,6 +560,7 @@ export interface OntologyBuildStepResponse {
   name: string;
   status: OntologyStepStatus;
   detail?: string | null;
+  metadata: Record<string, unknown>;
   started_at?: string | null;
   finished_at?: string | null;
 }
@@ -831,6 +865,7 @@ export type SearchCollectionTarget = "workspace" | "documents";
 export type SearchOntologyScope = "published" | "version";
 export type SearchGraphSearchType = "nodes" | "edges" | "combined";
 export type SearchGraphReranker = "cross_encoder" | "rrf" | "none";
+export type SearchAssignableToolSlot = "rag" | "ontology_search";
 
 export interface SearchToolConfigResponse {
   id: string;
@@ -840,7 +875,13 @@ export interface SearchToolConfigResponse {
   description: string;
   provider: string;
   model: string;
+  tool_name: string;
+  embedding_provider: string;
+  embedding_model: string;
   default_top_k: number;
+  system_key?: string | null;
+  is_system: boolean;
+  assignable_slots: SearchAssignableToolSlot[];
   collection_target: SearchCollectionTarget;
   document_ids: string[];
   bm25_enabled: boolean;
@@ -861,8 +902,10 @@ export interface SearchToolConfigCreateRequest {
   tool_type: SearchToolType;
   name: string;
   description?: string;
-  provider: string;
-  model: string;
+  provider?: string | null;
+  model?: string | null;
+  embedding_provider?: string | null;
+  embedding_model?: string | null;
   default_top_k?: number;
   collection_target?: SearchCollectionTarget;
   document_ids?: string[];
@@ -880,6 +923,8 @@ export interface SearchToolConfigUpdateRequest {
   description?: string;
   provider?: string;
   model?: string;
+  embedding_provider?: string | null;
+  embedding_model?: string | null;
   default_top_k?: number;
   collection_target?: SearchCollectionTarget;
   document_ids?: string[];
@@ -898,6 +943,7 @@ export interface SearchToolRunRequest {
   bm25_enabled?: boolean | null;
   fusion_strategy?: SearchFusionStrategy | null;
   reranker?: SearchGraphReranker | null;
+  document_ids?: string[] | null;
 }
 
 export interface SearchToolRunResponse {

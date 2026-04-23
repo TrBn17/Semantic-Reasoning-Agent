@@ -21,6 +21,11 @@ type ProviderDraft = {
   values: Record<string, string>;
 };
 
+type SearchDefaultsDraft = {
+  embedding_provider: string;
+  embedding_model: string;
+};
+
 function hydrateProviderDrafts(settings: SettingsResponse): Record<string, ProviderDraft> {
   return Object.fromEntries(
     settings.providers.map((provider) => [
@@ -28,10 +33,12 @@ function hydrateProviderDrafts(settings: SettingsResponse): Record<string, Provi
       {
         enabled: provider.enabled,
         values: Object.fromEntries(
-          provider.values.map((value) => [
-            value.key,
-            value.source === "database" ? value.display_value : "",
-          ]),
+          provider.fields.map((field) => {
+            const value = provider.values.find((item) => item.key === field.key);
+            const initialValue =
+              value?.source === "database" && !field.secret ? value.display_value : "";
+            return [field.key, initialValue];
+          }),
         ),
       },
     ]),
@@ -53,6 +60,13 @@ function draftsEqual(a: Record<string, ProviderDraft>, b: Record<string, Provide
   return true;
 }
 
+function searchDefaultsEqual(left: SearchDefaultsDraft, right: SearchDefaultsDraft): boolean {
+  return (
+    left.embedding_provider === right.embedding_provider &&
+    left.embedding_model === right.embedding_model
+  );
+}
+
 export function ProviderSettingsView() {
   const { t, language } = useI18n();
   const queryClient = useQueryClient();
@@ -62,6 +76,10 @@ export function ProviderSettingsView() {
     queryFn: () => getSettings(workspaceId),
   });
   const [providerDrafts, setProviderDrafts] = useState<Record<string, ProviderDraft>>({});
+  const [searchDefaultsDraft, setSearchDefaultsDraft] = useState<SearchDefaultsDraft>({
+    embedding_provider: "",
+    embedding_model: "",
+  });
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const hydratedDrafts = useMemo(() => (data ? hydrateProviderDrafts(data) : {}), [data]);
   const hasHydratedDrafts = useMemo(() => {
@@ -72,12 +90,26 @@ export function ProviderSettingsView() {
   useEffect(() => {
     if (!data) return;
     setProviderDrafts(hydrateProviderDrafts(data));
+    setSearchDefaultsDraft({
+      embedding_provider: data.search_defaults.embedding_provider,
+      embedding_model: data.search_defaults.embedding_model,
+    });
   }, [data]);
 
   const baselineDrafts = hydratedDrafts;
+  const baselineSearchDefaults = useMemo(
+    () => ({
+      embedding_provider: data?.search_defaults.embedding_provider ?? "",
+      embedding_model: data?.search_defaults.embedding_model ?? "",
+    }),
+    [data?.search_defaults.embedding_model, data?.search_defaults.embedding_provider],
+  );
   const isDirty = useMemo(
-    () => hasHydratedDrafts && !draftsEqual(providerDrafts, baselineDrafts),
-    [hasHydratedDrafts, providerDrafts, baselineDrafts],
+    () =>
+      hasHydratedDrafts &&
+      (!draftsEqual(providerDrafts, baselineDrafts) ||
+        !searchDefaultsEqual(searchDefaultsDraft, baselineSearchDefaults)),
+    [hasHydratedDrafts, providerDrafts, baselineDrafts, searchDefaultsDraft, baselineSearchDefaults],
   );
 
   const mutation = useMutation({
@@ -97,6 +129,7 @@ export function ProviderSettingsView() {
               hydratedDrafts[provider.provider]?.values ??
               {},
           })) ?? [],
+        search_defaults: searchDefaultsDraft,
       });
     },
     onSuccess: async (updated) => {
@@ -126,7 +159,6 @@ export function ProviderSettingsView() {
     <div className="space-y-6">
       <SettingSection
         title={t.agentsSettings.providerEnv.title}
-        description={t.agentsSettings.providerEnv.description}
         action={
           <div className="flex items-center gap-2">
             <Button
@@ -152,6 +184,46 @@ export function ProviderSettingsView() {
         }
       >
         <div className="divide-y">
+          <div className="space-y-3 py-3">
+            <div className="text-sm font-medium">Workspace Search Embeddings</div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="search-embedding-provider" className="text-xs font-medium">
+                  Embedding provider
+                </Label>
+                <Input
+                  id="search-embedding-provider"
+                  value={searchDefaultsDraft.embedding_provider}
+                  onChange={(event) =>
+                    setSearchDefaultsDraft((current) => ({
+                      ...current,
+                      embedding_provider: event.target.value,
+                    }))
+                  }
+                  className="h-8 text-sm"
+                  placeholder="cloudflare"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="search-embedding-model" className="text-xs font-medium">
+                  Embedding model
+                </Label>
+                <Input
+                  id="search-embedding-model"
+                  value={searchDefaultsDraft.embedding_model}
+                  onChange={(event) =>
+                    setSearchDefaultsDraft((current) => ({
+                      ...current,
+                      embedding_model: event.target.value,
+                    }))
+                  }
+                  className="h-8 text-sm"
+                  placeholder="@cf/baai/bge-base-en-v1.5"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">{data.search_defaults.reason}</p>
+          </div>
           {data.providers.map((provider) => {
             const draft = providerDrafts[provider.provider];
             const isOpen = expanded[provider.provider] ?? false;
@@ -219,6 +291,19 @@ export function ProviderSettingsView() {
                             id={inputId}
                             type={field.secret ? "password" : "text"}
                             placeholder={field.placeholder}
+                            title={
+                              [
+                                field.help_text,
+                                valueState?.configured && !draft?.values[field.key]
+                                  ? `${t.agentsSettings.providerEnv.currentPrefix} ${
+                                      valueState.display_value ||
+                                      t.agentsSettings.providerEnv.configured
+                                    }`
+                                  : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ") || undefined
+                            }
                             value={draft?.values[field.key] ?? ""}
                             onChange={(event) =>
                               setProviderDrafts((current) => ({
@@ -235,15 +320,6 @@ export function ProviderSettingsView() {
                             }
                             className="h-8 text-sm"
                           />
-                          <p className="text-[11px] leading-relaxed text-muted-foreground">
-                            {field.help_text}
-                            {valueState?.configured && !draft?.values[field.key]
-                              ? ` · ${t.agentsSettings.providerEnv.currentPrefix} ${
-                                  valueState.display_value ||
-                                  t.agentsSettings.providerEnv.configured
-                                }`
-                              : ""}
-                          </p>
                         </div>
                       );
                     })}

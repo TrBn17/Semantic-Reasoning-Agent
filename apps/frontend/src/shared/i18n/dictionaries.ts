@@ -101,6 +101,11 @@ export type Dictionary = {
     uploadTitle: string;
     uploadDescription: string;
     fileLabel: string;
+    ingestionModeLabel: string;
+    ingestionModeOntology: string;
+    ingestionModeRetrieval: string;
+    ingestionModeBoth: string;
+    ingestionModeHint: string;
     pdfModeLabel: string;
     pdfModeFast: string;
     pdfModeAccurate: string;
@@ -743,6 +748,11 @@ export const dictionaries: Record<Language, Dictionary> = {
       uploadTitle: "Upload a document",
       uploadDescription: "PDF, DOCX, XLSX, or CSV. Parsed and indexed by the ingestion worker.",
       fileLabel: "File",
+      ingestionModeLabel: "Ingestion mode",
+      ingestionModeOntology: "Ontology only",
+      ingestionModeRetrieval: "Retrieval only",
+      ingestionModeBoth: "Both",
+      ingestionModeHint: "Choose whether to run ontology, retrieval indexing, or both in parallel.",
       pdfModeLabel: "PDF mode",
       pdfModeFast: "Fast",
       pdfModeAccurate: "Accurate",
@@ -1443,6 +1453,11 @@ export const dictionaries: Record<Language, Dictionary> = {
       uploadTitle: "Tải tài liệu lên",
       uploadDescription: "Hỗ trợ PDF, DOCX, XLSX, hoặc CSV. Tài liệu sẽ được xử lý bởi worker.",
       fileLabel: "Tệp tin",
+      ingestionModeLabel: "Chế độ ingest",
+      ingestionModeOntology: "Chỉ ontology",
+      ingestionModeRetrieval: "Chỉ retrieval",
+      ingestionModeBoth: "Cả hai",
+      ingestionModeHint: "Chọn chạy ontology, lập chỉ mục retrieval, hoặc chạy song song cả hai.",
       pdfModeLabel: "Chế độ PDF",
       pdfModeFast: "Nhanh",
       pdfModeAccurate: "Chính xác",

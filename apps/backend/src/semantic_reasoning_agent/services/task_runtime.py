@@ -5,15 +5,10 @@ from uuid import uuid4
 
 from semantic_reasoning_agent.core.config import Settings
 from semantic_reasoning_agent.core.runtime_constants import (
-    DEFAULT_TASK_TOP_K,
-    GRAPH_DOMAIN_WORKSPACE,
     GRAPH_KEYWORDS,
     NO_CONTEXT_MESSAGE,
     ONTOLOGY_DOMAIN_WORKSPACE,
     ONTOLOGY_KEYWORDS,
-    TOOL_GRAPHITI_SEARCH,
-    TOOL_ONTOLOGY_LOOKUP,
-    TOOL_RETRIEVAL_INTERNAL,
     WORKFLOW_TASK_RESOLVE_CHAT,
 )
 from semantic_reasoning_agent.domain.contracts.llm import LLMMessage
@@ -67,13 +62,22 @@ class ToolPlanStep:
 @dataclass(frozen=True)
 class AgentExecutionScope:
     allowed_tool_names: tuple[str, ...]
-    allowed_tool_families: tuple[str, ...]
     knowledge_pack_ids: tuple[str, ...]
     derived_document_ids: tuple[str, ...]
     evidence_sources: tuple[str, ...]
     allow_model_only_fallback: bool
     capability_preset: str
     capability_configured: bool
+    slot_bindings: tuple["SlotToolBinding", ...]
+
+
+@dataclass(frozen=True)
+class SlotToolBinding:
+    slot: str
+    tool_name: str
+    config_id: str
+    label: str
+    position: int
 
 
 class TaskRuntimeService:
@@ -243,6 +247,7 @@ class TaskRuntimeService:
                 use_retrieval=payload.use_retrieval,
                 document_ids=payload.document_ids,
                 top_k=payload.top_k,
+                enabled_tool_names=payload.enabled_tool_names,
             ),
             provider=provider,
             model=model,
@@ -273,27 +278,41 @@ class TaskRuntimeService:
         request_document_ids: list[str],
     ) -> AgentExecutionScope:
         if profile is None:
-            preset = get_capability_preset("internal_qa")
-            derived_document_ids = tuple(request_document_ids)
             return AgentExecutionScope(
-                allowed_tool_names=preset.default_tool_order,
-                allowed_tool_families=preset.allowed_tool_families,
+                allowed_tool_names=(),
                 knowledge_pack_ids=(),
-                derived_document_ids=derived_document_ids,
+                derived_document_ids=tuple(request_document_ids),
                 evidence_sources=("internal_chunk", "graph_node", "graph_edge"),
                 allow_model_only_fallback=True,
-                capability_preset=preset.preset,
+                capability_preset="internal_qa",
                 capability_configured=False,
+                slot_bindings=(),
             )
 
         preset = get_capability_preset(profile.capability_preset)
         capability_configured = has_explicit_capability_config(profile.policy_config)
-        allowed_tools = list(preset.default_tool_order)
-        if profile.tool_policy.allowed_tools:
-            allowed_set = set(profile.tool_policy.allowed_tools)
-            allowed_tools = [tool_name for tool_name in allowed_tools if tool_name in allowed_set]
         blocked = set(profile.tool_policy.blocked_tools)
-        allowed_tools = [tool_name for tool_name in allowed_tools if tool_name not in blocked]
+        allow_mode = profile.tool_policy.mode == "allowlist"
+        allow_set = set(profile.tool_policy.allowed_tools)
+        slot_bindings: list[SlotToolBinding] = []
+        for index, assignment in enumerate(profile.tool_assignments):
+            if not assignment.enabled or not assignment.config_id:
+                continue
+            if assignment.tool_name in blocked:
+                continue
+            if allow_mode and allow_set and assignment.tool_name not in allow_set:
+                continue
+            if assignment.slot not in {"rag", "ontology_search"}:
+                continue
+            slot_bindings.append(
+                SlotToolBinding(
+                    slot=assignment.slot,
+                    tool_name=assignment.tool_name,
+                    config_id=assignment.config_id,
+                    label=assignment.tool_name,
+                    position=assignment.position if assignment.position is not None else index,
+                )
+            )
 
         pack_document_ids = self._knowledge_pack_service.resolve_document_scope(
             workspace_id,
@@ -311,14 +330,14 @@ class TaskRuntimeService:
                 derived_document_ids = tuple(sorted(set(pack_document_ids)))
 
         return AgentExecutionScope(
-            allowed_tool_names=tuple(allowed_tools),
-            allowed_tool_families=preset.allowed_tool_families,
+            allowed_tool_names=tuple(binding.tool_name for binding in slot_bindings),
             knowledge_pack_ids=tuple(profile.knowledge_pack_ids),
             derived_document_ids=derived_document_ids,
             evidence_sources=tuple(profile.evidence_policy.allowed_sources),
             allow_model_only_fallback=profile.evidence_policy.allow_model_only_fallback,
             capability_preset=preset.preset,
             capability_configured=capability_configured,
+            slot_bindings=tuple(sorted(slot_bindings, key=lambda item: item.position)),
         )
 
     def _build_tool_plan(
@@ -327,17 +346,30 @@ class TaskRuntimeService:
         *,
         scope: AgentExecutionScope,
     ) -> list[ToolPlanStep]:
-        preset = get_capability_preset(scope.capability_preset)
         plan: list[ToolPlanStep] = []
-        retrieval_should_run = TOOL_RETRIEVAL_INTERNAL in scope.allowed_tool_names and (
-            bool(scope.derived_document_ids)
-            or request.use_retrieval and not scope.capability_configured
+        enabled_tool_names = set(request.enabled_tool_names or [])
+        rag_binding = next((item for item in scope.slot_bindings if item.slot == "rag"), None)
+        ontology_binding = next(
+            (item for item in scope.slot_bindings if item.slot == "ontology_search"),
+            None,
         )
-        if retrieval_should_run:
+
+        retrieval_should_run = (
+            rag_binding is not None
+            and rag_binding.tool_name == "supersearch.docs"
+            and (not enabled_tool_names or rag_binding.tool_name in enabled_tool_names)
+            and (
+                request.use_retrieval
+                or bool(scope.derived_document_ids)
+                or not scope.capability_configured
+            )
+        )
+        if retrieval_should_run and rag_binding is not None:
             plan.append(
                 ToolPlanStep(
-                    tool_name=TOOL_RETRIEVAL_INTERNAL,
+                    tool_name=rag_binding.tool_name,
                     arguments={
+                        "config_ref": rag_binding.config_id,
                         "query": request.content,
                         "document_ids": list(scope.derived_document_ids),
                         "top_k": request.top_k,
@@ -347,20 +379,21 @@ class TaskRuntimeService:
                     can_fallback=True,
                 )
             )
-        if preset.ontology_enabled and TOOL_ONTOLOGY_LOOKUP in scope.allowed_tool_names and _should_use_ontology(request.content):
+        if (
+            ontology_binding is not None
+            and ontology_binding.tool_name == "supersearch.graph"
+            and (not enabled_tool_names or ontology_binding.tool_name in enabled_tool_names)
+            and (_should_use_ontology(request.content) or _should_use_graph(request.content))
+        ):
             plan.append(
                 ToolPlanStep(
-                    tool_name=TOOL_ONTOLOGY_LOOKUP,
-                    arguments={"mode": "entity_lookup", "query": request.content},
-                    reason="Use ontology context for entity/type grounding.",
-                )
-            )
-        if preset.graph_enabled and TOOL_GRAPHITI_SEARCH in scope.allowed_tool_names and _should_use_graph(request.content):
-            plan.append(
-                ToolPlanStep(
-                    tool_name=TOOL_GRAPHITI_SEARCH,
-                    arguments={"query": request.content, "max_results": request.top_k},
-                    reason="Use graph context for relationship-oriented questions.",
+                    tool_name=ontology_binding.tool_name,
+                    arguments={
+                        "config_ref": ontology_binding.config_id,
+                        "query": request.content,
+                        "top_k": request.top_k,
+                    },
+                    reason="Use ontology search for entity and relationship grounding.",
                 )
             )
         return plan
@@ -374,11 +407,6 @@ class TaskRuntimeService:
         workflow_id: str,
         request: TaskResolveRequest,
     ):
-        ontology_context = None
-        if step.tool_name == TOOL_ONTOLOGY_LOOKUP:
-            ontology_context = OntologyContextRef(domain=ONTOLOGY_DOMAIN_WORKSPACE)
-        elif step.tool_name == TOOL_GRAPHITI_SEARCH:
-            ontology_context = OntologyContextRef(domain=GRAPH_DOMAIN_WORKSPACE)
         return self._tool_runtime.invoke(
             ToolEnvelope(
                 call_id=uuid4(),
@@ -389,7 +417,9 @@ class TaskRuntimeService:
                 task_type="chat.answer",
                 task_payload={"content": request.content, "reason": step.reason},
                 arguments=step.arguments,
-                ontology_context=ontology_context,
+                ontology_context=OntologyContextRef(domain=ONTOLOGY_DOMAIN_WORKSPACE)
+                if step.tool_name == "supersearch.graph"
+                else None,
                 constraints=ToolConstraints(max_results=request.top_k),
             )
         )

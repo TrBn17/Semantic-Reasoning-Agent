@@ -105,14 +105,7 @@ export function SettingsModelsView() {
         </div>
       </SettingSection>
 
-      <SettingSection
-        title={language === "vi" ? "Danh mục model" : "Model catalog"}
-        description={
-          language === "vi"
-            ? "Mô hình hiển thị đúng với thứ tự backend trả về."
-            : "Models exposed by the backend settings endpoint, in backend order."
-        }
-      >
+      <SettingSection title={language === "vi" ? "Danh mục model" : "Model catalog"}>
         {filtered.length === 0 ? (
           <div className="py-10 text-center text-sm text-muted-foreground">
             {t.common.noMatches}

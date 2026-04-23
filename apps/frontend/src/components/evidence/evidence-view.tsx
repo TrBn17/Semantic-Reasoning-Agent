@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
@@ -13,15 +13,11 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { EvidenceSourceType, EvidenceItemViewModel } from "@/entities/evidence/types";
 import {
-  candidateEntityToEvidence,
-  candidateRelationToEvidence,
   retrievalResultToEvidence,
 } from "@/shared/api/adapters/evidence";
-import { listBuildEntities, listBuildRelations, listBuilds } from "@/shared/api/ontology";
 import { searchRetrieval } from "@/shared/api/retrieval";
 import { useCapabilities } from "@/shared/capabilities/useCapabilities";
 import { useI18n } from "@/shared/i18n/use-language";
-import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { track } from "@/shared/telemetry/track";
 
@@ -32,7 +28,6 @@ export function EvidenceView() {
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(5);
   const [selected, setSelected] = useState<EvidenceItemViewModel | null>(null);
-  const [includeOntology, setIncludeOntology] = useState(true);
   const [page, setPage] = useState(1);
   const pageSize = 12;
   const sourceLabels: Record<EvidenceSourceType, string> = {
@@ -44,8 +39,8 @@ export function EvidenceView() {
   const [enabledSources, setEnabledSources] = useState<Record<EvidenceSourceType, boolean>>({
     retrieval_citation: true,
     document_chunk: true,
-    ontology_candidate_entity: true,
-    ontology_candidate_relation: true,
+    ontology_candidate_entity: false,
+    ontology_candidate_relation: false,
   });
 
   const searchMutation = useMutation({
@@ -58,23 +53,6 @@ export function EvidenceView() {
     onError: (err) => toast.error(`${t.evidenceUi.searchFailedPrefix} ${(err as Error).message}`),
   });
 
-  const builds = useQuery({
-    queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
-    queryFn: () => listBuilds(workspaceId ?? undefined),
-    enabled: includeOntology,
-  });
-  const latestBuild = builds.data?.[0];
-  const buildEntities = useQuery({
-    queryKey: queryKeys.ontology.buildEntities(latestBuild?.id ?? "none"),
-    queryFn: () => listBuildEntities(latestBuild!.id),
-    enabled: includeOntology && Boolean(latestBuild),
-  });
-  const buildRelations = useQuery({
-    queryKey: queryKeys.ontology.buildRelations(latestBuild?.id ?? "none"),
-    queryFn: () => listBuildRelations(latestBuild!.id),
-    enabled: includeOntology && Boolean(latestBuild),
-  });
-
   const items = useMemo(() => {
     const out: EvidenceItemViewModel[] = [];
     if (searchMutation.data) {
@@ -82,12 +60,8 @@ export function EvidenceView() {
         out.push(retrievalResultToEvidence(r));
       }
     }
-    if (includeOntology) {
-      for (const e of buildEntities.data ?? []) out.push(candidateEntityToEvidence(e));
-      for (const r of buildRelations.data ?? []) out.push(candidateRelationToEvidence(r));
-    }
     return out.filter((i) => enabledSources[i.sourceType]);
-  }, [buildEntities.data, buildRelations.data, enabledSources, includeOntology, searchMutation.data]);
+  }, [enabledSources, searchMutation.data]);
 
   const pagedItems = useMemo(
     () => items.slice((page - 1) * pageSize, page * pageSize),
@@ -99,9 +73,7 @@ export function EvidenceView() {
     if (page > pageCount) setPage(pageCount);
   }, [page, pageCount]);
 
-  const loading =
-    searchMutation.isPending ||
-    (includeOntology && (buildEntities.isLoading || buildRelations.isLoading));
+  const loading = searchMutation.isPending;
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -158,16 +130,6 @@ export function EvidenceView() {
             {sourceLabels[key]}
           </label>
         ))}
-        <span className="ml-auto" />
-        <label className="flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            className="h-3.5 w-3.5 rounded border-input"
-            checked={includeOntology}
-            onChange={(e) => setIncludeOntology(e.target.checked)}
-          />
-          {t.evidenceUi.includeOntology}
-        </label>
         {!caps.evidencePromotionAvailable && (
           <Badge variant="secondary" className="ml-2">
             {t.evidenceUi.promoteComingSoon}

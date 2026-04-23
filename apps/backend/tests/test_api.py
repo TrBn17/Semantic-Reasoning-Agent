@@ -1,6 +1,12 @@
+from io import BytesIO
+
 from fastapi.testclient import TestClient
+from docx import Document as DocxDocument
+import pytest
 
 from semantic_reasoning_agent.main import app
+from semantic_reasoning_agent.schemas.ontology import OntologyBuildCreateRequest
+from semantic_reasoning_agent.services.ontology_service import OntologyBuildError
 from semantic_reasoning_agent.services.provider_models_service import (
     AnthropicModelsClient,
     OpenAIModelsClient,
@@ -15,6 +21,89 @@ def test_healthcheck() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_delete_failed_ontology_build_via_api(
+    document_service,
+    ontology_service,
+    monkeypatch,
+) -> None:
+    document = document_service.upload_document(
+        filename="ontology-source.docx",
+        content=_build_docx_bytes(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    monkeypatch.setattr(
+        ontology_service._task_dispatcher,
+        "enqueue_ontology_build_processing",
+        lambda build_id: None,
+    )
+
+    class _DeleteApiRateLimitedExtractor:
+        def classify_document_domain(self, document) -> str:  # noqa: ANN001
+            return "pending"
+
+        def extract_ontology_candidates(self, document, workspace_id=None, provider=None, model=None):  # noqa: ANN001
+            raise RuntimeError("simulated extraction failure")
+
+        def summarize_ontology(self, document, *, workspace_id=None, provider=None, model=None, domain=None):  # noqa: ANN001
+            raise AssertionError("summarize_ontology should not be called after extraction failure")
+
+    ontology_service._ontology_extractor = _DeleteApiRateLimitedExtractor()
+    build = ontology_service.create_build(
+        OntologyBuildCreateRequest(
+            document_id=document.id,
+            extraction_provider="openrouter",
+            extraction_model="test-model",
+        )
+    )
+
+    with pytest.raises(OntologyBuildError):
+        ontology_service.process_build(build.id)
+
+    response = client.delete(f"/api/v1/ontology/builds/{build.id}")
+    assert response.status_code == 204
+
+    missing = client.get(f"/api/v1/ontology/builds/{build.id}")
+    assert missing.status_code == 404
+
+
+def test_delete_pending_ontology_build_via_api_returns_bad_request(
+    document_service,
+    ontology_service,
+    monkeypatch,
+) -> None:
+    document = document_service.upload_document(
+        filename="ontology-source.docx",
+        content=_build_docx_bytes(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    monkeypatch.setattr(
+        ontology_service._task_dispatcher,
+        "enqueue_ontology_build_processing",
+        lambda build_id: None,
+    )
+    build = ontology_service.create_build(
+        OntologyBuildCreateRequest(
+            document_id=document.id,
+            extraction_provider="echo",
+            extraction_model="local-echo",
+        )
+    )
+
+    response = client.delete(f"/api/v1/ontology/builds/{build.id}")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Only failed ontology builds can be deleted."
+
+
+def _build_docx_bytes() -> bytes:
+    document = DocxDocument()
+    document.add_heading("Delivery Plan", level=1)
+    document.add_paragraph("Alpha initiative depends on the beta system for approvals.")
+    document.add_paragraph("Beta system uses Audit service.")
+    buffer = BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
 
 
 def test_auth_me_contract() -> None:
@@ -287,6 +376,13 @@ def test_chat_stream_endpoint_emits_structured_events() -> None:
 
 
 def test_default_agent_profile_drives_new_conversation_model() -> None:
+    tools_response = client.get("/api/v1/search-tools")
+    assert tools_response.status_code == 200
+    tools = tools_response.json()
+    rag_tool = next(item for item in tools if item["system_key"] == "workspace_default_rag")
+    ontology_tool = next(
+        item for item in tools if item["system_key"] == "workspace_default_ontology_search"
+    )
     profile_response = client.post(
         "/api/v1/agents/profiles",
         json={
@@ -301,7 +397,22 @@ def test_default_agent_profile_drives_new_conversation_model() -> None:
                     "model": "local-echo",
                 }
             ],
-            "tool_assignments": [{"tool_name": "retrieval.internal", "enabled": False}],
+            "tool_assignments": [
+                {
+                    "slot": "rag",
+                    "tool_name": "supersearch.docs",
+                    "config_id": rag_tool["id"],
+                    "enabled": True,
+                    "position": 0,
+                },
+                {
+                    "slot": "ontology_search",
+                    "tool_name": "supersearch.graph",
+                    "config_id": ontology_tool["id"],
+                    "enabled": True,
+                    "position": 1,
+                },
+            ],
         },
     )
     assert profile_response.status_code == 201
@@ -316,7 +427,41 @@ def test_default_agent_profile_drives_new_conversation_model() -> None:
     assert conversation["agent_profile_id"] == profile["id"]
     assert conversation["uses_model_override"] is False
     assert conversation["provider"] == "echo"
-    assert conversation["effective_tool_names"] == ["ontology.lookup", "graph.search", "graph.ingest"]
+    assert conversation["effective_tool_names"] == ["supersearch.docs", "supersearch.graph"]
+    assert [item["label"] for item in conversation["effective_tool_bindings"]] == [
+        rag_tool["name"],
+        ontology_tool["name"],
+    ]
+
+
+def test_agent_profile_rejects_slot_assignment_when_tool_policy_blocks_it() -> None:
+    tools = client.get("/api/v1/search-tools").json()
+    rag_tool = next(item for item in tools if item["system_key"] == "workspace_default_rag")
+
+    response = client.post(
+        "/api/v1/agents/profiles",
+        json={
+            "workspace_id": "workspace-demo",
+            "name": "Blocked slots",
+            "tool_policy": {
+                "mode": "blocklist",
+                "allowed_tools": [],
+                "blocked_tools": ["supersearch.docs"],
+            },
+            "tool_assignments": [
+                {
+                    "slot": "rag",
+                    "tool_name": "supersearch.docs",
+                    "config_id": rag_tool["id"],
+                    "enabled": True,
+                    "position": 0,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "blocked" in response.json()["detail"].lower()
 
 
 def test_conversation_model_override_persists_per_session() -> None:

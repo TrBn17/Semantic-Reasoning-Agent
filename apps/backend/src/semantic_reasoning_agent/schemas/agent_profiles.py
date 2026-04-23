@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from semantic_reasoning_agent.schemas.agent_capabilities import (
     EvidencePolicySchema,
@@ -20,8 +20,33 @@ class AgentProfileTaskModelAssignment(BaseModel):
 
 
 class AgentProfileToolAssignment(BaseModel):
+    slot: str = "legacy"
     tool_name: str
+    config_id: str | None = None
     enabled: bool = True
+    position: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_shape(cls, value):  # noqa: ANN001
+        if not isinstance(value, dict):
+            return value
+        tool_name = value.get("tool_name") or value.get("toolName") or ""
+        slot = value.get("slot")
+        if not slot:
+            if tool_name == "supersearch.docs":
+                slot = "rag"
+            elif tool_name == "supersearch.graph":
+                slot = "ontology_search"
+            else:
+                slot = "legacy"
+        return {
+            "slot": slot,
+            "tool_name": tool_name,
+            "config_id": value.get("config_id") or value.get("configId"),
+            "enabled": value.get("enabled", value.get("is_enabled", True)),
+            "position": value.get("position", 0),
+        }
 
 
 class AgentProfileResponse(BaseModel):

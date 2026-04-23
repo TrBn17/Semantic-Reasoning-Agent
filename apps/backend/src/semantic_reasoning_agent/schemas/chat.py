@@ -8,6 +8,17 @@ from semantic_reasoning_agent.core.time import utc_now
 from semantic_reasoning_agent.schemas.retrieval import Citation
 
 
+class ConversationToolBinding(BaseModel):
+    slot: str
+    tool_name: str
+    config_id: str | None = None
+    label: str
+    enabled: bool = True
+    position: int = 0
+    is_system: bool = False
+    system_key: str | None = None
+
+
 class Message(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     role: str
@@ -45,6 +56,7 @@ class ConversationResponse(BaseModel):
     uses_model_override: bool = False
     effective_agent_name: str | None = None
     effective_tool_names: list[str] = Field(default_factory=list)
+    effective_tool_bindings: list[ConversationToolBinding] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     messages: list[Message]

@@ -9,7 +9,16 @@ from fastapi.testclient import TestClient
 
 from semantic_reasoning_agent.core.container import get_app_container
 from semantic_reasoning_agent.main import app
-from semantic_reasoning_agent.persistence.models import DocumentChunkORM, DocumentORM
+from semantic_reasoning_agent.persistence.models import (
+    DocumentChunkORM,
+    DocumentORM,
+    OntologyEntityFactORM,
+    OntologyEntityORM,
+    OntologyEntityTypeDefinitionORM,
+    OntologyRelationORM,
+    OntologyRelationTypeDefinitionORM,
+    OntologyVersionORM,
+)
 from semantic_reasoning_agent.services.bm25_scorer import BM25Scorer
 from semantic_reasoning_agent.services.search_tool_service import (
     SearchToolConfigInvalidError,
@@ -25,6 +34,7 @@ def _seed_document_chunks(count: int = 3) -> list[str]:
     """Insert a small document + chunks and return chunk_ids."""
 
     container = get_app_container()
+    retrieval_service = container.retrieval_service
     now = datetime.now(timezone.utc)
     chunk_ids: list[str] = []
     with container.database_manager.session() as session:
@@ -52,6 +62,7 @@ def _seed_document_chunks(count: int = 3) -> list[str]:
             ("c3", "Completely unrelated cooking instructions for a cake."),
         ][:count]
         for order, (cid, text) in enumerate(chunks):
+            embedding = retrieval_service.embed_text(text, workspace_id=WORKSPACE_ID)
             session.add(
                 DocumentChunkORM(
                     chunk_id=cid,
@@ -63,12 +74,108 @@ def _seed_document_chunks(count: int = 3) -> list[str]:
                     chunk_index=order,
                     source_url="",
                     parser_version="test",
-                    embedding={},
+                    embedding=embedding,
+                    embedding_provider="token",
+                    embedding_model="token-fallback",
                     created_at=now,
                 )
             )
             chunk_ids.append(cid)
     return chunk_ids
+
+
+def _seed_ontology_with_facts() -> None:
+    container = get_app_container()
+    now = datetime.now(timezone.utc)
+    with container.database_manager.session() as session:
+        version = OntologyVersionORM(
+            id="ver-1",
+            workspace_id=WORKSPACE_ID,
+            version_number=1,
+            source_build_id="build-1",
+            ontology_title="Test Graph",
+            ontology_summary="seed",
+            created_at=now,
+        )
+        entity = OntologyEntityORM(
+            id="entity-1",
+            version_id=version.id,
+            workspace_id=WORKSPACE_ID,
+            resolution_key="sensor-a",
+            name="Sensor A",
+            entity_type="sensor",
+            aliases=[],
+            query_rules=[],
+            source_build_id="build-1",
+            source_document_id="doc-1",
+            created_at=now,
+        )
+        relation = OntologyRelationORM(
+            id="relation-1",
+            version_id=version.id,
+            workspace_id=WORKSPACE_ID,
+            source_entity_id=entity.id,
+            target_entity_id=entity.id,
+            relation_type="reports",
+            confidence=1.0,
+            source_build_id="build-1",
+            source_document_id="doc-1",
+            evidence_text="Sensor reports values.",
+            provenance={},
+            query_rules=[],
+            created_at=now,
+        )
+        entity_type = OntologyEntityTypeDefinitionORM(
+            id="entity-type-1",
+            version_id=version.id,
+            workspace_id=WORKSPACE_ID,
+            name="sensor",
+            description="Sensor entity",
+            attributes=[],
+            query_rules=[
+                {
+                    "rule_id": "sensor-threshold-rule",
+                    "scope": "entity_type",
+                    "query_route": "sql_facts",
+                    "trigger_keywords": ["threshold", "sensor"],
+                }
+            ],
+            examples=["Sensor A"],
+            created_at=now,
+        )
+        relation_type = OntologyRelationTypeDefinitionORM(
+            id="relation-type-1",
+            version_id=version.id,
+            workspace_id=WORKSPACE_ID,
+            name="reports",
+            description="report relation",
+            attributes=[],
+            query_rules=[],
+            allowed_source_targets=[],
+            created_at=now,
+        )
+        fact = OntologyEntityFactORM(
+            id="fact-1",
+            workspace_id=WORKSPACE_ID,
+            version_id=version.id,
+            entity_id=entity.id,
+            metric_key="maintenance_threshold",
+            value_num=80.0,
+            value_text=None,
+            value_bool=None,
+            unit="percent",
+            observed_at=now,
+            source_document_id="doc-1",
+            source_chunk_id="chunk-1",
+            metadata_json={},
+            created_at=now,
+        )
+        session.add(version)
+        session.add(entity)
+        session.add(relation)
+        session.add(entity_type)
+        session.add(relation_type)
+        session.add(fact)
 
 
 # ------------------ BM25 scorer unit tests ------------------
@@ -175,6 +282,22 @@ def test_service_readiness_reflects_model_config() -> None:
     assert "not ready" in created.ready_reason.lower()
 
 
+def test_service_auto_provisions_workspace_defaults() -> None:
+    configs = _service().list()
+    system_keys = {config.system_key for config in configs if config.is_system}
+    assert "workspace_default_rag" in system_keys
+    assert "workspace_default_ontology_search" in system_keys
+
+
+def test_service_duplicate_creates_custom_copy_for_system_tool() -> None:
+    svc = _service()
+    system_tool = next(config for config in svc.list() if config.system_key == "workspace_default_rag")
+    duplicated = svc.duplicate(system_tool.id)
+    assert duplicated.is_system is False
+    assert duplicated.name.startswith(system_tool.name)
+    assert duplicated.embedding_provider == system_tool.embedding_provider
+
+
 # ------------------ HTTP API ------------------
 
 
@@ -214,6 +337,19 @@ def test_http_crud_round_trip_for_docs_config() -> None:
 
     missing = client.get(f"/api/v1/search-tools/{config_id}")
     assert missing.status_code == 404
+
+
+def test_http_system_search_tool_cannot_be_deleted_but_can_be_duplicated() -> None:
+    client = TestClient(app)
+    configs = client.get("/api/v1/search-tools").json()
+    system_tool = next(item for item in configs if item["system_key"] == "workspace_default_rag")
+
+    delete_response = client.delete(f"/api/v1/search-tools/{system_tool['id']}")
+    assert delete_response.status_code == 400
+
+    duplicate_response = client.post(f"/api/v1/search-tools/{system_tool['id']}/duplicate")
+    assert duplicate_response.status_code == 201
+    assert duplicate_response.json()["is_system"] is False
 
 
 def test_http_rejects_invalid_docs_payload() -> None:
@@ -290,6 +426,30 @@ def test_run_graph_without_published_ontology_returns_partial_and_no_evidence() 
     assert response.tool_name == "supersearch.graph"
     assert response.evidence == []
     assert response.status == "partial"
+
+
+def test_run_graph_uses_sql_facts_route_when_rule_matches() -> None:
+    _seed_ontology_with_facts()
+    svc = _service()
+    from semantic_reasoning_agent.schemas.search_tools import (
+        SearchToolConfigCreateRequest,
+        SearchToolRunRequest,
+    )
+
+    config = svc.create(
+        SearchToolConfigCreateRequest(
+            tool_type="graph",
+            name="graph-facts",
+            provider="openai",
+            model="gpt-4o-mini",
+            ontology_scope="published",
+        )
+    )
+    response = svc.run(config.id, SearchToolRunRequest(query="sensor threshold"))
+
+    assert response.status in {"success", "partial"}
+    assert len(response.evidence) >= 1
+    assert any(ev.citation_anchor.locator.startswith("ontology-entity-fact:") for ev in response.evidence)
 
 
 # ------------------ Tool registration ------------------

@@ -54,13 +54,30 @@ class Settings(BaseSettings):
         default="https://openrouter.ai/api/v1",
         alias="OPENROUTER_BASE_URL",
     )
+    cloudflare_api_key: str | None = Field(default=None, alias="CLOUDFLARE_API_KEY")
+    cloudflare_account_id: str | None = Field(default=None, alias="CLOUDFLARE_ACCOUNT_ID")
+    default_embedding_provider: str = Field(
+        default="cloudflare",
+        alias="DEFAULT_EMBEDDING_PROVIDER",
+    )
+    default_embedding_model: str = Field(
+        default="@cf/baai/bge-base-en-v1.5",
+        alias="DEFAULT_EMBEDDING_MODEL",
+    )
     google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ontology_llm_provider: str | None = Field(default=None, alias="ONTOLOGY_LLM_PROVIDER")
     ontology_llm_model: str | None = Field(default=None, alias="ONTOLOGY_LLM_MODEL")
-    ontology_prompt_version: str = Field(default="v1", alias="ONTOLOGY_PROMPT_VERSION")
+    ontology_prompt_version: str = Field(default="v2", alias="ONTOLOGY_PROMPT_VERSION")
     ontology_chunk_limit: int = Field(default=24, alias="ONTOLOGY_CHUNK_LIMIT")
+    ontology_markdown_char_limit: int = Field(default=50000, alias="ONTOLOGY_MARKDOWN_CHAR_LIMIT")
     ontology_llm_enabled: bool = Field(default=True, alias="ONTOLOGY_LLM_ENABLED")
+    ontology_extraction_max_tokens: int = Field(default=6000, alias="ONTOLOGY_EXTRACTION_MAX_TOKENS")
+    ontology_extraction_reasoning_effort: str = Field(
+        default="low",
+        alias="ONTOLOGY_EXTRACTION_REASONING_EFFORT",
+    )
+    ontology_extraction_max_chunks: int = Field(default=8, alias="ONTOLOGY_EXTRACTION_MAX_CHUNKS")
 
     object_store_backend: str = Field(default="postgres", alias="OBJECT_STORE_BACKEND")
     object_store_bucket: str = Field(default="semantic-artifacts", alias="OBJECT_STORE_BUCKET")
@@ -76,12 +93,6 @@ class Settings(BaseSettings):
     vector_store_backend: str = Field(default="postgres", alias="VECTOR_STORE_BACKEND")
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
     qdrant_collection_name: str = Field(default="document_chunks", alias="QDRANT_COLLECTION_NAME")
-    pdf_parser_backend: str = Field(default="marker", alias="PDF_PARSER_BACKEND")
-    pdf_parser_default_mode: str = Field(default="fast", alias="PDF_PARSER_DEFAULT_MODE")
-    marker_torch_device: str | None = Field(default=None, alias="MARKER_TORCH_DEVICE")
-    marker_use_llm_in_accurate: bool = Field(default=False, alias="MARKER_USE_LLM_IN_ACCURATE")
-    marker_max_pages_per_doc: int | None = Field(default=None, alias="MARKER_MAX_PAGES_PER_DOC")
-    marker_model_cache_dir: str = Field(default=".cache/datalab/models", alias="MARKER_MODEL_CACHE_DIR")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

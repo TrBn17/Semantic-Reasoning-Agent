@@ -5,13 +5,15 @@ from sqlalchemy import delete, select
 from semantic_reasoning_agent.core.config import Settings
 from semantic_reasoning_agent.core.runtime_constants import DEFAULT_TASK_TOP_K
 from semantic_reasoning_agent.core.time import utc_now
-from semantic_reasoning_agent.documents.models import IndexedChunk, ParsedDocument
+from semantic_reasoning_agent.documents.models import IndexedChunk, ParsedChunk
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import DocumentChunkORM
 from semantic_reasoning_agent.infrastructure.vector import TokenVectorBackend
 from semantic_reasoning_agent.ports.vector_backend import VectorBackendPort
 from semantic_reasoning_agent.schemas.documents import DocumentResponse
 from semantic_reasoning_agent.schemas.retrieval import Citation, RetrievalResult, RetrievalSearchResponse
+from semantic_reasoning_agent.services.embedding_service import EmbeddingService
+from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 
 
 class RetrievalService:
@@ -20,18 +22,30 @@ class RetrievalService:
         settings: Settings,
         database_manager: DatabaseManager,
         vector_backend: VectorBackendPort | None = None,
+        model_config_service: ModelConfigService | None = None,
     ) -> None:
         self._settings = settings
         self._database_manager = database_manager
         self._vector_backend = vector_backend or TokenVectorBackend()
+        self._embedding_service = (
+            EmbeddingService(settings, model_config_service)
+            if model_config_service is not None
+            else None
+        )
 
-    def prepare_document_chunks(
+    def prepare_chunks(
         self,
         document: DocumentResponse,
-        parsed_document: ParsedDocument,
+        chunks: list[ParsedChunk],
+        *,
+        parser_version: str,
     ) -> list[IndexedChunk]:
         prepared_chunks: list[IndexedChunk] = []
-        for chunk in parsed_document.chunks:
+        for chunk in chunks:
+            embedding_record = self._embed_text(
+                chunk.text,
+                workspace_id=document.workspace_id,
+            )
             prepared_chunks.append(
                 IndexedChunk(
                     chunk_id=str(uuid4()),
@@ -42,9 +56,11 @@ class RetrievalService:
                     text=chunk.text,
                     chunk_index=chunk.chunk_index,
                     source_url=document.source_url,
-                    parser_version=parsed_document.parser_version,
+                    parser_version=parser_version,
                     created_at=utc_now(),
-                    embedding=self.embed_text(chunk.text),
+                    embedding=embedding_record.values,
+                    embedding_provider=embedding_record.provider,
+                    embedding_model=embedding_record.model,
                     page_number=chunk.page_number,
                     section_title=chunk.section_title,
                     heading_path=chunk.heading_path,
@@ -75,6 +91,8 @@ class RetrievalService:
                         parser_version=chunk.parser_version,
                         created_at=chunk.created_at,
                         embedding=chunk.embedding,
+                        embedding_provider=chunk.embedding_provider,
+                        embedding_model=chunk.embedding_model,
                         page_number=chunk.page_number,
                         section_title=chunk.section_title,
                         heading_path=chunk.heading_path,
@@ -97,6 +115,8 @@ class RetrievalService:
         workspace_id: str | None = None,
         document_ids: list[str] | None = None,
         top_k: int = DEFAULT_TASK_TOP_K,
+        embedding_provider: str | None = None,
+        embedding_model: str | None = None,
     ) -> RetrievalSearchResponse:
         resolved_workspace_id = workspace_id or self._settings.default_workspace_id
         with self._database_manager.session() as session:
@@ -105,10 +125,28 @@ class RetrievalService:
                 statement = statement.where(DocumentChunkORM.document_id.in_(document_ids))
             chunks = session.scalars(statement).all()
 
-        query_embedding = self.embed_text(query)
+        query_embedding = self._embed_text(
+            query,
+            workspace_id=resolved_workspace_id,
+            provider=embedding_provider,
+            model=embedding_model,
+        )
+        preferred_chunks = [
+            chunk
+            for chunk in chunks
+            if (
+                not embedding_provider
+                or chunk.embedding_provider == query_embedding.provider
+            )
+            and (
+                not embedding_model
+                or chunk.embedding_model == query_embedding.model
+            )
+        ]
+        chunks_to_score = preferred_chunks or chunks
         matches: list[tuple[DocumentChunkORM, float]] = []
-        for chunk in chunks:
-            score = self._vector_backend.cosine_similarity(query_embedding, chunk.embedding)
+        for chunk in chunks_to_score:
+            score = self._cosine_similarity(query_embedding.values, chunk.embedding)
             if score <= 0:
                 continue
             matches.append((chunk, score))
@@ -129,8 +167,56 @@ class RetrievalService:
         ]
         return RetrievalSearchResponse(query=query, results=results)
 
-    def embed_text(self, text: str) -> dict[str, int]:
-        return self._vector_backend.embed_text(text)
+    def embed_text(
+        self,
+        text: str,
+        *,
+        workspace_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> list[float] | dict[str, int]:
+        return self._embed_text(
+            text,
+            workspace_id=workspace_id,
+            provider=provider,
+            model=model,
+        ).values
+
+    def _embed_text(
+        self,
+        text: str,
+        *,
+        workspace_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+    ):
+        if self._embedding_service is not None:
+            return self._embedding_service.embed_text(
+                text,
+                workspace_id=workspace_id,
+                provider=provider,
+                model=model,
+            )
+        return type(
+            "_TokenEmbeddingRecord",
+            (),
+            {
+                "values": self._vector_backend.embed_text(text),
+                "provider": provider or "token",
+                "model": model or "token-fallback",
+            },
+        )()
+
+    def _cosine_similarity(
+        self,
+        left: list[float] | dict[str, int],
+        right: list[float] | dict[str, int],
+    ) -> float:
+        if self._embedding_service is not None:
+            return self._embedding_service.cosine_similarity(left, right)
+        if isinstance(left, dict) and isinstance(right, dict):
+            return self._vector_backend.cosine_similarity(left, right)
+        return 0.0
 
     def _build_citation(self, chunk: DocumentChunkORM) -> Citation:
         location_label = "document"

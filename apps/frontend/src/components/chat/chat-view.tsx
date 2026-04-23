@@ -67,7 +67,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
           workspace_id: workspaceId ?? conversation.workspace_id ?? undefined,
           document_ids: payload.documentIds,
           top_k: payload.topK,
-          enabled_tool_names: payload.enabledToolNames ?? conversation.effective_tool_names,
+          enabled_tool_names:
+            payload.enabledToolNames ?? conversation.effective_tool_names,
         },
         {
           onEvent: (event, data) => {
@@ -189,6 +190,9 @@ export function ChatView({ conversationId }: { conversationId: string }) {
         toolToggles={(conversation?.effective_tool_names ?? []).map((toolName) => ({
           tool_name: toolName,
           enabled: true,
+          label:
+            conversation?.effective_tool_bindings.find((binding) => binding.tool_name === toolName)
+              ?.label ?? toolName,
         }))}
       />
     </div>

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Play, Plus, Trash2 } from "lucide-react";
+import { Copy, Loader2, Play, Plus, Trash2 } from "lucide-react";
 
 import { ModelCombobox } from "@/components/agents/model-combobox";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   createSearchTool,
   deleteSearchTool,
+  duplicateSearchTool,
   listSearchTools,
   runSearchTool,
 } from "@/shared/api/search-tools";
@@ -126,6 +127,12 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
       qc.invalidateQueries({ queryKey: queryKeys.searchTools.all });
     },
   });
+  const duplicateMutation = useMutation({
+    mutationFn: () => duplicateSearchTool(config.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.searchTools.all });
+    },
+  });
 
   return (
     <div className="rounded-xl border bg-background p-4 shadow-sm">
@@ -136,6 +143,11 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
             <Badge variant="outline" className="font-mono text-[10px]">
               {config.tool_type}
             </Badge>
+            {config.is_system ? (
+              <Badge variant="secondary" className="text-[10px]">
+                system
+              </Badge>
+            ) : null}
             <Badge variant={config.ready ? "success" : "warning"} className="text-[10px]">
               {config.ready ? "ready" : "blocked"}
             </Badge>
@@ -145,7 +157,7 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
           ) : null}
           <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
             <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
-              {config.provider}::{config.model}
+              {config.embedding_provider}::{config.embedding_model}
             </span>
             <span className="rounded bg-muted px-1.5 py-0.5">top_k={config.default_top_k}</span>
             {config.tool_type === "docs" ? (
@@ -177,18 +189,32 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
             <p className="mt-2 text-xs text-amber-700">{config.ready_reason}</p>
           ) : null}
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => {
-            if (confirm(`Delete "${config.name}"?`)) deleteMutation.mutate();
-          }}
-          disabled={deleteMutation.isPending}
-          aria-label="Delete tool"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => duplicateMutation.mutate()}
+            disabled={duplicateMutation.isPending}
+            aria-label="Duplicate tool"
+          >
+            <Copy className="h-4 w-4" />
+          </Button>
+          {!config.is_system ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                if (confirm(`Delete "${config.name}"?`)) deleteMutation.mutate();
+              }}
+              disabled={deleteMutation.isPending}
+              aria-label="Delete tool"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-3 flex gap-2">
@@ -318,8 +344,6 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
 
   const canSubmit =
     draft.name.trim().length > 0 &&
-    draft.provider.length > 0 &&
-    draft.model.length > 0 &&
     (toolType !== "docs" ||
       draft.collection_target === "workspace" ||
       (draft.document_ids?.length ?? 0) > 0);
@@ -366,8 +390,8 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
           </Field>
 
           <Field
-            label="Provider + model"
-            hint="Used to gate readiness — the config will be marked blocked until this model is configured."
+            label="Legacy provider + model"
+            hint="Optional compatibility fields. If omitted, workspace embedding defaults are used."
           >
             <ModelCombobox
               models={modelsQuery.data ?? ([] as SettingsModelOption[])}
@@ -384,6 +408,27 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
               collapseOnSelect
             />
           </Field>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Embedding provider" hint="Defaults to the workspace search embedding provider.">
+              <Input
+                value={draft.embedding_provider ?? ""}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, embedding_provider: e.target.value }))
+                }
+                placeholder="cloudflare"
+              />
+            </Field>
+            <Field label="Embedding model" hint="Defaults to the workspace search embedding model.">
+              <Input
+                value={draft.embedding_model ?? ""}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, embedding_model: e.target.value }))
+                }
+                placeholder="@cf/baai/bge-base-en-v1.5"
+              />
+            </Field>
+          </div>
 
           <Field label="Default top_k">
             <Input

@@ -187,7 +187,7 @@ flowchart TB
         storDb["storage/database_blob_store.py"]:::infra
         storMin["storage/minio_blob_store.py"]:::infra
         vec["vector/token_vector_backend.py"]:::infra
-        parsers["documents/parsers/*<br/>(marker, pypdf, docx, xlsx, csv)"]:::infra
+        converters["documents/converters/*<br/>(MarkItDown)"]:::infra
     end
 
     subgraph Persist["persistence/ + workers"]
@@ -399,7 +399,11 @@ sequenceDiagram
 
 ### 5.4 Document ingestion pipeline
 
-Document là async job. Upload sync → Celery chạy 4 sub-step. Các step được track bởi `DocumentJobORM` với các `name` cố định: `parse_document`, `store_artifacts`, `build_chunks`, `index_chunks` (xem `PIPELINE_JOB_NAMES` trong `documents/service.py`).
+Document là async job. Upload sync → Celery chạy 2 hoặc 4 sub-step tùy `ingestion_mode`.
+Các step được track bởi `DocumentJobORM`:
+
+- Luôn có: `convert_markdown`, `store_artifacts`
+- Chỉ khi mode là `retrieval` hoặc `both`: `build_chunks`, `index_chunks`
 
 ```mermaid
 sequenceDiagram
@@ -412,15 +416,15 @@ sequenceDiagram
     participant TD as TaskDispatcher
     participant Q as Redis (Celery)
     participant W as Celery Worker (worker_tasks.process_document)
-    participant P as DocumentParserRegistry (marker / pypdf / docx / xlsx / csv)
+    participant C as MarkdownConverterService (MarkItDown)
     participant RS as RetrievalService
     participant DB as Postgres
 
     U->>FE: Chọn file + metadata
     FE->>API: multipart upload
-    API->>DS: upload_document(filename, content, tags, pdf_mode, …)
+    API->>DS: upload_document(filename, content, tags, ingestion_mode)
     DS->>OS: put(blob)
-    DS->>DB: INSERT documents, document_jobs(pending × 4)
+    DS->>DB: INSERT documents, document_jobs(pending × mode)
     DS->>TD: enqueue_document_processing(document_id)
     TD->>Q: process_document.delay(id)
     DS-->>FE: DocumentResponse(status=uploaded)
@@ -429,28 +433,28 @@ sequenceDiagram
     W->>DS: process_document(document_id)
 
     rect rgb(240,248,255)
-    Note over DS: Step 1 — parse_document
-    DS->>P: parse(blob, options)
-    P-->>DS: ParsedDocument (markdown, sections, images)
-    DS->>DB: update job(parse_document=completed)
+    Note over DS: Step 1 — convert_markdown
+    DS->>C: convert(blob)
+    C-->>DS: markdown + metadata
+    DS->>DB: update job(convert_markdown=completed)
     end
 
     rect rgb(240,248,255)
     Note over DS: Step 2 — store_artifacts
-    DS->>OS: put(markdown, images, sidecars)
+    DS->>OS: put(markdown, normalized_json)
     DS->>DB: INSERT document_artifacts
     DS->>DB: update job(store_artifacts=completed)
     end
 
     rect rgb(240,248,255)
-    Note over DS: Step 3 — build_chunks
+    Note over DS: Step 3 — build_chunks (retrieval/both only)
     DS->>DS: chunker splits sections → chunks
     DS->>DB: INSERT document_chunks
     DS->>DB: update job(build_chunks=completed)
     end
 
     rect rgb(240,248,255)
-    Note over DS: Step 4 — index_chunks
+    Note over DS: Step 4 — index_chunks (retrieval/both only)
     DS->>RS: index(chunks) [token-vector backend hiện tại]
     RS->>DB: UPSERT chunk embeddings
     DS->>DB: update document(status=indexed), job(index_chunks=completed)
@@ -464,7 +468,7 @@ sequenceDiagram
 
 **Quan điểm production:**
 
-- Celery restart phải **idempotent** ở cả 4 step. Mỗi step update status riêng; nếu worker chết, retry sẽ tiếp tục từ step pending kế.
+- Celery restart phải **idempotent** theo mode; mỗi step update status riêng. Nếu worker chết, retry tiếp tục từ step pending kế.
 - Object store hiện hỗ trợ 2 backend (`DatabaseBlobStore`, `MinIOBlobStore`) sau cùng 1 port — migrate bằng cách đổi `OBJECT_STORE_BACKEND` env.
 - Reprocess (`POST /documents/:id/reprocess`) reset job về pending và re-enqueue.
 
@@ -476,7 +480,7 @@ Ontology có 3 giai đoạn tách biệt: **build (async)** → **review (intera
 stateDiagram-v2
     [*] --> pending: POST /ontology/builds (OntologyBuildCreateRequest)
     pending --> running: Celery picks process_ontology_build_task
-    running --> candidates: LLM extract entities/relations per chunk
+    running --> candidates: LLM extract entities/relations from markdown artifact
     candidates --> drafted: merge into OntologyGraphDraft
     drafted --> under_review: reviewer opens /ontology/builds/:id
     under_review --> under_review: approve/reject candidates
@@ -501,6 +505,15 @@ flowchart LR
     F --> G[assemble_draft<br/>OntologyGraphDraft]
     G --> H[ready_for_review]
 ```
+
+Runtime `OpenDomainLLMExtractor` hiện chạy theo mô hình **2-stage + chunked**:
+
+- Chia markdown thành các cửa sổ chồng lấp (`chunk_for_extraction`, mặc định window `6000`, overlap `500`, tối đa `ONTOLOGY_EXTRACTION_MAX_CHUNKS`).
+- Với mỗi chunk:
+  - Call 1: extract `domain + entities` (JSON mode, `reasoning_effort` thấp).
+  - Call 2: extract `relations` với whitelist `resolution_key` đã merge.
+- Kết quả được dedupe toàn cục theo `resolution_key` (entities) và `(source, type, target)` (relations).
+- Khi parse JSON lỗi hoặc bị `finish_reason=max_tokens`, extractor retry 1 lần với prompt rút gọn và ghi lỗi vào `safe_trace.errors`.
 
 **Publish transaction** phải atomic trên Postgres; Graphiti sync là **best-effort** (không làm fail publish nếu Neo4j down). Draft không bao giờ được dùng làm runtime knowledge — chỉ `OntologyVersionORM.state='published'` mới được `ontology.lookup` đọc.
 
@@ -784,7 +797,7 @@ sequenceDiagram
 - [ ] **Rate limit.** Chưa có. Thêm ở reverse proxy (nginx / caddy) trước `/chat/*`, `/tasks/resolve`, `/tools/*/invoke`.
 - [ ] **LLM timeout & retry.** `ToolRuntime` có timeout; adapter cần retry policy đồng nhất (exponential backoff với max attempts).
 - [ ] **Tool confirmation gate.** Đảm bảo mọi tool `side_effect_level >= write_external` có `requires_confirmation=true`.
-- [ ] **Celery isolation.** `worker-entrypoint.sh` nên set `--concurrency`, `--max-tasks-per-child` để tránh leak (marker model cache lớn).
+- [ ] **Celery isolation.** `worker-entrypoint.sh` nên set `--concurrency`, `--max-tasks-per-child` để tránh leak ở worker converter/indexing.
 - [ ] **Audit retention.** Thêm TTL/partition cho `task_runs` + `tool_call_audit` (dữ liệu lớn).
 - [ ] **Structured logging.** Chuyển logging sang JSON + correlation id = `trace_id` từ `ToolResult.meta`.
 - [ ] **Metrics.** Export Prometheus metrics: tool_latency, tool_status_count, task_run_count theo `output_type`, queue depth Celery.

@@ -41,8 +41,8 @@ What is already implemented in this repository:
 - optional Neo4j projection for published ontology graph reads
 - DB-backed object storage and DB-backed chunk retrieval/vector seam
 - document ingestion for `pdf`, `docx`, `xlsx`, and `csv`
-- PDF parsing prefers `marker` when the optional `pdf_parsing` extra is installed, with `pypdf` fast-mode fallback
-- DOCX/XLSX/CSV parsing uses `python-docx`, `openpyxl`, and stdlib `csv`
+- file conversion is normalized through `MarkItDown` into markdown artifacts
+- ingestion mode can be `ontology`, `retrieval`, or `both` per document
 - rule/LLM-assisted ontology extraction path with review and publish flow
 
 What is provisioned but still behind stable ports/contracts:
@@ -144,10 +144,10 @@ docker compose up -d postgres redis neo4j minio qdrant
 .venv\Scripts\python.exe -m pip install -e .[dev]
 ```
 
-Optional PDF stack with Marker:
+Optional extended document conversion stack:
 
 ```powershell
-.venv\Scripts\python.exe -m pip install -e .[dev,pdf_parsing]
+.venv\Scripts\python.exe -m pip install -e .[dev,document_conversion]
 ```
 
 5. Run the API on the host:

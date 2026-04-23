@@ -2,6 +2,7 @@ import { apiFetch } from "@/shared/api/client";
 import type {
   DocumentBatchUploadResponse,
   DocumentIngestionCapabilitiesResponse,
+  DocumentArtifactResponse,
   DocumentJobResponse,
   DocumentReprocessResponse,
   DocumentResponse,
@@ -26,6 +27,10 @@ export function listDocumentJobs(id: string): Promise<DocumentJobResponse[]> {
   return apiFetch<DocumentJobResponse[]>(`/documents/${id}/jobs`, { method: "GET" });
 }
 
+export function listDocumentArtifacts(id: string): Promise<DocumentArtifactResponse[]> {
+  return apiFetch<DocumentArtifactResponse[]>(`/documents/${id}/artifacts`, { method: "GET" });
+}
+
 export function reprocessDocument(id: string): Promise<DocumentReprocessResponse> {
   return apiFetch<DocumentReprocessResponse>(`/documents/${id}/reprocess`, {
     method: "POST",
@@ -37,9 +42,7 @@ export interface UploadDocumentInput {
   title?: string;
   workspaceId?: string;
   tags?: string[];
-  pdfMode?: "fast" | "accurate";
-  outputFormat?: "markdown" | "html" | "json" | "chunks";
-  extractImages?: boolean;
+  ingestionMode?: "ontology" | "retrieval" | "both";
 }
 
 export function uploadDocument(input: UploadDocumentInput): Promise<DocumentResponse> {
@@ -50,11 +53,7 @@ export function uploadDocument(input: UploadDocumentInput): Promise<DocumentResp
   if (input.tags && input.tags.length > 0) {
     form.append("tags", input.tags.join(","));
   }
-  if (input.pdfMode) form.append("pdf_mode", input.pdfMode);
-  if (input.outputFormat) form.append("output_format", input.outputFormat);
-  if (typeof input.extractImages === "boolean") {
-    form.append("extract_images", String(input.extractImages));
-  }
+  if (input.ingestionMode) form.append("ingestion_mode", input.ingestionMode);
   return apiFetch<DocumentResponse>("/documents/upload", {
     method: "POST",
     body: form,
@@ -65,9 +64,7 @@ export interface UploadDocumentsInput {
   files: File[];
   workspaceId?: string;
   tags?: string[];
-  pdfMode?: "fast" | "accurate";
-  outputFormat?: "markdown" | "html" | "json" | "chunks";
-  extractImages?: boolean;
+  ingestionMode?: "ontology" | "retrieval" | "both";
 }
 
 export function uploadDocuments(input: UploadDocumentsInput): Promise<DocumentBatchUploadResponse> {
@@ -77,9 +74,7 @@ export function uploadDocuments(input: UploadDocumentsInput): Promise<DocumentBa
         file,
         workspaceId: input.workspaceId,
         tags: input.tags,
-        pdfMode: input.pdfMode,
-        outputFormat: input.outputFormat,
-        extractImages: input.extractImages,
+        ingestionMode: input.ingestionMode,
       }),
     ),
   ).then((results) => {

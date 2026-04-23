@@ -20,6 +20,7 @@ class DocumentORM(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     ingestion_options: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    ingestion_mode: Mapped[str] = mapped_column(String(32), default="both", index=True)
     source_url: Mapped[str] = mapped_column(Text)
     source_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -86,7 +87,9 @@ class DocumentChunkORM(Base):
     source_url: Mapped[str] = mapped_column(Text)
     parser_version: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    embedding: Mapped[dict[str, int]] = mapped_column(JSON)
+    embedding: Mapped[list[float] | dict[str, int]] = mapped_column(JSON)
+    embedding_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     section_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     heading_path: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -98,6 +101,23 @@ class DocumentChunkORM(Base):
     column_headers: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     document: Mapped[DocumentORM] = relationship(back_populates="chunks")
+
+
+class OntologySearchIndexORM(Base):
+    __tablename__ = "ontology_search_index"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    version_id: Mapped[str] = mapped_column(String(64), index=True)
+    item_type: Mapped[str] = mapped_column(String(32), index=True)
+    item_id: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float] | dict[str, int]] = mapped_column(JSON)
+    embedding_provider: Mapped[str] = mapped_column(String(64))
+    embedding_model: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class DocumentArtifactORM(Base):

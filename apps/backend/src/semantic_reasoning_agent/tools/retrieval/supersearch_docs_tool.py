@@ -52,6 +52,11 @@ _SPEC_INPUT_SCHEMA: dict[str, Any] = {
             "enum": ["semantic_only", "bm25_only", "hybrid_rrf"],
             "description": "Override for the configured fusion strategy.",
         },
+        "document_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Optional runtime document scope override.",
+        },
     },
     "required": ["config_ref", "query"],
     "additionalProperties": False,
@@ -107,6 +112,12 @@ class SuperSearchDocsTool(Tool):
             fusion_strategy=arguments.get("fusion_strategy")
             if arguments.get("fusion_strategy") in {"semantic_only", "bm25_only", "hybrid_rrf"}
             else None,
+            document_ids=[
+                str(item)
+                for item in arguments.get("document_ids", [])
+                if isinstance(item, str) and item.strip()
+            ]
+            or None,
         )
 
         now = utc_now()

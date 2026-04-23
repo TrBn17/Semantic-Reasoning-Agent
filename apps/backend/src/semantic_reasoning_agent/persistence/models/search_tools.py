@@ -20,6 +20,9 @@ class SearchToolConfigORM(Base):
         UniqueConstraint(
             "workspace_id", "tool_type", "name", name="uq_search_tool_configs_name"
         ),
+        UniqueConstraint(
+            "workspace_id", "system_key", name="uq_search_tool_configs_system_key"
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -27,9 +30,13 @@ class SearchToolConfigORM(Base):
     tool_type: Mapped[str] = mapped_column(String(16), index=True)  # docs | graph
     name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str] = mapped_column(Text, default="")
+    system_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    provider: Mapped[str] = mapped_column(String(64))
-    model: Mapped[str] = mapped_column(String(128))
+    provider: Mapped[str] = mapped_column(String(64), default="cloudflare")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    embedding_provider: Mapped[str] = mapped_column(String(64), default="cloudflare")
+    embedding_model: Mapped[str] = mapped_column(String(255), default="")
     default_top_k: Mapped[int] = mapped_column(Integer, default=5)
 
     # docs-specific

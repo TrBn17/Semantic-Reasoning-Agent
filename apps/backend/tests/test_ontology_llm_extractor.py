@@ -1,24 +1,14 @@
-import json
+﻿import json
 from types import SimpleNamespace
 
 from semantic_reasoning_agent.domain.contracts.llm import LLMResponse
-from semantic_reasoning_agent.domain.ontology.models import OntologySourceChunk
+from semantic_reasoning_agent.domain.ontology.models import OntologyDocument
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.infrastructure.ontology.llm_extractor import OpenDomainLLMExtractor
 from semantic_reasoning_agent.tools.ontology.schema_registry import EmergentSchema
 
 
 class _FakeModelResolver:
-    def resolve_task_model(  # noqa: ANN001
-        self,
-        task_type: str,
-        workspace_id: str | None = None,
-        agent_profile_id: str | None = None,
-    ) -> tuple[str, str]:
-        assert task_type == "ontology_extraction"
-        assert workspace_id == "workspace-openrouter"
-        return "openrouter", "minimax/minimax-m2.5:free"
-
     def is_ready(  # noqa: ANN001
         self,
         provider: str,
@@ -50,6 +40,27 @@ class _FakeAdapter:
 
     def run(self, **kwargs) -> LLMResponse:  # noqa: ANN003
         self.calls.append(kwargs)
+        user_content = kwargs["messages"][0].content  # type: ignore[index]
+        if "Extract candidate relations" in user_content:
+            return LLMResponse(
+                content=json.dumps(
+                    {
+                        "relations": [
+                            {
+                                "source_resolution_key": "gamma_program",
+                                "target_resolution_key": "delta_system",
+                                "source_name": "Gamma Program",
+                                "target_name": "Delta System",
+                                "relation_type": "depends_on",
+                                "confidence": 0.91,
+                                "evidence_text": "Gamma Program depends on Delta System.",
+                            }
+                        ]
+                    }
+                ),
+                provider="openrouter",
+                model="minimax/minimax-m2.5:free",
+            )
         return LLMResponse(
             content=json.dumps(
                 {
@@ -58,7 +69,7 @@ class _FakeAdapter:
                         {
                             "name": "Gamma Program",
                             "canonical_name": "Gamma Program",
-                            "resolution_key": "gamma-program",
+                            "resolution_key": "gamma_program",
                             "entity_type": "initiative",
                             "confidence": 0.88,
                             "evidence_text": "Gamma Program depends on Delta System.",
@@ -67,23 +78,12 @@ class _FakeAdapter:
                         {
                             "name": "Delta System",
                             "canonical_name": "Delta System",
-                            "resolution_key": "delta-system",
+                            "resolution_key": "delta_system",
                             "entity_type": "system",
                             "confidence": 0.93,
                             "evidence_text": "Gamma Program depends on Delta System.",
                             "aliases": [],
                         },
-                    ],
-                    "relations": [
-                        {
-                            "source_resolution_key": "gamma-program",
-                            "target_resolution_key": "delta-system",
-                            "source_name": "Gamma Program",
-                            "target_name": "Delta System",
-                            "relation_type": "depends_on",
-                            "confidence": 0.91,
-                            "evidence_text": "Gamma Program depends on Delta System.",
-                        }
                     ],
                 }
             ),
@@ -98,7 +98,11 @@ def test_open_domain_llm_extractor_supports_ready_non_anthropic_provider() -> No
         settings=SimpleNamespace(
             ontology_llm_enabled=True,
             ontology_chunk_limit=24,
-            ontology_prompt_version="v1",
+            ontology_markdown_char_limit=50000,
+            ontology_prompt_version="v2",
+            ontology_extraction_max_tokens=6000,
+            ontology_extraction_reasoning_effort="low",
+            ontology_extraction_max_chunks=8,
             default_workspace_id="workspace-demo",
         ),
         model_config_service=_FakeModelResolver(),
@@ -107,12 +111,10 @@ def test_open_domain_llm_extractor_supports_ready_non_anthropic_provider() -> No
     )
 
     result = extractor.extract_ontology_candidates(
-        [
-            OntologySourceChunk(
-                chunk_id="chunk-1",
-                text="Gamma Program depends on Delta System.",
-            )
-        ],
+        OntologyDocument(
+            document_id="doc-1",
+            markdown="Gamma Program depends on Delta System.",
+        ),
         workspace_id="workspace-openrouter",
         provider="openrouter",
         model="minimax/minimax-m2.5:free",
@@ -120,19 +122,27 @@ def test_open_domain_llm_extractor_supports_ready_non_anthropic_provider() -> No
 
     assert result.domain == "delivery_ops"
     assert [entity.resolution_key for entity in result.entities] == [
-        "gamma-program",
-        "delta-system",
+        "gamma_program",
+        "delta_system",
     ]
     assert result.entities[0].aliases == {"Program Gamma"}
     assert result.entities[0].provenance["provider"] == "openrouter"
     assert result.entities[0].provenance["model"] == "minimax/minimax-m2.5:free"
-    assert result.entities[0].provenance["source_chunk_id"] == "chunk-1"
+    assert result.entities[0].provenance["source_document_id"] == "doc-1"
     assert [relation.relation_type for relation in result.relations] == ["depends_on"]
 
-    assert len(fake_adapter.calls) == 1
-    call = fake_adapter.calls[0]
-    assert call["model"] == "minimax/minimax-m2.5:free"
-    assert call["tool_choice"] == "none"
-    assert call["tools"] == ()
-    assert call["max_tokens"] == 3000
-    assert call["temperature"] == 0
+    assert isinstance(result.trace["chunks"], list)
+    assert len(result.trace["chunks"]) == 2
+    assert result.trace["errors"] == []
+    assert result.trace["chunks"][0]["stage"] == "entities"
+    assert result.trace["chunks"][1]["stage"] == "relations"
+
+    assert len(fake_adapter.calls) == 2
+    first_call = fake_adapter.calls[0]
+    assert first_call["model"] == "minimax/minimax-m2.5:free"
+    assert first_call["tool_choice"] == "none"
+    assert first_call["tools"] == ()
+    assert first_call["max_tokens"] == 6000
+    assert first_call["temperature"] == 0
+    assert first_call["response_format"] == "json_object"
+    assert first_call["reasoning_effort"] == "low"

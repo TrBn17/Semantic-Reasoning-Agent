@@ -36,11 +36,7 @@ export function UploadDialog() {
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [tags, setTags] = useState("");
-  const [pdfMode, setPdfMode] = useState<"fast" | "accurate">("fast");
-  const [outputFormat, setOutputFormat] = useState<"markdown" | "html" | "json" | "chunks">("markdown");
-  const [extractImages, setExtractImages] = useState(true);
-  const hasPdf = files.some((file) => file.name.toLowerCase().endsWith(".pdf"));
-  const hasMarkerFile = files.some((file) => file.name.toLowerCase().split(".").pop() !== "csv");
+  const [ingestionMode, setIngestionMode] = useState<"ontology" | "retrieval" | "both">("both");
   const { data: capabilities } = useQuery({
     queryKey: ["documents", "options"],
     queryFn: getDocumentIngestionCapabilities,
@@ -56,9 +52,7 @@ export function UploadDialog() {
           .split(",")
           .map((t) => t.trim())
           .filter(Boolean),
-        pdfMode,
-        outputFormat,
-        extractImages,
+        ingestionMode,
       });
     },
     onSuccess: ({ uploaded, failed }) => {
@@ -84,9 +78,7 @@ export function UploadDialog() {
 
       setFiles([]);
       setTags("");
-      setPdfMode("fast");
-      setOutputFormat("markdown");
-      setExtractImages(true);
+      setIngestionMode("both");
     },
     onError: (err) => toast.error(t.documents.toasts.uploadFailed.replace("{reason}", (err as Error).message)),
   });
@@ -112,7 +104,7 @@ export function UploadDialog() {
             <Input
               id="file"
               type="file"
-              accept=".pdf,.docx,.xlsx,.csv"
+              accept=".pdf,.docx,.xlsx,.csv,.pptx,.md,.markdown,.txt,.html,.htm,.json,.xml,.epub,.zip,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff"
               multiple
               onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
             />
@@ -123,75 +115,35 @@ export function UploadDialog() {
               </p>
             )}
           </div>
-          {hasPdf && (
-            <div className="space-y-1">
-              <Label htmlFor="pdf-mode">{t.documents.pdfModeLabel}</Label>
-              <Select value={pdfMode} onValueChange={(value) => setPdfMode(value as "fast" | "accurate")}>
-                <SelectTrigger id="pdf-mode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(capabilities?.pdf_mode_options ?? [
-                    { value: "fast", label: t.documents.pdfModeFast },
-                    { value: "accurate", label: t.documents.pdfModeAccurate },
-                  ]).map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          {hasMarkerFile && (
-            <div className="space-y-4 rounded-md border p-3">
-              <div className="space-y-1">
-                <Label htmlFor="output-format">{t.documents.outputFormatLabel}</Label>
-                <Select
-                  value={outputFormat}
-                  onValueChange={(value) => setOutputFormat(value as "markdown" | "html" | "json" | "chunks")}
-                >
-                  <SelectTrigger id="output-format">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(capabilities?.output_format_options ?? [
-                      { value: "markdown", label: t.documents.outputFormatMarkdown },
-                      { value: "html", label: t.documents.outputFormatHtml },
-                      { value: "json", label: t.documents.outputFormatJson },
-                      { value: "chunks", label: t.documents.outputFormatChunks },
-                    ]).map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {
-                    (capabilities?.output_format_options ?? []).find((option) => option.value === outputFormat)
-                      ?.description ?? t.documents.outputFormatHint
-                  }
-                </p>
-              </div>
-              {capabilities?.supports_extract_images !== false && (
-                <label className="flex items-start gap-3 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 rounded border"
-                    checked={extractImages}
-                    onChange={(e) => setExtractImages(e.target.checked)}
-                  />
-                  <span>
-                    <span className="font-medium">{t.documents.extractImagesLabel}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {t.documents.extractImagesHint}
-                    </span>
-                  </span>
-                </label>
-              )}
-            </div>
-          )}
+          <div className="space-y-1">
+            <Label htmlFor="ingestion-mode">{t.documents.ingestionModeLabel}</Label>
+            <Select
+              value={ingestionMode}
+              onValueChange={(value) =>
+                setIngestionMode(value as "ontology" | "retrieval" | "both")
+              }
+            >
+              <SelectTrigger id="ingestion-mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(capabilities?.ingestion_mode_options ?? [
+                  { value: "ontology", label: t.documents.ingestionModeOntology },
+                  { value: "retrieval", label: t.documents.ingestionModeRetrieval },
+                  { value: "both", label: t.documents.ingestionModeBoth },
+                ]).map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {(capabilities?.ingestion_mode_options ?? []).find(
+                (option) => option.value === ingestionMode,
+              )?.description ?? t.documents.ingestionModeHint}
+            </p>
+          </div>
           <div className="space-y-1">
             <Label htmlFor="tags">{t.documents.tagsLabel}</Label>
             <Input

@@ -2,9 +2,9 @@
 
 import { memo, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
-import { Check, ChevronDown, ChevronUp, Cpu, Radio } from "lucide-react";
+import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import type { SettingsModelOption } from "@/shared/api/types";
-import { composeModelValue } from "@/shared/utils/model-value";
+import { composeModelValue, parseModelValue } from "@/shared/utils/model-value";
 import { rankItems } from "@/shared/utils/fuzzy";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -67,6 +67,16 @@ export const ModelCombobox = memo(function ModelCombobox({
       setModelsOpen(false);
     }
   }, [collapseOnSelect, value]);
+  useEffect(() => {
+    const parsed = parseModelValue(value);
+    if (!parsed) {
+      setProviderFilter((prev) => (prev === "all" ? prev : "all"));
+      return;
+    }
+    if (providers.includes(parsed.provider)) {
+      setProviderFilter((prev) => (prev === parsed.provider ? prev : parsed.provider));
+    }
+  }, [providers, value]);
 
   const filteredModels = useMemo(() => {
     const scoped = models.filter((model) => {
@@ -93,9 +103,10 @@ export const ModelCombobox = memo(function ModelCombobox({
 
   return (
     <div className="min-w-0 space-y-2">
-      <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)]">
+      <Command className="max-w-full min-w-0 overflow-hidden rounded-md border">
+        <div className="grid gap-2 border-b p-2 md:grid-cols-[180px_minmax(0,1fr)]">
         <Select value={providerFilter} onValueChange={setProviderFilter}>
-          <SelectTrigger>
+            <SelectTrigger>
             <SelectValue placeholder={labels?.providerPlaceholder ?? "Provider"} />
           </SelectTrigger>
           <SelectContent className="max-h-64 max-w-[min(90vw,20rem)]">
@@ -107,26 +118,20 @@ export const ModelCombobox = memo(function ModelCombobox({
             ))}
           </SelectContent>
         </Select>
-        <Command className="rounded-md border">
           <Command.Input
             value={searchText}
             onValueChange={setSearchText}
             placeholder={labels?.searchModelPlaceholder ?? "Search model"}
-            className="h-9 w-full border-0 bg-transparent px-3 text-sm outline-none"
+            className="h-9 w-full rounded-md border bg-transparent px-3 text-sm outline-none"
           />
-        </Command>
-      </div>
-
-      <Command className="max-w-full min-w-0 overflow-hidden rounded-md border">
+        </div>
         <button
           type="button"
           className="flex w-full min-w-0 items-center justify-between gap-2 border-b px-3 py-2 text-left text-xs text-muted-foreground"
           onClick={() => setModelsOpen((open) => !open)}
         >
           <span className="truncate">
-            {selected
-              ? `${labels?.selectModelPlaceholder ?? "Select model"}: ${selected.label}`
-              : labels?.selectModelPlaceholder ?? "Select model"}
+            {selected ? selected.label : labels?.selectModelPlaceholder ?? "Select model"}
           </span>
           {modelsOpen ? (
             <ChevronUp className="h-3.5 w-3.5 shrink-0" />
@@ -175,20 +180,15 @@ export const ModelCombobox = memo(function ModelCombobox({
                     <p className="truncate text-xs text-muted-foreground">
                       <span className="inline-block max-w-full truncate align-bottom font-mono">{item.model}</span>
                       {item.reason ? ` · ${item.reason}` : ""}
+                      {item.supports_streaming || item.supports_structured_output
+                        ? ` · ${[
+                            item.supports_streaming ? labels?.capabilityStreaming ?? "streaming" : null,
+                            item.supports_structured_output ? labels?.capabilityStructured ?? "structured" : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}`
+                        : ""}
                     </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <Badge variant={item.supports_streaming ? "info" : "outline"} className="text-[10px]">
-                        <Radio className="mr-1 h-3 w-3" />
-                        {labels?.capabilityStreaming ?? "streaming"}
-                      </Badge>
-                      <Badge
-                        variant={item.supports_structured_output ? "info" : "outline"}
-                        className="text-[10px]"
-                      >
-                        <Cpu className="mr-1 h-3 w-3" />
-                        {labels?.capabilityStructured ?? "structured"}
-                      </Badge>
-                    </div>
                   </div>
                 </div>
               </Command.Item>

@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
-from semantic_reasoning_agent.documents.parsers import build_document_parser
+from semantic_reasoning_agent.documents.chunking import MarkdownChunker
+from semantic_reasoning_agent.documents.converters import MarkdownConverterService
 from semantic_reasoning_agent.documents.service import DocumentService
 from semantic_reasoning_agent.infrastructure.graphiti import build_graphiti_gateway
 from semantic_reasoning_agent.infrastructure.graphiti.graphiti_gateway import GraphitiGateway
@@ -88,9 +89,14 @@ def get_app_container() -> AppContainer:
         adapter_registry.refresh(build_adapter_registry(settings).adapters)
     graphiti_gateway = build_graphiti_gateway(settings)
     runtime_audit_service = RuntimeAuditService(database_manager)
-    parser_registry = build_document_parser(settings)
+    markdown_converter = MarkdownConverterService()
+    markdown_chunker = MarkdownChunker()
     object_store = build_object_store(settings)
-    retrieval_service = RetrievalService(settings, database_manager)
+    retrieval_service = RetrievalService(
+        settings,
+        database_manager,
+        model_config_service=model_config_service,
+    )
     conversation_service = ConversationService(
         database_manager,
         model_config_service,
@@ -100,11 +106,14 @@ def get_app_container() -> AppContainer:
     task_dispatcher = TaskDispatcher()
     document_service = DocumentService(
         settings,
-        parser_registry,
+        markdown_converter,
+        markdown_chunker,
         retrieval_service,
         database_manager,
         task_dispatcher,
         object_store=object_store,
+        model_config_service=model_config_service,
+        adapter_registry=adapter_registry,
     )
     ontology_repository = OntologyRepository(database_manager)
     schema_registry = OntologySchemaRegistry(ontology_repository)
@@ -119,6 +128,7 @@ def get_app_container() -> AppContainer:
             schema_registry=schema_registry,
             adapter_registry=adapter_registry,
         ),
+        object_store=object_store,
     )
     search_tool_service = SearchToolConfigService(
         settings=settings,

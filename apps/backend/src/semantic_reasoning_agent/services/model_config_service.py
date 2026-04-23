@@ -12,6 +12,7 @@ from semantic_reasoning_agent.persistence.models import (
     AgentProfileTaskModelORM,
     ProviderConfigORM,
     TaskModelConfigORM,
+    WorkspaceSearchSettingsORM,
 )
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry, build_adapter_registry
 from semantic_reasoning_agent.schemas.agents import (
@@ -32,6 +33,8 @@ from semantic_reasoning_agent.schemas.settings import (
     SettingsModelOption,
     SettingsProviderFieldValue,
     SettingsProviderResponse,
+    WorkspaceSearchDefaultsResponse,
+    WorkspaceSearchDefaultsUpdateRequest,
 )
 from semantic_reasoning_agent.services.secret_service import SecretService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService, ProviderModel
@@ -128,6 +131,27 @@ PROVIDER_SPECS: tuple[ProviderSpec, ...] = (
                 placeholder="https://openrouter.ai/api/v1",
                 help_text="Endpoint OpenRouter-compatible. Mặc định là OpenRouter public API.",
                 required=False,
+                secret=False,
+            ),
+        ),
+    ),
+    ProviderSpec(
+        provider="cloudflare",
+        label="Cloudflare Workers AI",
+        description="OpenAI-compatible endpoint qua Cloudflare Workers AI.",
+        fields=(
+            ProviderFieldSpec(
+                key="CLOUDFLARE_API_KEY",
+                label="Cloudflare API Key",
+                placeholder="cfut_...",
+                help_text="API key/token để gọi Workers AI qua OpenAI SDK.",
+                secret=True,
+            ),
+            ProviderFieldSpec(
+                key="CLOUDFLARE_ACCOUNT_ID",
+                label="Cloudflare Account ID",
+                placeholder="184e67c1ca6539acb8c6ec7eff68cb50",
+                help_text="Account ID dùng để build base URL cho Workers AI.",
                 secret=False,
             ),
         ),
@@ -319,6 +343,24 @@ class ModelConfigService:
                     secret=False,
                 ),
             },
+            "cloudflare": {
+                "api_key": self._resolve_provider_field_value(
+                    workspace_id,
+                    "cloudflare",
+                    "CLOUDFLARE_API_KEY",
+                    provider_configs,
+                    secret=True,
+                ),
+                "base_url": self._cloudflare_base_url(
+                    self._resolve_provider_field_value(
+                        workspace_id,
+                        "cloudflare",
+                        "CLOUDFLARE_ACCOUNT_ID",
+                        provider_configs,
+                        secret=False,
+                    )
+                ),
+            },
             "anthropic": {
                 "api_key": self._resolve_provider_field_value(
                     workspace_id,
@@ -388,6 +430,7 @@ class ModelConfigService:
                 name=self._workspace_name(settings.workspace_id),
             ),
             providers=[self._to_public_provider(provider) for provider in settings.providers],
+            search_defaults=self.get_workspace_search_defaults(settings.workspace_id),
         )
 
     async def update_agent_settings(self, payload: AgentSettingsUpdateRequest) -> AgentSettingsResponse:
@@ -475,6 +518,11 @@ class ModelConfigService:
         self,
         payload: PublicSettingsUpdateRequest,
     ) -> PublicSettingsResponse:
+        if payload.search_defaults is not None:
+            self.update_workspace_search_defaults(
+                payload.workspace_id,
+                payload.search_defaults,
+            )
         updated = await self.update_agent_settings(
             AgentSettingsUpdateRequest(
                 workspace_id=payload.workspace_id,
@@ -488,7 +536,83 @@ class ModelConfigService:
                 name=self._workspace_name(updated.workspace_id),
             ),
             providers=[self._to_public_provider(provider) for provider in updated.providers],
+            search_defaults=self.get_workspace_search_defaults(updated.workspace_id),
         )
+
+    def get_workspace_search_defaults(
+        self,
+        workspace_id: str | None = None,
+    ) -> WorkspaceSearchDefaultsResponse:
+        resolved_workspace_id = workspace_id or self._settings.default_workspace_id
+        record = self._load_workspace_search_settings(resolved_workspace_id)
+        provider = (
+            record.embedding_provider
+            if record is not None and record.embedding_provider
+            else self._settings.default_embedding_provider
+        )
+        model = (
+            record.embedding_model
+            if record is not None and record.embedding_model
+            else self._settings.default_embedding_model
+        )
+        ready, reason = self.embedding_backend_status(
+            provider,
+            model,
+            resolved_workspace_id,
+        )
+        return WorkspaceSearchDefaultsResponse(
+            embedding_provider=provider,
+            embedding_model=model,
+            ready=ready,
+            reason=reason,
+        )
+
+    def update_workspace_search_defaults(
+        self,
+        workspace_id: str,
+        payload: WorkspaceSearchDefaultsUpdateRequest,
+    ) -> WorkspaceSearchDefaultsResponse:
+        now = utc_now()
+        with self._database_manager.session() as session:
+            existing = session.get(WorkspaceSearchSettingsORM, workspace_id)
+            if existing is None:
+                session.add(
+                    WorkspaceSearchSettingsORM(
+                        workspace_id=workspace_id,
+                        embedding_provider=payload.embedding_provider.strip(),
+                        embedding_model=payload.embedding_model.strip(),
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            else:
+                existing.embedding_provider = payload.embedding_provider.strip()
+                existing.embedding_model = payload.embedding_model.strip()
+                existing.updated_at = now
+        return self.get_workspace_search_defaults(workspace_id)
+
+    def embedding_backend_status(
+        self,
+        provider: str,
+        model: str,
+        workspace_id: str | None = None,
+    ) -> tuple[bool, str]:
+        resolved_workspace_id = workspace_id or self._settings.default_workspace_id
+        provider_key = (provider or "").strip().lower()
+        if not provider_key:
+            return False, "Embedding provider is not configured."
+        if not (model or "").strip():
+            return False, "Embedding model is not configured."
+        if provider_key == "cloudflare":
+            credentials = self.get_provider_credentials(resolved_workspace_id).get("cloudflare", {})
+            if not credentials.get("api_key"):
+                return False, "Cloudflare API key is not configured."
+            if not credentials.get("base_url"):
+                return False, "Cloudflare account id is not configured."
+            return True, "Ready to run."
+        if provider_key in {"token", "local_token"}:
+            return True, "Ready to run."
+        return False, f"Embedding provider '{provider}' is not supported."
 
     def is_ready(self, provider: str, model: str, workspace_id: str | None = None) -> bool:
         """
@@ -612,6 +736,13 @@ class ModelConfigService:
                 select(TaskModelConfigORM).where(TaskModelConfigORM.workspace_id == workspace_id)
             ).all()
             return {config.task_type: config for config in configs}
+
+    def _load_workspace_search_settings(
+        self,
+        workspace_id: str,
+    ) -> WorkspaceSearchSettingsORM | None:
+        with self._database_manager.session() as session:
+            return session.get(WorkspaceSearchSettingsORM, workspace_id)
 
     def _load_profile_task_assignment(
         self,
@@ -849,12 +980,20 @@ class ModelConfigService:
             "OPENAI_BASE_URL": self._settings.openai_base_url,
             "OPENROUTER_API_KEY": self._settings.openrouter_api_key,
             "OPENROUTER_BASE_URL": self._settings.openrouter_base_url,
+            "CLOUDFLARE_API_KEY": self._settings.cloudflare_api_key,
+            "CLOUDFLARE_ACCOUNT_ID": self._settings.cloudflare_account_id,
             "ANTHROPIC_API_KEY": self._settings.anthropic_api_key,
             "ANTHROPIC_BASE_URL": self._settings.anthropic_base_url,
             "GOOGLE_API_KEY": self._settings.google_api_key,
             "OLLAMA_BASE_URL": self._settings.ollama_base_url,
         }
         return attr_by_env.get(field_key)
+
+    @staticmethod
+    def _cloudflare_base_url(account_id: str | None) -> str | None:
+        if not account_id:
+            return None
+        return f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
 
     def _missing_env_fields(
         self,
