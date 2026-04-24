@@ -18,6 +18,12 @@ class KnowledgePackResponse(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class KnowledgePackDocumentSummaryResponse(BaseModel):
+    document_id: str
+    document_title: str
+    chunk_count: int = 0
+
+
 class KnowledgePackCreateRequest(BaseModel):
     workspace_id: str
     name: str
@@ -31,3 +37,7 @@ class KnowledgePackUpdateRequest(BaseModel):
     description: str | None = None
     document_ids: list[str] | None = None
     status: str | None = None
+
+
+class KnowledgePackAddDocumentRequest(BaseModel):
+    document_id: str

@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ChevronDown, Plus, Check, Loader2 } from "lucide-react";
+import { ChevronDown, Plus, Check, Loader2, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,18 +16,23 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { fetchMe, fetchWorkspaces } from "@/shared/api/auth";
+import {
+  createWorkspace,
+  deleteWorkspace,
+  fetchMe,
+  fetchWorkspaces,
+  updateWorkspace,
+} from "@/shared/api/auth";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
-import { toast } from "sonner";
 import { useI18n } from "@/shared/i18n/use-language";
+import { notify } from "@/shared/ui/notify";
 
 export function WorkspaceSwitcher() {
   const { t } = useI18n();
@@ -44,35 +49,81 @@ export function WorkspaceSwitcher() {
     queryFn: fetchWorkspaces,
   });
 
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [newWorkspaceId, setNewWorkspaceId] = useState("");
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [editingWorkspaceId, setEditingWorkspaceId] = useState<string>("");
+  const [editingWorkspaceName, setEditingWorkspaceName] = useState("");
 
-  const activeWorkspace = workspaces?.find(ws => ws.id === workspaceId) || 
-                          (user?.active_workspace?.id === workspaceId ? user.active_workspace : null) ||
-                          { id: workspaceId || "unknown", name: workspaceId || "Unknown" };
+  const activeWorkspace =
+    workspaces?.find((ws) => ws.id === workspaceId) ||
+    (user?.active_workspace?.id === workspaceId ? user.active_workspace : null) || {
+      id: workspaceId || "unknown",
+      name: workspaceId || "Unknown",
+    };
 
-  const handleCreateWorkspace = () => {
-    if (!newWorkspaceId.trim()) {
-      toast.error(t.workspaceSwitcher.toasts.idRequired);
-      return;
-    }
-    
-    // Trong kiến trúc hiện tại, chúng ta chỉ cần set ID mới vào store.
-    // Khi frontend gọi các API với ID này, backend sẽ tự động "hiểu" là workspace mới.
-    const slugifiedId = newWorkspaceId.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    setWorkspaceId(slugifiedId);
-    
-    // Refresh danh sách để hiện cái mới (backend sẽ tổng hợp từ DB)
-    setTimeout(() => {
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const workspaceNameInput = newWorkspaceName.trim();
+      if (!workspaceNameInput) {
+        throw new Error(t.workspaceSwitcher.toasts.nameRequired);
+      }
+      return createWorkspace({
+        name: workspaceNameInput,
+      });
+    },
+    onSuccess: (workspace) => {
+      setWorkspaceId(workspace.id);
+      setIsCreateDialogOpen(false);
+      setNewWorkspaceName("");
       queryClient.invalidateQueries({ queryKey: ["workspaces"] });
-    }, 1000);
-    
-    setIsDialogOpen(false);
-    setNewWorkspaceId("");
-    setNewWorkspaceName("");
-    toast.success(`${t.workspaceSwitcher.toasts.switchedTo} ${slugifiedId}`);
-  };
+      notify.success(`${t.workspaceSwitcher.toasts.switchedTo} ${workspace.name}`);
+    },
+    onError: (error) => {
+      notify.error(error, t.common.error);
+    },
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: async () => {
+      const name = editingWorkspaceName.trim();
+      if (!editingWorkspaceId) {
+        throw new Error(t.workspaceSwitcher.toasts.selectWorkspace);
+      }
+      if (!name) {
+        throw new Error(t.workspaceSwitcher.toasts.nameRequired);
+      }
+      return updateWorkspace(editingWorkspaceId, { name });
+    },
+    onSuccess: (workspace) => {
+      setIsEditDialogOpen(false);
+      setEditingWorkspaceId("");
+      setEditingWorkspaceName("");
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      notify.success(t.workspaceSwitcher.toasts.workspaceUpdated.replace("{name}", workspace.name));
+    },
+    onError: (error) => {
+      notify.error(error, t.common.error);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (workspaceToDelete: { id: string; name: string }) => {
+      await deleteWorkspace(workspaceToDelete.id);
+      return workspaceToDelete;
+    },
+    onSuccess: (workspace) => {
+      const fallbackWorkspaceId = user?.active_workspace?.id ?? null;
+      if (workspace.id === workspaceId) {
+        setWorkspaceId(fallbackWorkspaceId);
+      }
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      notify.success(t.workspaceSwitcher.toasts.workspaceDeleted.replace("{name}", workspace.name));
+    },
+    onError: (error) => {
+      notify.error(error, t.common.error);
+    },
+  });
 
   return (
     <>
@@ -97,57 +148,120 @@ export function WorkspaceSwitcher() {
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              workspaces?.map((ws) => (
-                <DropdownMenuItem
-                  key={ws.id}
-                  onClick={() => {
-                    setWorkspaceId(ws.id);
-                    toast.success(`${t.workspaceSwitcher.toasts.switchedTo} ${ws.name}`);
-                  }}
-                  className="flex items-center justify-between"
-                >
-                  <span className={ws.id === workspaceId ? "font-bold" : ""}>
-                    {ws.name}
-                  </span>
-                  {ws.id === workspaceId && <Check className="h-4 w-4 text-primary" />}
-                </DropdownMenuItem>
-              ))
+              workspaces?.map((ws) => {
+                const isDefault = ws.id === user?.active_workspace?.id;
+                return (
+                  <DropdownMenuItem
+                    key={ws.id}
+                    onClick={() => {
+                      setWorkspaceId(ws.id);
+                      notify.success(`${t.workspaceSwitcher.toasts.switchedTo} ${ws.name}`);
+                    }}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className={ws.id === workspaceId ? "font-bold" : ""}>{ws.name}</span>
+                    <div className="flex items-center gap-1">
+                      {ws.id === workspaceId && <Check className="h-4 w-4 text-primary" />}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setEditingWorkspaceId(ws.id);
+                          setEditingWorkspaceName(ws.name);
+                          setIsEditDialogOpen(true);
+                        }}
+                        aria-label={t.workspaceSwitcher.renameWorkspace}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      {!isDefault && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 text-destructive hover:text-destructive"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const confirmed = window.confirm(
+                              t.workspaceSwitcher.deleteConfirm.replace("{name}", ws.name),
+                            );
+                            if (!confirmed) return;
+                            deleteMutation.mutate({ id: ws.id, name: ws.name });
+                          }}
+                          aria-label={t.workspaceSwitcher.deleteWorkspace}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </DropdownMenuItem>
+                );
+              })
             )}
           </div>
 
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setIsDialogOpen(true)} className="text-primary focus:text-primary">
+          <DropdownMenuItem onClick={() => setIsCreateDialogOpen(true)} className="text-primary focus:text-primary">
             <Plus className="mr-2 h-4 w-4" />
             {t.workspaceSwitcher.createWorkspace}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent className="sm:max-w-md" closeLabel={t.common.accessibility.closeDialog}>
           <DialogHeader>
             <DialogTitle>{t.workspaceSwitcher.createTitle}</DialogTitle>
-            <DialogDescription>
-              {t.workspaceSwitcher.createDescription}
-            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="id">{t.workspaceSwitcher.workspaceIdLabel}</Label>
+              <Label htmlFor="name">{t.workspaceSwitcher.workspaceNameLabel}</Label>
               <Input
-                id="id"
-                placeholder={t.workspaceSwitcher.workspaceIdPlaceholder}
-                value={newWorkspaceId}
-                onChange={(e) => setNewWorkspaceId(e.target.value)}
+                id="name"
+                placeholder={t.workspaceSwitcher.workspaceNamePlaceholder}
+                value={newWorkspaceName}
+                onChange={(e) => setNewWorkspaceName(e.target.value)}
               />
-              <p className="text-[10px] text-muted-foreground italic">
-                {t.workspaceSwitcher.workspaceIdHint}
-              </p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>{t.common.cancel}</Button>
-            <Button onClick={handleCreateWorkspace}>{t.workspaceSwitcher.createAndSwitch}</Button>
+            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+              {t.common.cancel}
+            </Button>
+            <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending}>
+              {t.workspaceSwitcher.createAndSwitch}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-md" closeLabel={t.common.accessibility.closeDialog}>
+          <DialogHeader>
+            <DialogTitle>{t.workspaceSwitcher.renameTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-name">{t.workspaceSwitcher.workspaceNameLabel}</Label>
+              <Input
+                id="edit-name"
+                placeholder={t.workspaceSwitcher.workspaceNamePlaceholder}
+                value={editingWorkspaceName}
+                onChange={(e) => setEditingWorkspaceName(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              {t.common.cancel}
+            </Button>
+            <Button onClick={() => renameMutation.mutate()} disabled={renameMutation.isPending}>
+              {t.common.save}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

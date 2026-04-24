@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,6 +17,7 @@ import { listAgentProfiles } from "@/shared/api/agent-profiles";
 import { queryKeys } from "@/shared/query/keys";
 import { useI18n } from "@/shared/i18n/use-language";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
+import { notify } from "@/shared/ui/notify";
 
 export function ConversationList() {
   const params = useParams<{ conversationId?: string }>();
@@ -49,9 +49,9 @@ export function ConversationList() {
     onSuccess: (conversation) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations.all });
       router.push(`/ask/${conversation.id}`);
-      toast.success(t.conversationList.created);
+      notify.success(t.conversationList.created);
     },
-    onError: (err) => toast.error(`${t.conversationList.createFailedPrefix} ${(err as Error).message}`),
+    onError: (err) => notify.error(`${t.conversationList.createFailedPrefix} ${(err as Error).message}`, t.common.error),
   });
 
   return (

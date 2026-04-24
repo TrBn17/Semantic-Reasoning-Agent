@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw } from "lucide-react";
 import Link from "next/link";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -35,6 +34,7 @@ import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { Badge } from "@/components/ui/badge";
 import { Time } from "@/shared/components/time";
+import { notify } from "@/shared/ui/notify";
 
 export function DocumentDetail({ documentId }: { documentId: string }) {
   const queryClient = useQueryClient();
@@ -99,10 +99,9 @@ export function DocumentDetail({ documentId }: { documentId: string }) {
         queryKey: queryKeys.documents.jobs(documentId),
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.documents.list() });
-      toast.success("Reprocess queued");
+      notify.success("Reprocess queued");
     },
-    onError: (err) =>
-      toast.error(`Reprocess failed: ${(err as Error).message}`),
+    onError: (err) => notify.error(`Reprocess failed: ${(err as Error).message}`, "Reprocess failed"),
   });
 
   if (isLoading) return <Skeleton className="h-64 w-full" />;

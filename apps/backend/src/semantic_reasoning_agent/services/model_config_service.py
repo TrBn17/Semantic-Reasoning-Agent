@@ -610,8 +610,6 @@ class ModelConfigService:
             if not credentials.get("base_url"):
                 return False, "Cloudflare account id is not configured."
             return True, "Ready to run."
-        if provider_key in {"token", "local_token"}:
-            return True, "Ready to run."
         return False, f"Embedding provider '{provider}' is not supported."
 
     def is_ready(self, provider: str, model: str, workspace_id: str | None = None) -> bool:

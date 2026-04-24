@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, RefreshCcw, Save } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +14,7 @@ import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
 import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
 import { cn } from "@/shared/utils";
+import { notify } from "@/shared/ui/notify";
 
 type ProviderDraft = {
   enabled: boolean;
@@ -139,10 +139,10 @@ export function ProviderSettingsView() {
         queryClient.invalidateQueries({ queryKey: queryKeys.settings.all }),
         queryClient.invalidateQueries({ queryKey: queryKeys.settings.models(resolvedWorkspaceId) }),
       ]);
-      toast.success(t.agentsSettings.toasts.agentSettingsSaved);
+      notify.success(t.agentsSettings.toasts.agentSettingsSaved);
     },
     onError: (error) =>
-      toast.error(`${t.agentsSettings.toasts.saveFailedPrefix} ${(error as Error).message}`),
+      notify.error(`${t.agentsSettings.toasts.saveFailedPrefix} ${(error as Error).message}`, t.common.error),
   });
 
   if (isLoading || !data) {

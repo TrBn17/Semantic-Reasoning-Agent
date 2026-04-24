@@ -14,7 +14,6 @@ export default function ToolsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">{t.pages.tools.title}</h1>
-          <p className="text-sm text-muted-foreground">{t.pages.tools.description}</p>
         </div>
         <Button asChild variant="secondary" size="sm">
           <Link href="/search-tools">

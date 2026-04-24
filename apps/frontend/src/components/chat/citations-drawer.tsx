@@ -7,7 +7,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
@@ -36,7 +35,6 @@ export function CitationsDrawer({ citations }: { citations: Citation[] }) {
       >
         <SheetHeader>
           <SheetTitle>{t.citationsDrawer.title}</SheetTitle>
-          <SheetDescription>{t.citationsDrawer.description}</SheetDescription>
         </SheetHeader>
         <ScrollArea className="mt-4 h-[calc(100vh-120px)] pr-3">
           <div className="space-y-3">

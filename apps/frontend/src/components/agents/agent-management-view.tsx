@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Save, Shield } from "lucide-react";
-import { toast } from "sonner";
 import {
   formatPresetLabel,
   summarizeKnowledgeScope,
@@ -41,6 +40,7 @@ import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
 import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
+import { notify } from "@/shared/ui/notify";
 import type {
   AgentProfileResponse,
   EvidencePolicySchema,
@@ -140,8 +140,8 @@ export function AgentManagementView() {
     queryFn: () => listKnowledgePacks(workspaceId),
   });
   const { data: documents = [] } = useQuery({
-    queryKey: queryKeys.documents.list(),
-    queryFn: listDocuments,
+    queryKey: ["documents", "list", workspaceId ?? null],
+    queryFn: () => listDocuments(workspaceId),
   });
 
   const [newProfileName, setNewProfileName] = useState("");
@@ -216,9 +216,9 @@ export function AgentManagementView() {
       setSelectedProfileId(profile.id);
       setPreferredAgentProfileId(profile.id);
       await queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
-      toast.success(t.agentsSettings.toasts.agentProfileCreated);
+      notify.success(t.agentsSettings.toasts.agentProfileCreated);
     },
-    onError: (error) => toast.error(`${t.agentsSettings.toasts.createFailedPrefix} ${(error as Error).message}`),
+    onError: (error) => notify.error(`${t.agentsSettings.toasts.createFailedPrefix} ${(error as Error).message}`, t.common.error),
   });
 
   const saveProfileMutation = useMutation({
@@ -239,9 +239,9 @@ export function AgentManagementView() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
-      toast.success(t.agentsSettings.toasts.profileSaved);
+      notify.success(t.agentsSettings.toasts.profileSaved);
     },
-    onError: (error) => toast.error(`${t.agentsSettings.toasts.profileSaveFailedPrefix} ${(error as Error).message}`),
+    onError: (error) => notify.error(`${t.agentsSettings.toasts.profileSaveFailedPrefix} ${(error as Error).message}`, t.common.error),
   });
 
   const setDefaultMutation = useMutation({
@@ -252,9 +252,9 @@ export function AgentManagementView() {
     onSuccess: async (profile) => {
       setPreferredAgentProfileId(profile.id);
       await queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
-      toast.success(t.agentsSettings.toasts.defaultProfileUpdated);
+      notify.success(t.agentsSettings.toasts.defaultProfileUpdated);
     },
-    onError: (error) => toast.error(`${t.agentsSettings.toasts.defaultUpdateFailedPrefix} ${(error as Error).message}`),
+    onError: (error) => notify.error(`${t.agentsSettings.toasts.defaultUpdateFailedPrefix} ${(error as Error).message}`, t.common.error),
   });
 
   const saveKnowledgePackMutation = useMutation({
@@ -283,10 +283,10 @@ export function AgentManagementView() {
       setKnowledgeDialogOpen(false);
       setEditingPack(null);
       setKnowledgePackDraft(makeKnowledgePackDraft());
-      toast.success(t.agentManagement.toastKnowledgePackSaved);
+      notify.success(t.agentManagement.toastKnowledgePackSaved);
     },
     onError: (error) =>
-      toast.error(`${t.agentManagement.toastKnowledgePackSaveFailedPrefix} ${(error as Error).message}`),
+      notify.error(`${t.agentManagement.toastKnowledgePackSaveFailedPrefix} ${(error as Error).message}`, t.common.error),
   });
 
   if (isLoading) {

@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { MessageSquare, Plus } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { formatPresetLabel, summarizeKnowledgeScope } from "@/components/agents/model-picker";
 import {
@@ -18,6 +17,7 @@ import { createConversation } from "@/shared/api/conversations";
 import { queryKeys } from "@/shared/query/keys";
 import { useI18n } from "@/shared/i18n/use-language";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
+import { notify } from "@/shared/ui/notify";
 
 export default function ChatLandingPage() {
   const { t } = useI18n();
@@ -44,7 +44,7 @@ export default function ChatLandingPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.conversations.all });
       router.push(`/ask/${c.id}`);
     },
-    onError: (err) => toast.error(`${t.pages.ask.createFailedPrefix} ${(err as Error).message}`),
+    onError: (err) => notify.error(`${t.pages.ask.createFailedPrefix} ${(err as Error).message}`, t.common.error),
   });
 
   return (
@@ -54,7 +54,6 @@ export default function ChatLandingPage() {
           <MessageSquare className="h-6 w-6 text-muted-foreground" />
         </div>
         <h2 className="text-lg font-semibold">{t.pages.ask.newConversationHeading}</h2>
-        <p className="text-sm text-muted-foreground">{t.pages.ask.description}</p>
         <Select
           value={preferredAgentProfileId ?? "__default__"}
           onValueChange={(value) =>

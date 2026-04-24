@@ -47,6 +47,12 @@ from semantic_reasoning_agent.schemas.documents import (
     DocumentStatus,
     JobStatus,
 )
+from semantic_reasoning_agent.schemas.knowledge_packs import KnowledgePackCreateRequest
+from semantic_reasoning_agent.services.knowledge_pack_service import (
+    KnowledgePackNotFoundError,
+    KnowledgePackService,
+    KnowledgePackValidationError,
+)
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
@@ -76,6 +82,7 @@ class DocumentService:
         retrieval_service: RetrievalService,
         database_manager: DatabaseManager,
         task_dispatcher: TaskDispatcher,
+        knowledge_pack_service: KnowledgePackService,
         object_store: ObjectStorePort | None = None,
         model_config_service: TaskModelResolverPort | None = None,
         adapter_registry: AdapterRegistry | None = None,
@@ -86,13 +93,19 @@ class DocumentService:
         self._retrieval_service = retrieval_service
         self._database_manager = database_manager
         self._task_dispatcher = task_dispatcher
+        self._knowledge_pack_service = knowledge_pack_service
         self._object_store = object_store or build_object_store(settings)
         self._model_config_service = model_config_service
         self._adapter_registry = adapter_registry
 
-    def list_documents(self) -> list[DocumentResponse]:
+    def list_documents(self, workspace_id: str | None = None) -> list[DocumentResponse]:
+        resolved_workspace_id = workspace_id or self._settings.default_workspace_id
         with self._database_manager.session() as session:
-            documents = session.scalars(select(DocumentORM).order_by(desc(DocumentORM.updated_at))).all()
+            documents = session.scalars(
+                select(DocumentORM)
+                .where(DocumentORM.workspace_id == resolved_workspace_id)
+                .order_by(desc(DocumentORM.updated_at))
+            ).all()
             return [self._to_document_schema(document) for document in documents]
 
     def get_document(self, document_id: str) -> DocumentResponse:
@@ -154,6 +167,8 @@ class DocumentService:
         workspace_id: str | None = None,
         tags: list[str] | None = None,
         ingestion_mode: str | None = None,
+        knowledge_pack_id: str | None = None,
+        knowledge_pack_name: str | None = None,
         content_type: str | None = None,
     ) -> DocumentResponse:
         if not content:
@@ -167,9 +182,14 @@ class DocumentService:
             )
 
         document_type = Path(filename).suffix.lower().lstrip(".")
-        ingestion_options = self._resolve_ingestion_options(ingestion_mode=ingestion_mode)
         document_id = str(uuid4())
         resolved_workspace_id = workspace_id or self._settings.default_workspace_id
+        ingestion_options = self._resolve_ingestion_options(
+            workspace_id=resolved_workspace_id,
+            ingestion_mode=ingestion_mode,
+            knowledge_pack_id=knowledge_pack_id,
+            knowledge_pack_name=knowledge_pack_name,
+        )
         timestamp = utc_now()
         stored_object = self._object_store.put_document_binary(
             document_id,
@@ -297,7 +317,11 @@ class DocumentService:
         document = self._get_document_record(document_id)
         options = DocumentIngestionOptions.from_dict(document.ingestion_options)
         self._reset_jobs(document_id, ingestion_mode=options.ingestion_mode)
-        self._retrieval_service.remove_document(document_id)
+        self._retrieval_service.remove_document(
+            document_id,
+            workspace_id=document.workspace_id,
+            knowledge_pack_id=options.knowledge_pack_id,
+        )
 
         try:
             self._mark_job_running(document_id, "convert_markdown")
@@ -338,7 +362,12 @@ class DocumentService:
                     parsed_chunks,
                     parser_version=converted_document.converter_version,
                 )
-                self._retrieval_service.upsert_chunks(document_id, indexed_chunks)
+                self._retrieval_service.upsert_chunks(
+                    document_id,
+                    indexed_chunks,
+                    knowledge_pack_id=options.knowledge_pack_id,
+                    workspace_id=document.workspace_id,
+                )
                 self._mark_job_completed(document_id, "index_chunks")
 
             self._update_document_state(
@@ -355,17 +384,76 @@ class DocumentService:
             self._mark_failed(document_id, self._active_job_name(document_id), str(exc))
             raise DocumentProcessingError(str(exc)) from exc
 
-    def _resolve_ingestion_options(self, *, ingestion_mode: str | None) -> DocumentIngestionOptions:
+    def _resolve_ingestion_options(
+        self,
+        *,
+        workspace_id: str,
+        ingestion_mode: str | None,
+        knowledge_pack_id: str | None,
+        knowledge_pack_name: str | None,
+    ) -> DocumentIngestionOptions:
         mode = str(ingestion_mode or "both").lower()
         if mode not in {"ontology", "retrieval", "both"}:
             raise DocumentProcessingError(
                 "ingestion_mode must be one of 'ontology', 'retrieval', or 'both'."
             )
-        return DocumentIngestionOptions(ingestion_mode=mode)  # type: ignore[arg-type]
+        if mode == "ontology":
+            return DocumentIngestionOptions(ingestion_mode=mode)  # type: ignore[arg-type]
+
+        resolved_pack_id = (knowledge_pack_id or "").strip() or None
+        if resolved_pack_id:
+            try:
+                pack = self._knowledge_pack_service.get_pack(resolved_pack_id)
+            except KnowledgePackNotFoundError as exc:
+                raise DocumentProcessingError(str(exc)) from exc
+            if pack.workspace_id != workspace_id:
+                raise DocumentProcessingError(
+                    "Selected knowledge pack does not belong to the target workspace."
+                )
+            return DocumentIngestionOptions(
+                ingestion_mode=mode,  # type: ignore[arg-type]
+                knowledge_pack_id=resolved_pack_id,
+            )
+
+        resolved_pack_name = (knowledge_pack_name or "").strip()
+        if not resolved_pack_name:
+            resolved_pack_name = "Default Knowledge Pack"
+        existing_pack = next(
+            (
+                pack
+                for pack in self._knowledge_pack_service.list_packs(workspace_id)
+                if pack.name.strip().lower() == resolved_pack_name.lower()
+            ),
+            None,
+        )
+        if existing_pack is not None:
+            return DocumentIngestionOptions(
+                ingestion_mode=mode,  # type: ignore[arg-type]
+                knowledge_pack_id=existing_pack.id,
+            )
+        try:
+            created = self._knowledge_pack_service.create_pack(
+                KnowledgePackCreateRequest(
+                    workspace_id=workspace_id,
+                    name=resolved_pack_name,
+                )
+            )
+        except KnowledgePackValidationError as exc:
+            raise DocumentProcessingError(str(exc)) from exc
+        return DocumentIngestionOptions(
+            ingestion_mode=mode,  # type: ignore[arg-type]
+            knowledge_pack_id=created.id,
+        )
 
     def _mark_failed(self, document_id: str, failed_job: str, error_message: str) -> None:
         timestamp = utc_now()
-        self._retrieval_service.remove_document(document_id)
+        document = self._get_document_record(document_id)
+        options = DocumentIngestionOptions.from_dict(document.ingestion_options)
+        self._retrieval_service.remove_document(
+            document_id,
+            workspace_id=document.workspace_id,
+            knowledge_pack_id=options.knowledge_pack_id,
+        )
         with self._database_manager.session() as session:
             row = session.get(DocumentORM, document_id)
             if row is None:

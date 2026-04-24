@@ -22,6 +22,7 @@ from semantic_reasoning_agent.services.knowledge_pack_service import KnowledgePa
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
+from semantic_reasoning_agent.services.qdrant_collection_service import QdrantCollectionService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
 from semantic_reasoning_agent.services.runtime_audit_service import RuntimeAuditService
 from semantic_reasoning_agent.services.search_tool_service import SearchToolConfigService
@@ -44,6 +45,7 @@ class AppContainer:
     agent_capability_service: AgentCapabilityService
     model_config_service: ModelConfigService
     provider_models_service: ProviderModelsService
+    qdrant_collection_service: QdrantCollectionService
     adapter_registry: AdapterRegistry
     graphiti_gateway: GraphitiGateway
     retrieval_service: RetrievalService
@@ -67,7 +69,11 @@ def get_app_container() -> AppContainer:
     adapter_registry = AdapterRegistry()
     secret_service = SecretService(DatabaseSecretRepository(database_manager))
     agent_profile_service = AgentProfileService(database_manager, settings)
-    knowledge_pack_service = KnowledgePackService(database_manager)
+    qdrant_collection_service = QdrantCollectionService(settings)
+    knowledge_pack_service = KnowledgePackService(
+        database_manager,
+        qdrant_collection_service=qdrant_collection_service,
+    )
     provider_models_service = ProviderModelsService(settings)
     model_config_service = ModelConfigService(
         database_manager=database_manager,
@@ -96,6 +102,7 @@ def get_app_container() -> AppContainer:
         settings,
         database_manager,
         model_config_service=model_config_service,
+        qdrant_collection_service=qdrant_collection_service,
     )
     conversation_service = ConversationService(
         database_manager,
@@ -111,6 +118,7 @@ def get_app_container() -> AppContainer:
         retrieval_service,
         database_manager,
         task_dispatcher,
+        knowledge_pack_service,
         object_store=object_store,
         model_config_service=model_config_service,
         adapter_registry=adapter_registry,
@@ -170,6 +178,7 @@ def get_app_container() -> AppContainer:
         agent_capability_service=agent_capability_service,
         model_config_service=model_config_service,
         provider_models_service=provider_models_service,
+        qdrant_collection_service=qdrant_collection_service,
         adapter_registry=adapter_registry,
         graphiti_gateway=graphiti_gateway,
         retrieval_service=retrieval_service,

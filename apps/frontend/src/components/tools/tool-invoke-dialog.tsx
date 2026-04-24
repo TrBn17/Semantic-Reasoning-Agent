@@ -3,14 +3,12 @@
 import { useMutation } from "@tanstack/react-query";
 import { Play } from "lucide-react";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -30,6 +28,7 @@ import type {
 } from "@/shared/api/types";
 import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
 import { useI18n } from "@/shared/i18n/use-language";
+import { notify } from "@/shared/ui/notify";
 
 export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
   const { t } = useI18n();
@@ -61,7 +60,7 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
     onSuccess: (output) => {
       setResult(output);
       if (output.status === "success") {
-        toast.success(
+        notify.success(
           t.toolInvoke.successToast
             .replace("{tool}", tool.tool_name)
             .replace("{evidence}", output.evidence.length.toString())
@@ -70,7 +69,7 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
         return;
       }
       if (output.status === "partial") {
-        toast.warning(
+        notify.warning(
           t.toolInvoke.partialToast
             .replace(
               "{hints}",
@@ -80,16 +79,17 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
         );
         return;
       }
-      toast.error(
+      notify.error(
         t.toolInvoke.failedToast
           .replace("{tool}", tool.tool_name)
           .replace("{code}", output.error_code ?? t.toolInvoke.unknownError)
           .replace("{message}", output.error_message ?? ""),
+        t.toolInvoke.unknownError,
       );
     },
     onError: (err) => {
       setResult(null);
-      toast.error(`${t.toolInvoke.invokeFailedPrefix} ${(err as Error).message}`);
+      notify.error(`${t.toolInvoke.invokeFailedPrefix} ${(err as Error).message}`, t.common.error);
     },
   });
 
@@ -126,7 +126,6 @@ export function ToolInvokeDialog({ tool }: { tool: ToolSpec }) {
           <DialogTitle className="font-mono text-base">
             {tool.tool_name || t.toolInvoke.dialogTitleFallback}
           </DialogTitle>
-          <DialogDescription>{tool.description}</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 md:grid-cols-2">

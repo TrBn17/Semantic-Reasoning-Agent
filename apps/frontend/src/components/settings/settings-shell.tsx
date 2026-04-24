@@ -14,7 +14,6 @@ type TabId = "general" | "providers" | "models";
 type TabDef = {
   id: TabId;
   label: string;
-  description: string;
   icon: LucideIcon;
 };
 
@@ -54,19 +53,16 @@ export function SettingsShell({ defaultTab = DEFAULT_TAB }: { defaultTab?: TabId
       {
         id: "general",
         label: t.settingsShell.general.label,
-        description: t.settingsShell.general.description,
         icon: Cog,
       },
       {
         id: "providers",
         label: t.settingsShell.providers.label,
-        description: t.settingsShell.providers.description,
         icon: Key,
       },
       {
         id: "models",
         label: t.settingsShell.models.label,
-        description: t.settingsShell.models.description,
         icon: Layers,
       },
     ],
@@ -128,7 +124,6 @@ export function SettingsShell({ defaultTab = DEFAULT_TAB }: { defaultTab?: TabId
 
         <header className="mb-6">
           <h1 className="text-xl font-semibold tracking-tight">{activeMeta.label}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{activeMeta.description}</p>
         </header>
 
         <section className="space-y-8 pb-16">

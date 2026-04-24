@@ -6,6 +6,14 @@ class WorkspaceSummary(BaseModel):
     name: str
 
 
+class WorkspaceCreateRequest(BaseModel):
+    name: str
+
+
+class WorkspaceUpdateRequest(BaseModel):
+    name: str
+
+
 class AuthMeResponse(BaseModel):
     id: str
     email: str

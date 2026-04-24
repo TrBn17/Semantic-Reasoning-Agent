@@ -22,6 +22,7 @@ export function CommandPalette() {
       { id: "home", label: t.nav.home, href: "/" },
       { id: "ask", label: t.nav.ask, href: "/ask" },
       { id: "documents", label: t.nav.documents, href: "/documents" },
+      { id: "knowledge", label: t.nav.knowledgePacks, href: "/knowledge" },
       { id: "ontology", label: t.nav.ontology, href: "/ontology/builds" },
       { id: "graph", label: t.nav.graph, href: "/graph" },
       { id: "agents", label: t.nav.agents, href: "/agents" },

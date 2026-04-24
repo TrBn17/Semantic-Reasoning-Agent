@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { ModelCombobox } from "@/components/agents/model-combobox";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -22,6 +21,7 @@ import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { composeModelValue, parseModelValue } from "@/shared/utils/model-value";
+import { notify } from "@/shared/ui/notify";
 
 export function ChatRuntimeControls({
   conversation,
@@ -52,7 +52,7 @@ export function ChatRuntimeControls({
       });
     },
     onSuccess: onConversationChange,
-    onError: (err) => toast.error(`${t.agentsSettings.toasts.saveFailedPrefix} ${(err as Error).message}`),
+    onError: (err) => notify.error(`${t.agentsSettings.toasts.saveFailedPrefix} ${(err as Error).message}`, t.common.error),
   });
 
   const updateProfileMutation = useMutation({
@@ -63,7 +63,7 @@ export function ChatRuntimeControls({
         clear_model_override: true,
       }),
     onSuccess: onConversationChange,
-    onError: (err) => toast.error(`${t.agentsSettings.toasts.profileSaveFailedPrefix} ${(err as Error).message}`),
+    onError: (err) => notify.error(`${t.agentsSettings.toasts.profileSaveFailedPrefix} ${(err as Error).message}`, t.common.error),
   });
 
   const sortedModels = useMemo(() => {

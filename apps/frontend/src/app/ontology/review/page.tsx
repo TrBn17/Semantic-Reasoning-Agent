@@ -9,7 +9,6 @@ export default function OntologyReviewPage() {
     <div className="mx-auto max-w-6xl space-y-4 p-6">
       <div>
         <h1 className="text-xl font-semibold">{t.pages.ontologyReview.title}</h1>
-        <p className="text-sm text-muted-foreground">{t.pages.ontologyReview.description}</p>
       </div>
       <CrossBuildReview />
     </div>

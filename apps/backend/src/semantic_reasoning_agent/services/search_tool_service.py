@@ -29,7 +29,6 @@ from semantic_reasoning_agent.domain.contracts.evidence import (
 )
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import (
-    DocumentChunkORM,
     OntologySearchIndexORM,
     OntologyEntityFactORM,
     OntologyEntityORM,
@@ -86,6 +85,8 @@ def _utc_now() -> datetime:
 
 DEFAULT_DOCS_SYSTEM_KEY = "workspace_default_rag"
 DEFAULT_GRAPH_SYSTEM_KEY = "workspace_default_ontology_search"
+FORCED_EMBEDDING_PROVIDER = "cloudflare"
+FORCED_EMBEDDING_MODEL = "bge-m3"
 
 
 class SearchToolConfigService:
@@ -412,6 +413,7 @@ class SearchToolConfigService:
             if payload.document_ids is not None
             else list(config.document_ids) if config.collection_target == "documents" else None
         )
+        knowledge_pack_ids = self._resolve_knowledge_pack_ids(config)
         captured_at = _utc_now()
 
         semantic_evidence: list[Evidence] = []
@@ -423,6 +425,7 @@ class SearchToolConfigService:
                 top_k=max(top_k * 2, top_k),
                 embedding_provider=config.embedding_provider,
                 embedding_model=config.embedding_model,
+                knowledge_pack_ids=knowledge_pack_ids,
             )
             semantic_evidence = [
                 retrieval_result_to_evidence(
@@ -440,6 +443,7 @@ class SearchToolConfigService:
                 config.workspace_id,
                 payload.query,
                 document_ids=document_ids,
+                knowledge_pack_ids=knowledge_pack_ids,
                 top_k=max(top_k * 2, top_k),
                 call_id=call_id,
                 captured_at=captured_at,
@@ -460,17 +464,16 @@ class SearchToolConfigService:
         query: str,
         *,
         document_ids: list[str] | None,
+        knowledge_pack_ids: list[str] | None,
         top_k: int,
         call_id: UUID,
         captured_at: datetime,
     ) -> list[Evidence]:
-        with self._database_manager.session() as session:
-            statement = select(DocumentChunkORM).where(
-                DocumentChunkORM.workspace_id == workspace_id
-            )
-            if document_ids:
-                statement = statement.where(DocumentChunkORM.document_id.in_(document_ids))
-            chunks = list(session.scalars(statement).all())
+        chunks = self._retrieval_service.list_chunks_for_bm25(
+            workspace_id=workspace_id,
+            knowledge_pack_ids=knowledge_pack_ids,
+            document_ids=document_ids,
+        )
         if not chunks:
             return []
         corpus = [(chunk.chunk_id, chunk.text) for chunk in chunks]
@@ -487,7 +490,7 @@ class SearchToolConfigService:
 
     @staticmethod
     def _chunk_to_evidence(
-        chunk: DocumentChunkORM,
+        chunk,
         score: float,
         call_id: UUID,
         captured_at: datetime,
@@ -571,7 +574,6 @@ class SearchToolConfigService:
                 search_type=config.graph_search_type,  # type: ignore[arg-type]
                 reranker=reranker,  # type: ignore[arg-type]
             )
-            evidence: list[Evidence] = []
             for match in matches:
                 if match.kind == "edge":
                     graph_evidence.append(
@@ -829,7 +831,6 @@ class SearchToolConfigService:
         return evidence[:top_k]
 
     def ensure_workspace_defaults(self, workspace_id: str) -> None:
-        defaults = self._model_config_service.get_workspace_search_defaults(workspace_id)
         now = _utc_now()
         with self._database_manager.session() as session:
             self._upsert_system_config(
@@ -839,8 +840,8 @@ class SearchToolConfigService:
                 system_key=DEFAULT_DOCS_SYSTEM_KEY,
                 name="Workspace RAG",
                 description="System-managed default RAG tool for workspace documents.",
-                embedding_provider=defaults.embedding_provider,
-                embedding_model=defaults.embedding_model,
+                embedding_provider=FORCED_EMBEDDING_PROVIDER,
+                embedding_model=FORCED_EMBEDDING_MODEL,
                 default_top_k=5,
                 collection_target="workspace",
                 bm25_enabled=True,
@@ -854,8 +855,8 @@ class SearchToolConfigService:
                 system_key=DEFAULT_GRAPH_SYSTEM_KEY,
                 name="Workspace Ontology Search",
                 description="System-managed default ontology search tool for the published graph.",
-                embedding_provider=defaults.embedding_provider,
-                embedding_model=defaults.embedding_model,
+                embedding_provider=FORCED_EMBEDDING_PROVIDER,
+                embedding_model=FORCED_EMBEDDING_MODEL,
                 default_top_k=5,
                 ontology_scope="published",
                 graph_search_type="combined",
@@ -867,8 +868,8 @@ class SearchToolConfigService:
             self._ensure_ontology_index(
                 workspace_id=workspace_id,
                 version_id=version_id,
-                embedding_provider=defaults.embedding_provider,
-                embedding_model=defaults.embedding_model,
+                embedding_provider=FORCED_EMBEDDING_PROVIDER,
+                embedding_model=FORCED_EMBEDDING_MODEL,
             )
 
     def _upsert_system_config(
@@ -1164,14 +1165,21 @@ class SearchToolConfigService:
         embedding_provider: str | None,
         embedding_model: str | None,
     ) -> tuple[str, str]:
-        defaults = self._model_config_service.get_workspace_search_defaults(workspace_id)
-        resolved_provider = (embedding_provider or defaults.embedding_provider or "").strip()
-        resolved_model = (embedding_model or defaults.embedding_model or "").strip()
+        resolved_provider = (embedding_provider or FORCED_EMBEDDING_PROVIDER).strip()
+        resolved_model = (embedding_model or FORCED_EMBEDDING_MODEL).strip()
         if not resolved_provider or not resolved_model:
             raise SearchToolConfigInvalidError(
                 "Search tool configs require embedding_provider and embedding_model."
             )
         return resolved_provider, resolved_model
+
+    @staticmethod
+    def _resolve_knowledge_pack_ids(config: SearchToolConfigResponse) -> list[str] | None:
+        raw_value = (config.config_metadata or {}).get("knowledge_pack_ids")
+        if not isinstance(raw_value, list):
+            return None
+        values = [str(item).strip() for item in raw_value if str(item).strip()]
+        return values or None
 
     @staticmethod
     def _next_duplicate_name(

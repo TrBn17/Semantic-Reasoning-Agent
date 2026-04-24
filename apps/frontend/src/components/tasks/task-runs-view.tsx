@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,6 +11,7 @@ import { resolveTask } from "@/shared/api/tasks";
 import type { TaskResolveResponse } from "@/shared/api/types";
 import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
 import { useI18n } from "@/shared/i18n/use-language";
+import { notify } from "@/shared/ui/notify";
 
 export function TaskRunsView() {
   const { t } = useI18n();
@@ -31,9 +31,9 @@ export function TaskRunsView() {
       }),
     onSuccess: (data) => {
       setResult(data);
-      toast.success(t.tasksUi.taskResolved);
+      notify.success(t.tasksUi.taskResolved);
     },
-    onError: (error) => toast.error(`${t.tasksUi.taskFailedPrefix} ${(error as Error).message}`),
+    onError: (error) => notify.error(`${t.tasksUi.taskFailedPrefix} ${(error as Error).message}`, t.common.error),
   });
 
   return (

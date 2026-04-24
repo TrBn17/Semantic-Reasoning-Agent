@@ -2,7 +2,9 @@ import { apiFetch } from "@/shared/api/client";
 import type {
   OntologyBuildCreateRequest,
   OntologyBuildResponse,
+  OntologyDraftPublishRequest,
   OntologyGraphResponse,
+  OntologyPublishResponse,
 } from "@/shared/api/types";
 
 export {
@@ -45,5 +47,12 @@ export function getGraph(workspaceId?: string): Promise<OntologyGraphResponse> {
   return apiFetch<OntologyGraphResponse>("/ontology/graph", {
     method: "GET",
     searchParams: workspaceId ? { workspace_id: workspaceId } : undefined,
+  });
+}
+
+export function publishGraphDraft(body: OntologyDraftPublishRequest): Promise<OntologyPublishResponse> {
+  return apiFetch<OntologyPublishResponse>("/ontology/graph/draft/publish", {
+    method: "POST",
+    body,
   });
 }

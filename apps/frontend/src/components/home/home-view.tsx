@@ -64,8 +64,8 @@ export function HomeView() {
   }, []);
 
   const documents = useQuery({
-    queryKey: queryKeys.documents.list(),
-    queryFn: listDocuments,
+    queryKey: ["documents", "list", workspaceId ?? null],
+    queryFn: () => listDocuments(workspaceId),
   });
   const builds = useQuery({
     queryKey: queryKeys.ontology.builds(workspaceId ?? undefined),
@@ -177,7 +177,9 @@ export function HomeView() {
                 className="flex items-center justify-between rounded-md px-2 py-2 text-sm hover:bg-accent"
               >
                 <div className="min-w-0">
-                  <div className="truncate font-medium">{b.id.slice(0, 8)}</div>
+                  <div className="truncate font-medium">
+                    {b.ontology_title?.trim() || t.ontologyBuild.tableBuild}
+                  </div>
                   <div className="truncate text-xs text-muted-foreground">
                     {b.entity_count} {t.common.entities} · {b.relation_count} {t.common.relations} ·{" "}
                     <Time value={b.updated_at} className="inline" />
@@ -260,9 +262,7 @@ export function HomeView() {
                 {t.home.tasks.badge}
               </Badge>
             </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground">{t.home.tasks.description}</p>
-            </CardContent>
+            <CardContent />
           </Card>
         </section>
       )}

@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { Bot, Wrench } from "lucide-react";
-import { toast } from "sonner";
 import { ChatRuntimeControls } from "@/components/chat/chat-runtime-controls";
 import {
   MessageComposer,
@@ -21,6 +20,7 @@ import { useSettingsModelsQuery } from "@/shared/hooks/use-settings-models-query
 import { queryKeys } from "@/shared/query/keys";
 import { useI18n } from "@/shared/i18n/use-language";
 import type { ChatReply, ChatToolCallSummary, Citation } from "@/shared/api/types";
+import { notify } from "@/shared/ui/notify";
 
 const CitationsDrawer = dynamic(
   () =>
@@ -47,8 +47,8 @@ export function ChatView({ conversationId }: { conversationId: string }) {
   const { data: models = [] } = useSettingsModelsQuery();
 
   const { data: documents = [] } = useQuery({
-    queryKey: queryKeys.documents.list(),
-    queryFn: listDocuments,
+    queryKey: ["documents", "list", workspaceId ?? null],
+    queryFn: () => listDocuments(workspaceId),
   });
 
   async function handleSubmit(payload: ComposerSubmitPayload) {
@@ -99,13 +99,13 @@ export function ChatView({ conversationId }: { conversationId: string }) {
               return;
             }
             if (event === "error") {
-              toast.error(String(data.message ?? t.chatView.streamingFailed));
+              notify.error(String(data.message ?? t.chatView.streamingFailed), t.chatView.streamingFailed);
             }
           },
         },
       );
     } catch (error) {
-      toast.error(`${t.chatView.sendFailedPrefix} ${(error as Error).message}`);
+      notify.error(`${t.chatView.sendFailedPrefix} ${(error as Error).message}`, t.chatView.streamingFailed);
     } finally {
       setIsStreaming(false);
     }

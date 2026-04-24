@@ -36,8 +36,8 @@ class SearchToolConfigResponse(BaseModel):
 
     collection_target: CollectionTarget = "workspace"
     document_ids: list[str] = Field(default_factory=list)
-    bm25_enabled: bool = False
-    fusion_strategy: FusionStrategy = "semantic_only"
+    bm25_enabled: bool = True
+    fusion_strategy: FusionStrategy = "hybrid_rrf"
 
     ontology_scope: OntologyScope = "published"
     ontology_version_id: str | None = None
@@ -65,8 +65,8 @@ class SearchToolConfigCreateRequest(BaseModel):
 
     collection_target: CollectionTarget = "workspace"
     document_ids: list[str] = Field(default_factory=list)
-    bm25_enabled: bool = False
-    fusion_strategy: FusionStrategy = "semantic_only"
+    bm25_enabled: bool = True
+    fusion_strategy: FusionStrategy = "hybrid_rrf"
 
     ontology_scope: OntologyScope = "published"
     ontology_version_id: str | None = None

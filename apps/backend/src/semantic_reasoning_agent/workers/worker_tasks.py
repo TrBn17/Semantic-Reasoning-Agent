@@ -1,4 +1,11 @@
+import logging
+
 from semantic_reasoning_agent.workers.celery_app import celery_app
+
+# Neo4j emits many INFO notifications for IF NOT EXISTS schema calls.
+# Keep worker logs focused on actionable warnings/errors.
+logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)
+logging.getLogger("neo4j").setLevel(logging.WARNING)
 
 
 @celery_app.task(name="semantic_reasoning_agent.tasks.process_document")

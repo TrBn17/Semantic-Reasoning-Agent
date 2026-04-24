@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { listWorkflows, runWorkflow } from "@/shared/api/workflows";
 import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
+import { notify } from "@/shared/ui/notify";
 
 export function WorkflowRegistryView() {
   const workspaceId = useActiveWorkspaceId();
@@ -25,9 +25,9 @@ export function WorkflowRegistryView() {
       }),
     onSuccess: (data) => {
       setResult(data);
-      toast.success("Workflow run completed.");
+      notify.success("Workflow run completed.");
     },
-    onError: (error) => toast.error(`Workflow run failed: ${(error as Error).message}`),
+    onError: (error) => notify.error(`Workflow run failed: ${(error as Error).message}`, "Workflow run failed"),
   });
 
   return (

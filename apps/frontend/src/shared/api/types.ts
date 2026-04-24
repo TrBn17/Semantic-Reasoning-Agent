@@ -28,6 +28,14 @@ export interface WorkspaceSummary {
   name: string;
 }
 
+export interface WorkspaceCreateRequest {
+  name: string;
+}
+
+export interface WorkspaceUpdateRequest {
+  name: string;
+}
+
 export interface AuthMeResponse {
   id: string;
   email: string;
@@ -446,6 +454,16 @@ export interface KnowledgePackUpdateRequest {
   status?: string;
 }
 
+export interface KnowledgePackDocumentSummaryResponse {
+  document_id: string;
+  document_title: string;
+  chunk_count: number;
+}
+
+export interface KnowledgePackAddDocumentRequest {
+  document_id: string;
+}
+
 export interface DocumentResponse {
   id: string;
   title: string;
@@ -553,6 +571,11 @@ export interface OntologyBuildCreateRequest {
   workspace_id?: string | null;
   extraction_provider?: string | null;
   extraction_model?: string | null;
+}
+
+export interface OntologyDraftPublishRequest {
+  workspace_id?: string | null;
+  build_id?: string | null;
 }
 
 export interface OntologyBuildStepResponse {

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 
 from semantic_reasoning_agent.documents.errors import UnsupportedDocumentTypeError
 from semantic_reasoning_agent.entrypoints.dependencies import get_document_service
@@ -35,6 +35,8 @@ async def upload_document(
     workspace_id: str | None = Form(default=None),
     tags: str | None = Form(default=None),
     ingestion_mode: str | None = Form(default=None),
+    knowledge_pack_id: str | None = Form(default=None),
+    knowledge_pack_name: str | None = Form(default=None),
     document_service: DocumentService = Depends(get_document_service),
 ) -> DocumentResponse:
     try:
@@ -48,6 +50,8 @@ async def upload_document(
             workspace_id=workspace_id,
             tags=parsed_tags,
             ingestion_mode=ingestion_mode,
+            knowledge_pack_id=knowledge_pack_id,
+            knowledge_pack_name=knowledge_pack_name,
             content_type=file.content_type,
         )
     except UnsupportedDocumentTypeError as exc:
@@ -58,9 +62,10 @@ async def upload_document(
 
 @router.get("", response_model=list[DocumentResponse])
 def list_documents(
+    workspace_id: str | None = Query(default=None),
     document_service: DocumentService = Depends(get_document_service),
 ) -> list[DocumentResponse]:
-    return document_service.list_documents()
+    return document_service.list_documents(workspace_id=workspace_id)
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)

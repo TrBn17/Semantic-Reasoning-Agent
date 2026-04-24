@@ -61,7 +61,7 @@ class Settings(BaseSettings):
         alias="DEFAULT_EMBEDDING_PROVIDER",
     )
     default_embedding_model: str = Field(
-        default="@cf/baai/bge-base-en-v1.5",
+        default="bge-m3",
         alias="DEFAULT_EMBEDDING_MODEL",
     )
     google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
@@ -90,7 +90,7 @@ class Settings(BaseSettings):
         alias="MINIO_PUBLIC_BASE_URL",
     )
 
-    vector_store_backend: str = Field(default="postgres", alias="VECTOR_STORE_BACKEND")
+    vector_store_backend: str = Field(default="qdrant", alias="VECTOR_STORE_BACKEND")
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
     qdrant_collection_name: str = Field(default="document_chunks", alias="QDRANT_COLLECTION_NAME")
 

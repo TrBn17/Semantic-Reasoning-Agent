@@ -15,10 +15,12 @@ DocumentIngestionMode = Literal["ontology", "retrieval", "both"]
 @dataclass(frozen=True)
 class DocumentIngestionOptions:
     ingestion_mode: DocumentIngestionMode = "both"
+    knowledge_pack_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ingestion_mode": self.ingestion_mode,
+            "knowledge_pack_id": self.knowledge_pack_id,
         }
 
     @classmethod
@@ -28,7 +30,12 @@ class DocumentIngestionOptions:
         ingestion_mode = str(payload.get("ingestion_mode") or "both").lower()
         if ingestion_mode not in {"ontology", "retrieval", "both"}:
             ingestion_mode = "both"
-        return cls(ingestion_mode=ingestion_mode)  # type: ignore[arg-type]
+        knowledge_pack_id = payload.get("knowledge_pack_id")
+        resolved_pack = str(knowledge_pack_id).strip() if knowledge_pack_id else None
+        return cls(
+            ingestion_mode=ingestion_mode,  # type: ignore[arg-type]
+            knowledge_pack_id=resolved_pack or None,
+        )
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -105,6 +106,12 @@ def _safe_trace(
 
 
 class OpenDomainLLMExtractor:
+    _UUID_PATTERN = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    )
+    _HEXISH_PATTERN = re.compile(r"^[0-9a-f_-]{20,}$", re.IGNORECASE)
+
     def __init__(
         self,
         settings: Settings,
@@ -213,8 +220,9 @@ class OpenDomainLLMExtractor:
             narrative = _LLMOntologyNarrative.model_validate(payload)
         except ValidationError:
             return self._fallback_narrative(document, domain=domain)
+        resolved_title = self._normalize_narrative_title(narrative.title, domain=domain)
         return OntologyNarrative(
-            title=((narrative.title or "").strip() or "Ontology")[:120],
+            title=resolved_title[:120],
             summary=((narrative.summary or "").strip())[:280],
         )
 
@@ -462,6 +470,28 @@ class OpenDomainLLMExtractor:
         text = document.markdown[:600].strip()
         words = [word.strip(".,:;!?()[]{}\"'") for word in text.split()]
         title = " ".join(word for word in words[:5] if word) or "Ontology"
-        if domain and domain not in {"general", "pending"}:
-            title = f"{domain.replace('_', ' ').title()} Ontology"
+        title = OpenDomainLLMExtractor._normalize_narrative_title(title, domain=domain)
         return OntologyNarrative(title=title[:120], summary=text[:280])
+
+    @classmethod
+    def _normalize_narrative_title(cls, title: str | None, *, domain: str | None = None) -> str:
+        normalized = (title or "").strip()
+        domain_title = (
+            f"{domain.replace('_', ' ').title()} Ontology"
+            if domain and domain not in {"general", "pending"}
+            else "Ontology"
+        )
+        if not normalized:
+            return domain_title
+        if cls._looks_like_identifier_title(normalized):
+            return domain_title
+        return normalized
+
+    @classmethod
+    def _looks_like_identifier_title(cls, title: str) -> bool:
+        compact = title.strip()
+        if cls._UUID_PATTERN.fullmatch(compact):
+            return True
+        if " " not in compact and cls._HEXISH_PATTERN.fullmatch(compact):
+            return True
+        return False

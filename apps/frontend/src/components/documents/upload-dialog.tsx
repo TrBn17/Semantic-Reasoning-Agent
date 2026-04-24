@@ -3,13 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -25,9 +23,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getDocumentIngestionCapabilities, uploadDocuments } from "@/shared/api/documents";
+import { listKnowledgePacks } from "@/shared/api/knowledge-packs";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { useI18n } from "@/shared/i18n/use-language";
+import { notify } from "@/shared/ui/notify";
 
 export function UploadDialog() {
   const { t } = useI18n();
@@ -37,14 +37,30 @@ export function UploadDialog() {
   const [files, setFiles] = useState<File[]>([]);
   const [tags, setTags] = useState("");
   const [ingestionMode, setIngestionMode] = useState<"ontology" | "retrieval" | "both">("both");
+  const [knowledgePackId, setKnowledgePackId] = useState<string>("");
+  const requiresKnowledgePack = ingestionMode === "retrieval" || ingestionMode === "both";
   const { data: capabilities } = useQuery({
     queryKey: ["documents", "options"],
     queryFn: getDocumentIngestionCapabilities,
   });
+  const { data: knowledgePacks } = useQuery({
+    queryKey: queryKeys.knowledgePacks.list(workspaceId),
+    queryFn: () => listKnowledgePacks(workspaceId),
+    enabled: open && Boolean(workspaceId),
+  });
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (files.length === 0) throw new Error(t.documents.toasts.selectFile);
+      if (!workspaceId) throw new Error(t.documents.toasts.workspaceRequired);
+      let resolvedKnowledgePackId: string | undefined;
+      if (requiresKnowledgePack) {
+        if (knowledgePackId) {
+          resolvedKnowledgePackId = knowledgePackId;
+        } else {
+          throw new Error(t.documents.toasts.knowledgePackRequired);
+        }
+      }
       return uploadDocuments({
         files,
         workspaceId: workspaceId ?? undefined,
@@ -53,6 +69,7 @@ export function UploadDialog() {
           .map((t) => t.trim())
           .filter(Boolean),
         ingestionMode,
+        knowledgePackId: resolvedKnowledgePackId,
       });
     },
     onSuccess: ({ uploaded, failed }) => {
@@ -61,26 +78,38 @@ export function UploadDialog() {
       }
 
       if (uploaded.length > 0 && failed.length === 0) {
-        toast.success(t.documents.toasts.uploadSuccess.replace("{count}", uploaded.length.toString()));
+        notify.success(t.documents.toasts.uploadSuccess.replace("{count}", uploaded.length.toString()));
         setOpen(false);
       } else if (uploaded.length > 0) {
-        toast.warning(
+        notify.warning(
           t.documents.toasts.uploadPartial
             .replace("{uploaded}", uploaded.length.toString())
             .replace("{failed}", failed.length.toString())
             .replace("{filenames}", failed.slice(0, 2).map((f) => f.filename).join(", "))
         );
       } else {
-        toast.error(
-          t.documents.toasts.uploadFailed.replace("{reason}", failed.slice(0, 2).map((f) => f.reason).join(" | "))
+        notify.error(
+          t.documents.toasts.uploadFailed.replace("{reason}", failed.slice(0, 2).map((f) => f.reason).join(" | ")),
+          t.documents.toasts.uploadFailed.replace("{reason}", t.common.error),
         );
       }
 
       setFiles([]);
       setTags("");
       setIngestionMode("both");
+      setKnowledgePackId("");
     },
-    onError: (err) => toast.error(t.documents.toasts.uploadFailed.replace("{reason}", (err as Error).message)),
+    onError: (err) => {
+      const message = (err as Error).message;
+      const normalized = message.toLowerCase();
+      const reason = normalized.includes("out-of-scope document ids")
+        ? t.documents.toasts.outOfScopeDocument
+        : message;
+      notify.error(
+        t.documents.toasts.uploadFailed.replace("{reason}", reason),
+        t.documents.toasts.uploadFailed.replace("{reason}", t.common.error),
+      );
+    },
   });
 
   return (
@@ -94,9 +123,6 @@ export function UploadDialog() {
       <DialogContent closeLabel={t.common.accessibility.closeDialog}>
         <DialogHeader>
           <DialogTitle>{t.documents.uploadTitle}</DialogTitle>
-          <DialogDescription>
-            {t.documents.uploadDescription}
-          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1">
@@ -138,12 +164,24 @@ export function UploadDialog() {
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              {(capabilities?.ingestion_mode_options ?? []).find(
-                (option) => option.value === ingestionMode,
-              )?.description ?? t.documents.ingestionModeHint}
-            </p>
           </div>
+          {requiresKnowledgePack && (
+            <div className="space-y-1">
+              <Label htmlFor="knowledge-pack">{t.documents.knowledgePack.label}</Label>
+              <Select value={knowledgePackId} onValueChange={setKnowledgePackId}>
+                <SelectTrigger id="knowledge-pack">
+                  <SelectValue placeholder={t.documents.knowledgePack.selectPlaceholder} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(knowledgePacks ?? []).map((pack) => (
+                    <SelectItem key={pack.id} value={pack.id}>
+                      {pack.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1">
             <Label htmlFor="tags">{t.documents.tagsLabel}</Label>
             <Input

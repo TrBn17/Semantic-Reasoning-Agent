@@ -7,11 +7,10 @@ from typing import Any
 import httpx
 
 from semantic_reasoning_agent.core.config import Settings
-from semantic_reasoning_agent.infrastructure.vector import TokenVectorBackend
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
 
 
-EmbeddingPayload = list[float] | dict[str, int]
+EmbeddingPayload = list[float]
 
 
 @dataclass(frozen=True)
@@ -30,7 +29,6 @@ class EmbeddingService:
     ) -> None:
         self._settings = settings
         self._model_config_service = model_config_service
-        self._token_backend = TokenVectorBackend()
 
     def embed_text(
         self,
@@ -42,42 +40,33 @@ class EmbeddingService:
     ) -> EmbeddingRecord:
         workspace = workspace_id or self._settings.default_workspace_id
         defaults = self._model_config_service.get_workspace_search_defaults(workspace)
-        resolved_provider = (provider or defaults.embedding_provider or "token").strip()
-        resolved_model = (model or defaults.embedding_model or "token-fallback").strip()
+        resolved_provider = (provider or defaults.embedding_provider or "").strip()
+        resolved_model = (model or defaults.embedding_model or "").strip()
 
-        ready, _ = self._model_config_service.embedding_backend_status(
+        ready, reason = self._model_config_service.embedding_backend_status(
             resolved_provider,
             resolved_model,
             workspace,
         )
-        if resolved_provider.lower() == "cloudflare" and ready:
-            try:
-                return EmbeddingRecord(
-                    values=self._embed_cloudflare(
-                        text,
-                        workspace_id=workspace,
-                        model=resolved_model,
-                    ),
-                    provider=resolved_provider,
-                    model=resolved_model,
-                    backend="cloudflare",
-                )
-            except Exception:
-                pass
-
+        if resolved_provider.lower() != "cloudflare":
+            raise ValueError(
+                f"Embedding provider '{resolved_provider}' is not allowed. Only 'cloudflare' is supported."
+            )
+        if not ready:
+            raise ValueError(reason)
         return EmbeddingRecord(
-            values=self._token_backend.embed_text(text),
+            values=self._embed_cloudflare(
+                text,
+                workspace_id=workspace,
+                model=resolved_model,
+            ),
             provider=resolved_provider,
             model=resolved_model,
-            backend="token_fallback",
+            backend="cloudflare",
         )
 
     def cosine_similarity(self, left: EmbeddingPayload, right: EmbeddingPayload) -> float:
-        if isinstance(left, dict) and isinstance(right, dict):
-            return self._token_backend.cosine_similarity(left, right)
-        if isinstance(left, list) and isinstance(right, list):
-            return _dense_cosine_similarity(left, right)
-        return 0.0
+        return _dense_cosine_similarity(left, right)
 
     def _embed_cloudflare(
         self,
@@ -110,7 +99,6 @@ class EmbeddingService:
             raise ValueError("Cloudflare embedding response did not include a vector.")
         return embedding
 
-
 def _extract_embedding(payload: dict[str, Any]) -> list[float]:
     data = payload.get("data")
     if isinstance(data, list) and data:
@@ -130,7 +118,7 @@ def _extract_embedding(payload: dict[str, Any]) -> list[float]:
 def _dense_cosine_similarity(left: list[float], right: list[float]) -> float:
     if not left or not right or len(left) != len(right):
         return 0.0
-    numerator = sum(l * r for l, r in zip(left, right, strict=False))
+    numerator = sum(left_value * right_value for left_value, right_value in zip(left, right, strict=False))
     if numerator == 0:
         return 0.0
     left_norm = math.sqrt(sum(value * value for value in left))

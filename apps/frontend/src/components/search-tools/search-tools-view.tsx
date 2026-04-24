@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Loader2, Play, Plus, Trash2 } from "lucide-react";
 
@@ -31,7 +31,6 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import {
   createSearchTool,
   deleteSearchTool,
@@ -53,14 +52,17 @@ import type {
   SettingsModelOption,
 } from "@/shared/api/types";
 import { parseModelValue } from "@/shared/utils/model-value";
+import { useI18n } from "@/shared/i18n/use-language";
+import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
 
 export function SearchToolsView() {
+  const { t } = useI18n();
   const [tab, setTab] = useState<SearchToolType>("docs");
   return (
     <Tabs value={tab} onValueChange={(v) => setTab(v as SearchToolType)} className="space-y-4">
       <TabsList>
-        <TabsTrigger value="docs">Document Search</TabsTrigger>
-        <TabsTrigger value="graph">Graph Search</TabsTrigger>
+        <TabsTrigger value="docs">{t.searchToolsPage.tabs.docs}</TabsTrigger>
+        <TabsTrigger value="graph">{t.searchToolsPage.tabs.graph}</TabsTrigger>
       </TabsList>
       <TabsContent value="docs" className="space-y-4">
         <SearchToolSection toolType="docs" />
@@ -73,6 +75,29 @@ export function SearchToolsView() {
 }
 
 function SearchToolSection({ toolType }: { toolType: SearchToolType }) {
+  const { t } = useI18n();
+  useEffect(() => {
+    // #region agent log
+    fetch("http://127.0.0.1:7630/ingest/5124439d-c722-43d8-a824-62b24c1412e1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5bfbef" },
+      body: JSON.stringify({
+        sessionId: "5bfbef",
+        runId: "baseline",
+        hypothesisId: "H1",
+        location: "search-tools-view.tsx:SearchToolSection",
+        message: "Section localization snapshot",
+        data: {
+          toolType,
+          docsHint: t.searchToolsPage.docsHint,
+          graphHint: t.searchToolsPage.graphHint,
+          loadFailedPrefix: t.searchToolsPage.loadFailedPrefix,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [toolType, t]);
   const query = useQuery({
     queryKey: queryKeys.searchTools.list(null, toolType),
     queryFn: () => listSearchTools({ toolType }),
@@ -83,8 +108,8 @@ function SearchToolSection({ toolType }: { toolType: SearchToolType }) {
       <div className="flex items-center justify-between">
         <div className="text-sm text-muted-foreground">
           {toolType === "docs"
-            ? "Semantic + optional BM25 retrieval across a Qdrant collection or selected documents."
-            : "Ontology graph search — published snapshot or a specific version, with configurable reranker."}
+            ? t.searchToolsPage.docsHint
+            : t.searchToolsPage.graphHint}
         </div>
         <CreateToolDialog toolType={toolType} />
       </div>
@@ -93,12 +118,15 @@ function SearchToolSection({ toolType }: { toolType: SearchToolType }) {
         <Skeleton className="h-40 w-full" />
       ) : query.isError ? (
         <p className="text-sm text-destructive">
-          Failed to load configurations: {(query.error as Error)?.message}
+          {t.searchToolsPage.loadFailedPrefix} {(query.error as Error)?.message}
         </p>
       ) : (query.data ?? []).length === 0 ? (
         <p className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-          No saved {toolType === "docs" ? "document" : "graph"} search tools yet. Click{" "}
-          <span className="font-medium">New tool</span> to create one.
+          {t.searchToolsPage.emptyStatePrefix}{" "}
+          {toolType === "docs"
+            ? t.searchToolsPage.emptyStateDocs
+            : t.searchToolsPage.emptyStateGraph}{" "}
+          {t.searchToolsPage.emptyStateSuffix} <span className="font-medium">{t.searchToolsPage.newTool}</span>.
         </p>
       ) : (
         <div className="grid gap-3">
@@ -112,6 +140,7 @@ function SearchToolSection({ toolType }: { toolType: SearchToolType }) {
 }
 
 function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchToolRunResponse | null>(null);
@@ -145,16 +174,13 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
             </Badge>
             {config.is_system ? (
               <Badge variant="secondary" className="text-[10px]">
-                system
+                {t.searchToolsPage.system}
               </Badge>
             ) : null}
             <Badge variant={config.ready ? "success" : "warning"} className="text-[10px]">
-              {config.ready ? "ready" : "blocked"}
+              {config.ready ? t.searchToolsPage.ready : t.searchToolsPage.blocked}
             </Badge>
           </div>
-          {config.description ? (
-            <p className="mt-1 text-xs text-muted-foreground">{config.description}</p>
-          ) : null}
           <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
             <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
               {config.embedding_provider}::{config.embedding_model}
@@ -196,7 +222,7 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
             size="icon"
             onClick={() => duplicateMutation.mutate()}
             disabled={duplicateMutation.isPending}
-            aria-label="Duplicate tool"
+            aria-label={t.searchToolsPage.duplicateToolAria}
           >
             <Copy className="h-4 w-4" />
           </Button>
@@ -206,10 +232,12 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
               variant="ghost"
               size="icon"
               onClick={() => {
-                if (confirm(`Delete "${config.name}"?`)) deleteMutation.mutate();
+                if (confirm(t.searchToolsPage.deleteConfirm.replace("{name}", config.name))) {
+                  deleteMutation.mutate();
+                }
               }}
               disabled={deleteMutation.isPending}
-              aria-label="Delete tool"
+              aria-label={t.searchToolsPage.deleteToolAria}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -221,7 +249,7 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Type a query and press Run…"
+          placeholder={t.searchToolsPage.queryPlaceholder}
           className="flex-1"
         />
         <Button
@@ -234,7 +262,7 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
           ) : (
             <Play className="mr-1 h-4 w-4" />
           )}
-          Run
+          {t.searchToolsPage.run}
         </Button>
       </div>
 
@@ -250,13 +278,14 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
 }
 
 function RunResult({ result }: { result: SearchToolRunResponse }) {
+  const { t } = useI18n();
   return (
     <div className="mt-3 space-y-2 rounded-md border bg-muted/10 p-3">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge variant={result.status === "success" ? "success" : result.status === "partial" ? "warning" : "destructive"}>
           {result.status}
         </Badge>
-        <span>{result.evidence.length} hits</span>
+        <span>{t.searchToolsPage.hits.replace("{count}", String(result.evidence.length))}</span>
         <span>· {result.latency_ms} ms</span>
         {result.error_message ? (
           <span className="text-destructive">· {result.error_message}</span>
@@ -264,7 +293,7 @@ function RunResult({ result }: { result: SearchToolRunResponse }) {
       </div>
       {result.next_action_hints.length > 0 ? (
         <div className="text-[11px] text-muted-foreground">
-          Hints: {result.next_action_hints.join(" · ")}
+          {t.searchToolsPage.hintsPrefix} {result.next_action_hints.join(" · ")}
         </div>
       ) : null}
       <div className="space-y-1.5">
@@ -277,6 +306,7 @@ function RunResult({ result }: { result: SearchToolRunResponse }) {
 }
 
 function EvidenceRow({ ev }: { ev: Evidence }) {
+  const { t } = useI18n();
   return (
     <div className="rounded border bg-background px-3 py-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
@@ -284,7 +314,9 @@ function EvidenceRow({ ev }: { ev: Evidence }) {
           {ev.source_type}
         </Badge>
         <span className="truncate font-medium">{ev.title}</span>
-        <span className="ml-auto text-[10px] text-muted-foreground">score={ev.score.toFixed(3)}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground">
+          {t.searchToolsPage.scorePrefix}={ev.score.toFixed(3)}
+        </span>
       </div>
       <p className="mt-1 line-clamp-3 text-muted-foreground">{ev.content}</p>
     </div>
@@ -317,6 +349,33 @@ function emptyDraft(toolType: SearchToolType): DraftState {
 }
 
 function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
+  const { t } = useI18n();
+  const workspaceId = useActiveWorkspaceId();
+  useEffect(() => {
+    // #region agent log
+    fetch("http://127.0.0.1:7630/ingest/5124439d-c722-43d8-a824-62b24c1412e1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5bfbef" },
+      body: JSON.stringify({
+        sessionId: "5bfbef",
+        runId: "baseline",
+        hypothesisId: "H2",
+        location: "search-tools-view.tsx:CreateToolDialog",
+        message: "Dialog labels snapshot",
+        data: {
+          toolType,
+          newPrefix: t.searchToolsPage.newPrefix,
+          searchToolSuffix: t.searchToolsPage.searchToolSuffix,
+          embeddingProviderHint: t.searchToolsPage.embeddingProviderHint,
+          embeddingModelHint: t.searchToolsPage.embeddingModelHint,
+          hardcodedProviderPlaceholder: "cloudflare",
+          hardcodedModelPlaceholder: "@cf/baai/bge-base-en-v1.5",
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [toolType, t]);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<DraftState>(() => emptyDraft(toolType));
@@ -328,8 +387,8 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
   });
 
   const documentsQuery = useQuery({
-    queryKey: queryKeys.documents.list(),
-    queryFn: () => listDocuments(),
+    queryKey: ["documents", "list", workspaceId ?? null],
+    queryFn: () => listDocuments(workspaceId),
     enabled: open && toolType === "docs",
   });
 
@@ -363,36 +422,29 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
     >
       <DialogTrigger asChild>
         <Button size="sm">
-          <Plus className="mr-1 h-4 w-4" /> New tool
+          <Plus className="mr-1 h-4 w-4" /> {t.searchToolsPage.newTool}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            New {toolType === "docs" ? "document" : "graph"} search tool
+            {t.searchToolsPage.newPrefix}{" "}
+            {toolType === "docs"
+              ? t.searchToolsPage.emptyStateDocs
+              : t.searchToolsPage.emptyStateGraph}{" "}
+            {t.searchToolsPage.searchToolSuffix}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
-          <Field label="Name">
+          <Field label={t.searchToolsPage.nameLabel}>
             <Input
               value={draft.name}
               onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-              placeholder="e.g. Delivery ops retrieval"
+              placeholder={t.searchToolsPage.namePlaceholder}
             />
           </Field>
-          <Field label="Description" hint="Shown on the tool card.">
-            <Textarea
-              value={draft.description ?? ""}
-              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-              rows={2}
-            />
-          </Field>
-
-          <Field
-            label="Legacy provider + model"
-            hint="Optional compatibility fields. If omitted, workspace embedding defaults are used."
-          >
+          <Field label={t.searchToolsPage.legacyProviderModel}>
             <ModelCombobox
               models={modelsQuery.data ?? ([] as SettingsModelOption[])}
               value={draft.modelValue}
@@ -410,7 +462,7 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
           </Field>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Embedding provider" hint="Defaults to the workspace search embedding provider.">
+            <Field label={t.searchToolsPage.embeddingProvider}>
               <Input
                 value={draft.embedding_provider ?? ""}
                 onChange={(e) =>
@@ -419,7 +471,7 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
                 placeholder="cloudflare"
               />
             </Field>
-            <Field label="Embedding model" hint="Defaults to the workspace search embedding model.">
+            <Field label={t.searchToolsPage.embeddingModel}>
               <Input
                 value={draft.embedding_model ?? ""}
                 onChange={(e) =>
@@ -430,7 +482,7 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
             </Field>
           </div>
 
-          <Field label="Default top_k">
+          <Field label={t.searchToolsPage.defaultTopK}>
             <Input
               type="number"
               min={1}
@@ -458,13 +510,13 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-            Cancel
+            {t.common.cancel}
           </Button>
           <Button type="button" onClick={submit} disabled={!canSubmit || createMutation.isPending}>
             {createMutation.isPending ? (
               <Loader2 className="mr-1 h-4 w-4 animate-spin" />
             ) : null}
-            Create
+            {t.common.create}
           </Button>
         </DialogFooter>
 
@@ -487,11 +539,35 @@ function DocsFields({
   setDraft: React.Dispatch<React.SetStateAction<DraftState>>;
   documents: DocumentResponse[];
 }) {
+  const { t } = useI18n();
+  useEffect(() => {
+    // #region agent log
+    fetch("http://127.0.0.1:7630/ingest/5124439d-c722-43d8-a824-62b24c1412e1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5bfbef" },
+      body: JSON.stringify({
+        sessionId: "5bfbef",
+        runId: "baseline",
+        hypothesisId: "H3",
+        location: "search-tools-view.tsx:DocsFields",
+        message: "Docs fields labels snapshot",
+        data: {
+          bm25Hint: t.searchToolsPage.bm25Hint,
+          enableBm25: t.searchToolsPage.enableBm25,
+          semanticOnly: t.searchToolsPage.semanticOnly,
+          bm25Only: t.searchToolsPage.bm25Only,
+          hybridRrf: t.searchToolsPage.hybridRrf,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [t]);
   const docIds = useMemo(() => new Set(draft.document_ids ?? []), [draft.document_ids]);
 
   return (
     <>
-      <Field label="Collection target">
+      <Field label={t.searchToolsPage.collectionTarget}>
         <Select
           value={draft.collection_target}
           onValueChange={(v) =>
@@ -506,17 +582,17 @@ function DocsFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="workspace">Whole workspace</SelectItem>
-            <SelectItem value="documents">Selected documents</SelectItem>
+            <SelectItem value="workspace">{t.searchToolsPage.collectionWorkspace}</SelectItem>
+            <SelectItem value="documents">{t.searchToolsPage.collectionDocuments}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
 
       {draft.collection_target === "documents" ? (
-        <Field label="Documents" hint="Pick one or more indexed documents to scope this tool.">
+        <Field label={t.searchToolsPage.documentsLabel}>
           <div className="max-h-48 overflow-y-auto rounded-md border">
             {documents.length === 0 ? (
-              <p className="p-3 text-xs text-muted-foreground">No documents yet.</p>
+              <p className="p-3 text-xs text-muted-foreground">{t.searchToolsPage.noDocuments}</p>
             ) : (
               documents.map((doc) => {
                 const checked = docIds.has(doc.id);
@@ -549,7 +625,7 @@ function DocsFields({
         </Field>
       ) : null}
 
-      <Field label="BM25" hint="Toggle keyword scoring alongside semantic search.">
+      <Field label="BM25">
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -566,11 +642,11 @@ function DocsFields({
               }))
             }
           />
-          Enable BM25
+          {t.searchToolsPage.enableBm25}
         </label>
       </Field>
 
-      <Field label="Fusion strategy">
+      <Field label={t.searchToolsPage.fusionStrategy}>
         <Select
           value={draft.fusion_strategy}
           onValueChange={(v) =>
@@ -586,9 +662,9 @@ function DocsFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="semantic_only">Semantic only</SelectItem>
-            <SelectItem value="bm25_only">BM25 only</SelectItem>
-            <SelectItem value="hybrid_rrf">Hybrid (Semantic + BM25, RRF)</SelectItem>
+            <SelectItem value="semantic_only">{t.searchToolsPage.semanticOnly}</SelectItem>
+            <SelectItem value="bm25_only">{t.searchToolsPage.bm25Only}</SelectItem>
+            <SelectItem value="hybrid_rrf">{t.searchToolsPage.hybridRrf}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
@@ -603,9 +679,10 @@ function GraphFields({
   draft: DraftState;
   setDraft: React.Dispatch<React.SetStateAction<DraftState>>;
 }) {
+  const { t } = useI18n();
   return (
     <>
-      <Field label="Ontology scope">
+      <Field label={t.searchToolsPage.ontologyScope}>
         <Select
           value={draft.ontology_scope}
           onValueChange={(v) =>
@@ -619,14 +696,14 @@ function GraphFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="published">Published snapshot (default)</SelectItem>
-            <SelectItem value="version">Specific version</SelectItem>
+            <SelectItem value="published">{t.searchToolsPage.ontologyPublished}</SelectItem>
+            <SelectItem value="version">{t.searchToolsPage.ontologyVersion}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
 
       {draft.ontology_scope === "version" ? (
-        <Field label="Ontology version id" hint="Paste the ontology_version_id to target.">
+        <Field label={t.searchToolsPage.ontologyVersionId}>
           <Input
             value={draft.ontology_version_id ?? ""}
             onChange={(e) =>
@@ -639,7 +716,7 @@ function GraphFields({
         </Field>
       ) : null}
 
-      <Field label="Graph search type">
+      <Field label={t.searchToolsPage.graphSearchType}>
         <Select
           value={draft.graph_search_type}
           onValueChange={(v) =>
@@ -653,14 +730,14 @@ function GraphFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="combined">Combined (nodes + edges)</SelectItem>
-            <SelectItem value="nodes">Nodes</SelectItem>
-            <SelectItem value="edges">Edges</SelectItem>
+            <SelectItem value="combined">{t.searchToolsPage.graphCombined}</SelectItem>
+            <SelectItem value="nodes">{t.searchToolsPage.graphNodes}</SelectItem>
+            <SelectItem value="edges">{t.searchToolsPage.graphEdges}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
 
-      <Field label="Reranker">
+      <Field label={t.searchToolsPage.reranker}>
         <Select
           value={draft.reranker}
           onValueChange={(v) =>
@@ -674,9 +751,9 @@ function GraphFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="rrf">RRF (light, no extra model)</SelectItem>
-            <SelectItem value="cross_encoder">Cross-encoder</SelectItem>
-            <SelectItem value="none">None</SelectItem>
+            <SelectItem value="rrf">{t.searchToolsPage.rerankerRrf}</SelectItem>
+            <SelectItem value="cross_encoder">{t.searchToolsPage.rerankerCrossEncoder}</SelectItem>
+            <SelectItem value="none">{t.searchToolsPage.rerankerNone}</SelectItem>
           </SelectContent>
         </Select>
       </Field>

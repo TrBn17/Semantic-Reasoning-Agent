@@ -16,17 +16,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentStatusBadge } from "@/components/documents/status-badges";
 import { listDocuments } from "@/shared/api/documents";
-import { queryKeys } from "@/shared/query/keys";
 import { Time } from "@/shared/components/time";
 import { useI18n } from "@/shared/i18n/use-language";
+import { useWorkspaceStore } from "@/shared/state/workspace-store";
 
 export function DocumentTable() {
   const { t } = useI18n();
+  const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const { data, isLoading, isError } = useQuery({
-    queryKey: queryKeys.documents.list(),
-    queryFn: listDocuments,
+    queryKey: ["documents", "list", workspaceId ?? null],
+    queryFn: () => listDocuments(workspaceId),
     refetchInterval: 5000,
   });
   const documents = useMemo(() => data ?? [], [data]);

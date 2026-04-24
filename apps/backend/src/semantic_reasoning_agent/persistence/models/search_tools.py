@@ -34,16 +34,16 @@ class SearchToolConfigORM(Base):
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
 
     provider: Mapped[str] = mapped_column(String(64), default="cloudflare")
-    model: Mapped[str] = mapped_column(String(128), default="")
+    model: Mapped[str] = mapped_column(String(128), default="bge-m3")
     embedding_provider: Mapped[str] = mapped_column(String(64), default="cloudflare")
-    embedding_model: Mapped[str] = mapped_column(String(255), default="")
+    embedding_model: Mapped[str] = mapped_column(String(255), default="bge-m3")
     default_top_k: Mapped[int] = mapped_column(Integer, default=5)
 
     # docs-specific
     collection_target: Mapped[str] = mapped_column(String(64), default="workspace")
     document_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
-    bm25_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    fusion_strategy: Mapped[str] = mapped_column(String(32), default="semantic_only")
+    bm25_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    fusion_strategy: Mapped[str] = mapped_column(String(32), default="hybrid_rrf")
 
     # graph-specific
     ontology_scope: Mapped[str] = mapped_column(String(32), default="published")

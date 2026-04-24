@@ -171,8 +171,10 @@ class OntologyService:
             build = session.get(OntologyBuildORM, build_id)
             if build is None:
                 raise OntologyBuildNotFoundError(f"Ontology build '{build_id}' was not found.")
-            if build.status != OntologyBuildStatus.failed.value:
-                raise OntologyBuildError("Only failed ontology builds can be deleted.")
+            if build.status == OntologyBuildStatus.running.value:
+                raise OntologyBuildError("Running ontology builds cannot be deleted.")
+            if build.status == OntologyBuildStatus.pending.value:
+                raise OntologyBuildError("Pending ontology builds cannot be deleted.")
             session.delete(build)
 
     def get_graph(self, workspace_id: str | None = None) -> OntologyGraphResponse:

@@ -3,7 +3,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { toast } from "sonner";
 import { EvidenceDetailDrawer } from "@/components/evidence/evidence-detail-drawer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +19,7 @@ import { useCapabilities } from "@/shared/capabilities/useCapabilities";
 import { useI18n } from "@/shared/i18n/use-language";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { track } from "@/shared/telemetry/track";
+import { notify } from "@/shared/ui/notify";
 
 export function EvidenceView() {
   const { t } = useI18n();
@@ -50,7 +50,7 @@ export function EvidenceView() {
         workspace_id: workspaceId ?? undefined,
         top_k: topK,
       }),
-    onError: (err) => toast.error(`${t.evidenceUi.searchFailedPrefix} ${(err as Error).message}`),
+    onError: (err) => notify.error(`${t.evidenceUi.searchFailedPrefix} ${(err as Error).message}`, t.common.error),
   });
 
   const items = useMemo(() => {
@@ -86,7 +86,6 @@ export function EvidenceView() {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">{t.evidenceUi.title}</h1>
-        <p className="text-sm text-muted-foreground">{t.evidenceUi.description}</p>
       </header>
 
       <form onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row">

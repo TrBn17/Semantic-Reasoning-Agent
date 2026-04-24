@@ -51,6 +51,7 @@ export type Dictionary = {
     tools: string;
     connectors: string;
     artifacts: string;
+    knowledgePacks: string;
     settings: string;
   };
   home: {
@@ -86,15 +87,26 @@ export type Dictionary = {
     label: string;
     switchWorkspace: string;
     createWorkspace: string;
+    renameWorkspace: string;
+    deleteWorkspace: string;
     createTitle: string;
     createDescription: string;
+    renameTitle: string;
+    renameDescription: string;
     workspaceIdLabel: string;
     workspaceIdPlaceholder: string;
     workspaceIdHint: string;
+    workspaceNameLabel: string;
+    workspaceNamePlaceholder: string;
+    deleteConfirm: string;
     createAndSwitch: string;
     toasts: {
       idRequired: string;
+      nameRequired: string;
+      selectWorkspace: string;
       switchedTo: string;
+      workspaceUpdated: string;
+      workspaceDeleted: string;
     };
   };
   documents: {
@@ -136,7 +148,104 @@ export type Dictionary = {
       uploadSuccess: string;
       uploadPartial: string;
       uploadFailed: string;
+      workspaceRequired: string;
+      knowledgePackNameRequired: string;
+      knowledgePackRequired: string;
+      documentAddedToKnowledge: string;
+      outOfScopeDocument: string;
     };
+    knowledgePack: {
+      label: string;
+      selectPlaceholder: string;
+      createNew: string;
+      newNamePlaceholder: string;
+      documentSelectLabel: string;
+      documentSelectPlaceholder: string;
+      addButton: string;
+    };
+  };
+  knowledgePacksPage: {
+    title: string;
+    createTitle: string;
+    namePlaceholder: string;
+    createButton: string;
+    tableDocument: string;
+    tableChunks: string;
+    emptyState: string;
+    emptySelectedPack: string;
+    documentsHint: string;
+    toasts: {
+      workspaceRequired: string;
+      emptyName: string;
+      selectPackToDelete: string;
+      created: string;
+      deleted: string;
+    };
+  };
+  searchToolsPage: {
+    title: string;
+    description: string;
+    tabs: {
+      docs: string;
+      graph: string;
+    };
+    docsHint: string;
+    graphHint: string;
+    loadFailedPrefix: string;
+    emptyStatePrefix: string;
+    emptyStateDocs: string;
+    emptyStateGraph: string;
+    emptyStateSuffix: string;
+    newTool: string;
+    newPrefix: string;
+    searchToolSuffix: string;
+    system: string;
+    ready: string;
+    blocked: string;
+    duplicateToolAria: string;
+    deleteToolAria: string;
+    deleteConfirm: string;
+    queryPlaceholder: string;
+    run: string;
+    hits: string;
+    hintsPrefix: string;
+    scorePrefix: string;
+    nameLabel: string;
+    namePlaceholder: string;
+    descriptionLabel: string;
+    descriptionHint: string;
+    legacyProviderModel: string;
+    legacyProviderModelHint: string;
+    embeddingProvider: string;
+    embeddingProviderHint: string;
+    embeddingModel: string;
+    embeddingModelHint: string;
+    defaultTopK: string;
+    collectionTarget: string;
+    collectionWorkspace: string;
+    collectionDocuments: string;
+    documentsLabel: string;
+    documentsHint: string;
+    noDocuments: string;
+    bm25Hint: string;
+    enableBm25: string;
+    fusionStrategy: string;
+    semanticOnly: string;
+    bm25Only: string;
+    hybridRrf: string;
+    ontologyScope: string;
+    ontologyPublished: string;
+    ontologyVersion: string;
+    ontologyVersionId: string;
+    ontologyVersionHint: string;
+    graphSearchType: string;
+    graphCombined: string;
+    graphNodes: string;
+    graphEdges: string;
+    reranker: string;
+    rerankerRrf: string;
+    rerankerCrossEncoder: string;
+    rerankerNone: string;
   };
   chat: {
     useRetrieval: string;
@@ -365,7 +474,7 @@ export type Dictionary = {
     ontologyReview: { title: string; description: string };
     tasks: { title: string; description: string };
     tools: { title: string; description: string };
-    workflows: { title: string; description: string };
+    workflows: { title: string; description: string; comingSoonBadge: string; comingSoonDetail: string };
   };
   commandPalette: {
     inputPlaceholder: string;
@@ -630,6 +739,13 @@ export type Dictionary = {
     tableUpdated: string;
     statusFilterPlaceholder: string;
     emptyBuildsList: string;
+    deleted: string;
+    deleteFailed: string;
+    deleteConfirm: string;
+    publish: string;
+    publishing: string;
+    publishSuccess: string;
+    publishFailed: string;
   };
 };
 
@@ -685,6 +801,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       tools: "Tools",
       connectors: "Connectors",
       artifacts: "Artifacts",
+      knowledgePacks: "Knowledge",
       settings: "Settings",
     },
     home: {
@@ -693,19 +810,19 @@ export const dictionaries: Record<Language, Dictionary> = {
       quickActions: {
         ask: {
           title: "Ask a question",
-          description: "Send a grounded query and inspect cited evidence.",
+          description: "",
         },
         documents: {
           title: "Upload document",
-          description: "Parse and index a document for retrieval and ontology.",
+          description: "",
         },
         evidence: {
           title: "Browse evidence",
-          description: "Review citations, provenance, and source chunks.",
+          description: "",
         },
         ontology: {
           title: "Review ontology builds",
-          description: "Approve candidate entities and publish graph versions.",
+          description: "",
         },
       },
       sections: {
@@ -733,15 +850,26 @@ export const dictionaries: Record<Language, Dictionary> = {
       label: "Workspace",
       switchWorkspace: "Switch Workspace",
       createWorkspace: "Create Workspace",
-      createTitle: "Create New Workspace",
-      createDescription: "Each workspace has its own independent ontology, documents, and settings.",
+      renameWorkspace: "Rename workspace",
+      deleteWorkspace: "Delete workspace",
+      createTitle: "Create Workspace",
+      createDescription: "Create a new workspace.",
+      renameTitle: "Rename Workspace",
+      renameDescription: "Update workspace display name.",
       workspaceIdLabel: "Workspace ID (slug)",
       workspaceIdPlaceholder: "e.g. project-x, financial-analysis",
       workspaceIdHint: "Lowercase, no spaces. This will be used in Neo4j and SQL.",
+      workspaceNameLabel: "Workspace name",
+      workspaceNamePlaceholder: "e.g. Product Team",
+      deleteConfirm: "Delete workspace \"{name}\"?",
       createAndSwitch: "Create & Switch",
       toasts: {
         idRequired: "Workspace ID is required",
+        nameRequired: "Workspace name is required",
+        selectWorkspace: "Please select a workspace.",
         switchedTo: "Switched to workspace:",
+        workspaceUpdated: "Workspace updated: {name}",
+        workspaceDeleted: "Workspace deleted: {name}",
       },
     },
     documents: {
@@ -783,7 +911,108 @@ export const dictionaries: Record<Language, Dictionary> = {
         uploadSuccess: "Uploaded {count} file(s)",
         uploadPartial: "Uploaded {uploaded} file(s), failed {failed}: {filenames}",
         uploadFailed: "Upload failed: {reason}",
+        workspaceRequired: "Workspace is not ready yet. Please select a workspace first.",
+        knowledgePackNameRequired: "Please enter a knowledge collection name.",
+        knowledgePackRequired: "Please select a knowledge collection.",
+        documentAddedToKnowledge: "Document added to Knowledge.",
+        outOfScopeDocument: "The selected document does not belong to this workspace or knowledge pack.",
       },
+      knowledgePack: {
+        label: "Knowledge",
+        selectPlaceholder: "Select Knowledge",
+        createNew: "+ Create new Knowledge",
+        newNamePlaceholder: "Enter a new Knowledge name",
+        documentSelectLabel: "Document",
+        documentSelectPlaceholder: "Select document",
+        addButton: "Add to Knowledge",
+      },
+    },
+    knowledgePacksPage: {
+      title: "Knowledge",
+      createTitle: "Create Knowledge",
+      namePlaceholder: "Knowledge name",
+      createButton: "Create",
+      tableDocument: "Document",
+      tableChunks: "Chunks",
+      emptyState: "No Knowledge yet.",
+      emptySelectedPack: "No documents in the selected collection.",
+      documentsHint: "Add documents from the Documents tab.",
+      toasts: {
+        workspaceRequired: "Workspace is not ready yet. Please select a workspace first.",
+        emptyName: "Knowledge name cannot be empty.",
+        selectPackToDelete: "Please select a Knowledge to delete.",
+        created: "Knowledge created.",
+        deleted: "Knowledge deleted.",
+      },
+    },
+    searchToolsPage: {
+      title: "Search Tools",
+      description:
+        "Create reusable super-search tools over documents or the ontology graph. Pick provider + model once, then invoke with a single click.",
+      tabs: {
+        docs: "Document Search",
+        graph: "Graph Search",
+      },
+      docsHint:
+        "Semantic + optional BM25 retrieval across a Qdrant collection or selected documents.",
+      graphHint:
+        "Ontology graph search - published snapshot or a specific version, with configurable reranker.",
+      loadFailedPrefix: "Failed to load configurations:",
+      emptyStatePrefix: "No saved",
+      emptyStateDocs: "document",
+      emptyStateGraph: "graph",
+      emptyStateSuffix: "search tools yet. Click",
+      newTool: "New tool",
+      newPrefix: "New",
+      searchToolSuffix: "search tool",
+      system: "system",
+      ready: "ready",
+      blocked: "blocked",
+      duplicateToolAria: "Duplicate tool",
+      deleteToolAria: "Delete tool",
+      deleteConfirm: "Delete \"{name}\"?",
+      queryPlaceholder: "Type a query and press Run...",
+      run: "Run",
+      hits: "{count} hits",
+      hintsPrefix: "Hints:",
+      scorePrefix: "score",
+      nameLabel: "Name",
+      namePlaceholder: "e.g. Delivery ops retrieval",
+      descriptionLabel: "Description",
+      descriptionHint: "Shown on the tool card.",
+      legacyProviderModel: "Legacy provider + model",
+      legacyProviderModelHint:
+        "Optional compatibility fields. If omitted, workspace embedding defaults are used.",
+      embeddingProvider: "Embedding provider",
+      embeddingProviderHint: "Defaults to the workspace search embedding provider.",
+      embeddingModel: "Embedding model",
+      embeddingModelHint: "Defaults to the workspace search embedding model.",
+      defaultTopK: "Default top_k",
+      collectionTarget: "Collection target",
+      collectionWorkspace: "Whole workspace",
+      collectionDocuments: "Selected documents",
+      documentsLabel: "Documents",
+      documentsHint: "Pick one or more indexed documents to scope this tool.",
+      noDocuments: "No documents yet.",
+      bm25Hint: "Toggle keyword scoring alongside semantic search.",
+      enableBm25: "Enable BM25",
+      fusionStrategy: "Fusion strategy",
+      semanticOnly: "Semantic only",
+      bm25Only: "BM25 only",
+      hybridRrf: "Hybrid (Semantic + BM25, RRF)",
+      ontologyScope: "Ontology scope",
+      ontologyPublished: "Published snapshot (default)",
+      ontologyVersion: "Specific version",
+      ontologyVersionId: "Ontology version id",
+      ontologyVersionHint: "Paste the ontology_version_id to target.",
+      graphSearchType: "Graph search type",
+      graphCombined: "Combined (nodes + edges)",
+      graphNodes: "Nodes",
+      graphEdges: "Edges",
+      reranker: "Reranker",
+      rerankerRrf: "RRF (light, no extra model)",
+      rerankerCrossEncoder: "Cross-encoder",
+      rerankerNone: "None",
     },
     chat: {
       useRetrieval: "Use retrieval (RAG)",
@@ -822,7 +1051,7 @@ export const dictionaries: Record<Language, Dictionary> = {
     },
     retrieval: {
       title: "Retrieval playground",
-      description: "Search across indexed document chunks. Useful for validating that ingestion parsed the document the way you expected.",
+      description: "",
       queryLabel: "Query",
       queryPlaceholder: "Ask a question or paste keywords",
       topKLabel: "top_k",
@@ -833,21 +1062,20 @@ export const dictionaries: Record<Language, Dictionary> = {
     },
     settingsPage: {
       title: "Settings & Agent Profiles",
-      description:
-        "Manage provider credentials and readiness in one place.",
+      description: "",
     },
     settingsShell: {
       general: {
         label: "General",
-        description: "Workspace, language, appearance",
+        description: "",
       },
       providers: {
         label: "Providers",
-        description: "Configure provider access and readiness.",
+        description: "",
       },
       models: {
         label: "Models",
-        description: "Model catalog from backend",
+        description: "",
       },
     },
     generalSettings: {
@@ -1009,18 +1237,15 @@ export const dictionaries: Record<Language, Dictionary> = {
     pages: {
       agents: {
         title: "Agents",
-        description:
-          "Manage agent profiles, capability presets, tool policy, knowledge packs, and evidence scope.",
+        description: "",
       },
       artifacts: {
         title: "Artifacts",
-        description:
-          "Artifact generation surface is scaffolded and awaiting backend artifact contracts.",
+        description: "",
       },
       ask: {
         newConversationHeading: "Start a new conversation",
-        description:
-          "Pick an agent profile and create a chat. Model routing will come from that profile or the workspace default.",
+        description: "",
         workspaceDefault: "Workspace default",
         newConversationButton: "New conversation",
         createFailedPrefix: "Failed to create:",
@@ -1028,12 +1253,11 @@ export const dictionaries: Record<Language, Dictionary> = {
       },
       connectors: {
         title: "Connectors",
-        description: "Connector control plane is scaffolded and waiting for connector APIs.",
+        description: "",
       },
       documents: {
         title: "Documents",
-        description:
-          "Upload files for ingestion. Indexed chunks become available for retrieval and ontology extraction.",
+        description: "",
       },
       error: {
         title: "Something went wrong",
@@ -1042,32 +1266,31 @@ export const dictionaries: Record<Language, Dictionary> = {
       },
       ontologyHub: {
         title: "Ontology pipeline",
-        description:
-          "Move from indexed documents to extracted candidates, review, and published graph versions.",
+        description: "",
         openGraphEditor: "Open Graph Editor",
         recentBuilds: "Recent builds",
       },
       ontologyBuilds: {
         title: "Ontology builds",
-        description:
-          "Each build extracts candidate entities and relations from one document. Review and publish to promote them into the graph.",
+        description: "",
       },
       ontologyReview: {
         title: "Review queue",
-        description: "All pending candidates across builds in this workspace.",
+        description: "",
       },
       tasks: {
         title: "Tasks",
-        description: "Resolve ad-hoc tasks with the public task runtime endpoint.",
+        description: "",
       },
       tools: {
         title: "Admin / Debug Tools",
-        description:
-          "Internal diagnostics for the tool registry and direct tool invocation. This route is no longer part of the primary product workflow.",
+        description: "",
       },
       workflows: {
         title: "Workflows",
-        description: "Inspect registered workflows and execute supported entries.",
+        description: "",
+        comingSoonBadge: "Coming soon",
+        comingSoonDetail: "",
       },
     },
     commandPalette: {
@@ -1119,7 +1342,7 @@ export const dictionaries: Record<Language, Dictionary> = {
     },
     evidenceUi: {
       title: "Evidence",
-      description: "Search retrieval citations and ontology candidate provenance side by side.",
+      description: "",
       searchPlaceholder: "Search indexed chunks...",
       sourcesLabel: "Sources",
       includeOntology: "Include ontology candidates (latest build)",
@@ -1249,6 +1472,13 @@ export const dictionaries: Record<Language, Dictionary> = {
       tableUpdated: "Updated",
       statusFilterPlaceholder: "status or all",
       emptyBuildsList: "No ontology builds yet.",
+      deleted: "Ontology deleted.",
+      deleteFailed: "Failed to delete ontology.",
+      deleteConfirm: "Delete ontology {id}?",
+      publish: "Publish",
+      publishing: "Publishing...",
+      publishSuccess: "Published to graph.",
+      publishFailed: "Failed to publish ontology.",
     },
     ontologyUi: {
       unknownError: "Unknown error",
@@ -1335,7 +1565,7 @@ export const dictionaries: Record<Language, Dictionary> = {
     },
     citationsDrawer: {
       title: "Citations",
-      description: "Evidence chunks used to compose the reply.",
+      description: "",
       citationCount: "{count} citation{suffix}",
     },
   },
@@ -1390,6 +1620,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       tools: "Công cụ",
       connectors: "Kết nối",
       artifacts: "Tài sản",
+      knowledgePacks: "Knowledge",
       settings: "Cài đặt",
     },
     home: {
@@ -1398,19 +1629,19 @@ export const dictionaries: Record<Language, Dictionary> = {
       quickActions: {
         ask: {
           title: "Đặt câu hỏi",
-          description: "Gửi truy vấn có căn cứ và xem bằng chứng được trích dẫn.",
+          description: "",
         },
         documents: {
           title: "Tải tài liệu lên",
-          description: "Phân tích và lập chỉ mục tài liệu cho truy xuất và ontology.",
+          description: "",
         },
         evidence: {
           title: "Duyệt bằng chứng",
-          description: "Xem lại trích dẫn, nguồn gốc và các đoạn nguồn.",
+          description: "",
         },
         ontology: {
           title: "Duyệt build ontology",
-          description: "Phê duyệt thực thể ứng viên và xuất bản phiên bản đồ thị.",
+          description: "",
         },
       },
       sections: {
@@ -1438,15 +1669,26 @@ export const dictionaries: Record<Language, Dictionary> = {
       label: "Không gian làm việc",
       switchWorkspace: "Chuyển Workspace",
       createWorkspace: "Tạo Workspace",
-      createTitle: "Tạo Workspace Mới",
-      createDescription: "Mỗi workspace có ontology, tài liệu và cài đặt độc lập riêng.",
+      renameWorkspace: "Đổi tên workspace",
+      deleteWorkspace: "Xóa workspace",
+      createTitle: "Tạo Workspace",
+      createDescription: "Tạo workspace mới.",
+      renameTitle: "Đổi tên Workspace",
+      renameDescription: "Cập nhật tên hiển thị cho workspace.",
       workspaceIdLabel: "Workspace ID (slug)",
       workspaceIdPlaceholder: "ví dụ: project-x, phan-tich-tai-chinh",
       workspaceIdHint: "Viết thường, không dấu, không khoảng cách. Dùng cho Neo4j và SQL.",
+      workspaceNameLabel: "Tên workspace",
+      workspaceNamePlaceholder: "ví dụ: Đội sản phẩm",
+      deleteConfirm: "Xóa workspace \"{name}\"?",
       createAndSwitch: "Tạo & Chuyển",
       toasts: {
         idRequired: "Yêu cầu nhập Workspace ID",
+        nameRequired: "Yêu cầu nhập tên workspace",
+        selectWorkspace: "Vui lòng chọn workspace.",
         switchedTo: "Đã chuyển sang workspace:",
+        workspaceUpdated: "Đã cập nhật workspace: {name}",
+        workspaceDeleted: "Đã xóa workspace: {name}",
       },
     },
     documents: {
@@ -1488,7 +1730,108 @@ export const dictionaries: Record<Language, Dictionary> = {
         uploadSuccess: "Đã tải lên {count} tệp",
         uploadPartial: "Đã tải lên {uploaded} tệp, thất bại {failed}: {filenames}",
         uploadFailed: "Tải lên thất bại: {reason}",
+        workspaceRequired: "Workspace chưa sẵn sàng. Vui lòng chọn workspace trước.",
+        knowledgePackNameRequired: "Vui lòng nhập tên bộ tri thức mới.",
+        knowledgePackRequired: "Vui lòng chọn bộ tri thức.",
+        documentAddedToKnowledge: "Đã thêm tài liệu vào Knowledge.",
+        outOfScopeDocument: "Tài liệu đã chọn không thuộc workspace hoặc bộ tri thức hiện tại.",
       },
+      knowledgePack: {
+        label: "Knowledge",
+        selectPlaceholder: "Chọn Knowledge",
+        createNew: "+ Tạo Knowledge mới",
+        newNamePlaceholder: "Nhập tên Knowledge mới",
+        documentSelectLabel: "Tài liệu",
+        documentSelectPlaceholder: "Chọn tài liệu",
+        addButton: "Thêm vào Knowledge",
+      },
+    },
+    knowledgePacksPage: {
+      title: "Knowledge",
+      createTitle: "Tạo Knowledge",
+      namePlaceholder: "Tên Knowledge",
+      createButton: "Tạo",
+      tableDocument: "Tài liệu",
+      tableChunks: "Chunks",
+      emptyState: "Chưa có Knowledge nào.",
+      emptySelectedPack: "Chưa có tài liệu trong bộ tri thức được chọn.",
+      documentsHint: "Thêm tài liệu ở tab Documents.",
+      toasts: {
+        workspaceRequired: "Workspace chưa sẵn sàng. Vui lòng chọn workspace trước.",
+        emptyName: "Tên Knowledge không được để trống.",
+        selectPackToDelete: "Hãy chọn Knowledge cần xóa.",
+        created: "Đã tạo Knowledge.",
+        deleted: "Đã xóa Knowledge.",
+      },
+    },
+    searchToolsPage: {
+      title: "Công cụ tìm kiếm",
+      description:
+        "Tạo công cụ super-search dùng lại trên tài liệu hoặc đồ thị ontology. Chọn provider + model một lần rồi gọi chỉ với một lần bấm.",
+      tabs: {
+        docs: "Tìm kiếm tài liệu",
+        graph: "Tìm kiếm đồ thị",
+      },
+      docsHint:
+        "Truy xuất semantic + BM25 (tùy chọn) trên collection Qdrant hoặc tập tài liệu được chọn.",
+      graphHint:
+        "Tìm kiếm đồ thị ontology - snapshot đã xuất bản hoặc phiên bản cụ thể, với reranker có thể cấu hình.",
+      loadFailedPrefix: "Không thể tải cấu hình:",
+      emptyStatePrefix: "Chưa có công cụ tìm kiếm",
+      emptyStateDocs: "tài liệu",
+      emptyStateGraph: "đồ thị",
+      emptyStateSuffix: ". Nhấn",
+      newTool: "Công cụ mới",
+      newPrefix: "Tạo",
+      searchToolSuffix: "search tool",
+      system: "hệ thống",
+      ready: "sẵn sàng",
+      blocked: "bị chặn",
+      duplicateToolAria: "Nhân bản công cụ",
+      deleteToolAria: "Xóa công cụ",
+      deleteConfirm: "Xóa \"{name}\"?",
+      queryPlaceholder: "Nhập truy vấn và nhấn Chạy...",
+      run: "Chạy",
+      hits: "{count} kết quả",
+      hintsPrefix: "Gợi ý:",
+      scorePrefix: "điểm",
+      nameLabel: "Tên",
+      namePlaceholder: "ví dụ: truy xuất vận hành giao hàng",
+      descriptionLabel: "Mô tả",
+      descriptionHint: "Hiển thị trên thẻ công cụ.",
+      legacyProviderModel: "Provider + model cũ",
+      legacyProviderModelHint:
+        "Trường tương thích tùy chọn. Nếu bỏ trống, hệ thống dùng mặc định embedding của workspace.",
+      embeddingProvider: "Provider embedding",
+      embeddingProviderHint: "Mặc định theo provider embedding của workspace.",
+      embeddingModel: "Model embedding",
+      embeddingModelHint: "Mặc định theo model embedding của workspace.",
+      defaultTopK: "top_k mặc định",
+      collectionTarget: "Phạm vi collection",
+      collectionWorkspace: "Toàn workspace",
+      collectionDocuments: "Tài liệu được chọn",
+      documentsLabel: "Tài liệu",
+      documentsHint: "Chọn một hoặc nhiều tài liệu đã lập chỉ mục để giới hạn công cụ này.",
+      noDocuments: "Chưa có tài liệu.",
+      bm25Hint: "Bật/tắt điểm keyword song song với semantic search.",
+      enableBm25: "Bật BM25",
+      fusionStrategy: "Chiến lược trộn điểm",
+      semanticOnly: "Chỉ semantic",
+      bm25Only: "Chỉ BM25",
+      hybridRrf: "Hybrid (Semantic + BM25, RRF)",
+      ontologyScope: "Phạm vi ontology",
+      ontologyPublished: "Snapshot đã xuất bản (mặc định)",
+      ontologyVersion: "Phiên bản cụ thể",
+      ontologyVersionId: "ID phiên bản ontology",
+      ontologyVersionHint: "Dán ontology_version_id cần truy vấn.",
+      graphSearchType: "Loại tìm kiếm đồ thị",
+      graphCombined: "Kết hợp (nút + cạnh)",
+      graphNodes: "Nút",
+      graphEdges: "Cạnh",
+      reranker: "Reranker",
+      rerankerRrf: "RRF (nhẹ, không cần model phụ)",
+      rerankerCrossEncoder: "Cross-encoder",
+      rerankerNone: "Không dùng",
     },
     chat: {
       useRetrieval: "Sử dụng truy xuất (RAG)",
@@ -1527,7 +1870,7 @@ export const dictionaries: Record<Language, Dictionary> = {
     },
     retrieval: {
       title: "Sân chơi truy xuất",
-      description: "Tìm kiếm trên các đoạn tài liệu đã được lập chỉ mục. Hữu ích để kiểm tra xem việc nạp tài liệu có đúng như bạn mong đợi hay không.",
+      description: "",
       queryLabel: "Truy vấn",
       queryPlaceholder: "Đặt câu hỏi hoặc dán từ khóa",
       topKLabel: "top_k",
@@ -1538,21 +1881,20 @@ export const dictionaries: Record<Language, Dictionary> = {
     },
     settingsPage: {
       title: "Cài đặt & Hồ sơ Agent",
-      description:
-        "Quản lý thông tin xác thực provider và trạng thái sẵn sàng trong một màn hình.",
+      description: "",
     },
     settingsShell: {
       general: {
         label: "Chung",
-        description: "Workspace, ngôn ngữ, giao diện",
+        description: "",
       },
       providers: {
         label: "Nhà cung cấp",
-        description: "Cấu hình truy cập và trạng thái sẵn sàng của provider.",
+        description: "",
       },
       models: {
         label: "Mô hình",
-        description: "Danh mục model từ backend",
+        description: "",
       },
     },
     generalSettings: {
@@ -1714,18 +2056,15 @@ export const dictionaries: Record<Language, Dictionary> = {
     pages: {
       agents: {
         title: "Agents",
-        description:
-          "Quản lý hồ sơ agent, preset năng lực, chính sách công cụ, knowledge pack và phạm vi bằng chứng.",
+        description: "",
       },
       artifacts: {
         title: "Artifacts",
-        description:
-          "Giao diện tạo artifact đang được dựng và chờ hợp đồng backend.",
+        description: "",
       },
       ask: {
         newConversationHeading: "Bắt đầu cuộc hội thoại mới",
-        description:
-          "Chọn hồ sơ agent và tạo chat. Định tuyến model sẽ đến từ hồ sơ đó hoặc mặc định workspace.",
+        description: "",
         workspaceDefault: "Mặc định workspace",
         newConversationButton: "Cuộc hội thoại mới",
         createFailedPrefix: "Tạo thất bại:",
@@ -1733,12 +2072,11 @@ export const dictionaries: Record<Language, Dictionary> = {
       },
       connectors: {
         title: "Connectors",
-        description: "Bảng điều khiển connector đang được dựng và chờ API.",
+        description: "",
       },
       documents: {
         title: "Tài liệu",
-        description:
-          "Tải file để nạp. Các đoạn đã lập chỉ mục dùng cho truy xuất và trích xuất ontology.",
+        description: "",
       },
       error: {
         title: "Đã xảy ra lỗi",
@@ -1747,32 +2085,31 @@ export const dictionaries: Record<Language, Dictionary> = {
       },
       ontologyHub: {
         title: "Pipeline ontology",
-        description:
-          "Từ tài liệu đã lập chỉ mục đến ứng viên đã trích xuất, duyệt và phiên bản đồ thị đã xuất bản.",
+        description: "",
         openGraphEditor: "Mở trình sửa đồ thị",
         recentBuilds: "Build gần đây",
       },
       ontologyBuilds: {
         title: "Các build ontology",
-        description:
-          "Mỗi build trích xuất thực thể và quan hệ ứng viên từ một tài liệu. Duyệt và xuất bản để đưa vào đồ thị.",
+        description: "",
       },
       ontologyReview: {
         title: "Hàng đợi duyệt",
-        description: "Tất cả ứng viên đang chờ trên các build trong workspace này.",
+        description: "",
       },
       tasks: {
         title: "Tác vụ",
-        description: "Xử lý tác vụ ad-hoc qua endpoint runtime công khai.",
+        description: "",
       },
       tools: {
         title: "Công cụ Admin / Debug",
-        description:
-          "Chẩn đoán nội bộ cho registry công cụ và gọi trực tiếp. Route này không còn là luồng sản phẩm chính.",
+        description: "",
       },
       workflows: {
         title: "Workflows",
-        description: "Xem các workflow đã đăng ký và chạy các mục được hỗ trợ.",
+        description: "",
+        comingSoonBadge: "Sắp ra mắt",
+        comingSoonDetail: "",
       },
     },
     commandPalette: {
@@ -1924,6 +2261,13 @@ export const dictionaries: Record<Language, Dictionary> = {
       tableUpdated: "Cập nhật",
       statusFilterPlaceholder: "trạng thái hoặc all",
       emptyBuildsList: "Chưa có build ontology nào.",
+      deleted: "Đã xóa ontology.",
+      deleteFailed: "Không thể xóa ontology.",
+      deleteConfirm: "Xóa ontology {id}?",
+      publish: "Publish",
+      publishing: "Đang publish...",
+      publishSuccess: "Đã publish vào graph.",
+      publishFailed: "Không thể publish ontology.",
     },
     ontologyUi: {
       unknownError: "Lỗi không xác định",
@@ -2010,12 +2354,12 @@ export const dictionaries: Record<Language, Dictionary> = {
     },
     citationsDrawer: {
       title: "Trích dẫn",
-      description: "Các đoạn bằng chứng được dùng để tạo câu trả lời.",
+      description: "",
       citationCount: "{count} trích dẫn{suffix}",
     },
     evidenceUi: {
       title: "Bằng chứng",
-      description: "Tìm kiếm trích dẫn retrieval và provenance của ontology cạnh nhau.",
+      description: "",
       searchPlaceholder: "Tìm các chunk đã lập chỉ mục...",
       sourcesLabel: "Nguồn",
       includeOntology: "Bao gồm ứng viên ontology (build mới nhất)",

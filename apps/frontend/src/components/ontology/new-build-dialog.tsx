@@ -3,14 +3,12 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
-import { toast } from "sonner";
 import { ModelCombobox } from "@/components/agents/model-combobox";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -27,6 +25,7 @@ import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
 import { rankItems } from "@/shared/utils/fuzzy";
 import { parseModelValue } from "@/shared/utils/model-value";
+import { notify } from "@/shared/ui/notify";
 
 export function NewBuildDialog() {
   const { t } = useI18n();
@@ -38,8 +37,8 @@ export function NewBuildDialog() {
   const [modelSelection, setModelSelection] = useState<string>("");
 
   const { data: documents } = useQuery({
-    queryKey: queryKeys.documents.list(),
-    queryFn: listDocuments,
+    queryKey: ["documents", "list", workspaceId ?? null],
+    queryFn: () => listDocuments(workspaceId),
   });
   const { data: models = [] } = useSettingsModelsQuery();
 
@@ -83,12 +82,12 @@ export function NewBuildDialog() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ontology.all });
-      toast.success(t.ontologyUi.buildQueued);
+      notify.success(t.ontologyUi.buildQueued);
       setOpen(false);
       setDocumentId(null);
       setModelSelection("");
     },
-    onError: (err) => toast.error(`${t.ontologyUi.buildFailedPrefix} ${(err as Error).message}`),
+    onError: (err) => notify.error(`${t.ontologyUi.buildFailedPrefix} ${(err as Error).message}`, t.common.error),
   });
 
   return (
@@ -99,14 +98,16 @@ export function NewBuildDialog() {
           {t.ontologyUi.newBuild}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-2xl" closeLabel={t.common.accessibility.closeDialog}>
-        <DialogHeader>
+      <DialogContent
+        className="flex h-[min(86vh,780px)] w-[min(96vw,1120px)] max-w-none flex-col overflow-hidden p-0"
+        closeLabel={t.common.accessibility.closeDialog}
+      >
+        <DialogHeader className="border-b px-5 py-4 pr-12">
           <DialogTitle>{t.ontologyUi.runOntologyExtraction}</DialogTitle>
-          <DialogDescription>{t.ontologyUi.runOntologyExtractionDescription}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5">
-          <div className="space-y-3">
+        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-5 lg:grid-cols-2">
+          <div className="flex min-h-0 flex-col space-y-3">
             <Label>{t.ontologyUi.indexedDocument}</Label>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -117,7 +118,7 @@ export function NewBuildDialog() {
                 className="pl-9"
               />
             </div>
-            <ScrollArea className="h-64 rounded-2xl border">
+            <ScrollArea className="min-h-0 flex-1 rounded-2xl border">
               <div className="space-y-2 p-2">
                 {indexedDocuments.map((document) => {
                   const selected = documentId === document.id;
@@ -148,15 +149,14 @@ export function NewBuildDialog() {
             </ScrollArea>
           </div>
 
-          <div className="space-y-3">
+          <div className="flex min-h-0 flex-col space-y-3">
             <Label>{t.ontologyUi.extractionModel}</Label>
-            <div className="rounded-2xl border bg-muted/20 p-4">
+            <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border bg-muted/20 p-3">
               <ModelCombobox
                 models={ontologyModels}
                 value={modelSelection}
                 onChange={setModelSelection}
                 onlyReady
-                collapseOnSelect
                 labels={{
                   providerPlaceholder: t.agentsSettings.picker.providerPlaceholder,
                   allProviders: t.agentsSettings.picker.allProviders,
@@ -172,19 +172,13 @@ export function NewBuildDialog() {
               />
             </div>
           </div>
-
-          {(documentId || modelSelection) && (
-            <div className="rounded-2xl border bg-card p-4 text-sm">
-              <p className="font-medium">Selection</p>
-              <div className="mt-2 space-y-1 text-muted-foreground">
-                <p>Document: {selectedDocument?.title ?? t.ontologyUi.pickDocument}</p>
-                <p>Model: {parseModelValue(modelSelection)?.model ?? t.ontologyUi.pickExtractionModel}</p>
-              </div>
-            </div>
-          )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="border-t px-5 py-4">
+          <div className="mr-auto hidden text-xs text-muted-foreground sm:block">
+            {selectedDocument?.title ?? t.ontologyUi.pickDocument} |{" "}
+            {parseModelValue(modelSelection)?.model ?? t.ontologyUi.pickExtractionModel}
+          </div>
           <DialogClose asChild>
             <Button variant="outline" type="button">
               {t.common.cancel}

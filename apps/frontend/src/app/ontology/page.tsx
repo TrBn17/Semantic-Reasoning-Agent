@@ -14,7 +14,6 @@ export default function OntologyPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">{t.pages.ontologyHub.title}</h1>
-          <p className="text-sm text-muted-foreground">{t.pages.ontologyHub.description}</p>
         </div>
         <div className="flex gap-2">
           <Button asChild variant="outline">

@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
-import { toast } from "sonner";
 import { BuildStatusBadge } from "@/components/ontology/status-badges";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,6 +16,7 @@ import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { formatDateTime } from "@/shared/utils";
 import { rankItems } from "@/shared/utils/fuzzy";
+import { notify } from "@/shared/ui/notify";
 
 const STATUS_FILTERS = ["all", "pending", "running", "failed", "published"] as const;
 
@@ -43,10 +43,10 @@ export function BuildTable({ limit }: { limit?: number }) {
     mutationFn: (buildId: string) => deleteBuild(buildId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ontology.builds(workspaceId ?? undefined) });
-      toast.success("Deleted failed ontology build.");
+      notify.success(t.ontologyBuild.deleted);
     },
     onError: (err) => {
-      toast.error(`Failed to delete build: ${(err as Error).message}`);
+      notify.error(err, t.ontologyBuild.deleteFailed);
     },
   });
 
@@ -81,8 +81,9 @@ export function BuildTable({ limit }: { limit?: number }) {
         (previousStatus === "pending" || previousStatus === "running") &&
         build.status === "failed"
       ) {
-        toast.error(
+        notify.error(
           `Ontology build ${build.id.slice(0, 8)} failed: ${build.error_message ?? t.ontologyUi.unknownError}`,
+          t.ontologyUi.unknownError,
         );
       }
     }
@@ -127,19 +128,18 @@ export function BuildTable({ limit }: { limit?: number }) {
           {t.ontologyBuild.emptyBuildsList}
         </p>
       ) : (
-        <div className="space-y-3">
+        <div className="grid gap-3 xl:grid-cols-2">
           {rows.map((build) => {
             const provider = build.extraction_provider ?? build.provider;
             const model = build.extraction_model ?? build.model;
             const pendingCount = build.pending_entity_count + build.pending_relation_count;
-            const title =
-              build.ontology_title || `${t.ontologyBuild.documentLabel} ${build.document_id.slice(0, 8)}...`;
+            const title = build.ontology_title?.trim() || t.ontologyBuild.tableBuild;
 
             return (
-              <Card key={build.id} className="overflow-hidden rounded-2xl border">
+              <Card key={build.id} className="h-full overflow-hidden rounded-2xl border">
                 <CardContent className="space-y-4 p-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div className="space-y-2">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <BuildStatusBadge status={build.status} />
                         {build.domain ? (
@@ -148,24 +148,23 @@ export function BuildTable({ limit }: { limit?: number }) {
                           </span>
                         ) : null}
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <Link
                           href={`/ontology/builds/${build.id}`}
-                          className="text-base font-semibold underline-offset-4 hover:underline"
+                          className="line-clamp-2 text-base font-semibold underline-offset-4 hover:underline"
                         >
                           {title}
                         </Link>
-                        <p className="text-xs text-muted-foreground">
-                          #{build.id.slice(0, 8)}... - {provider ?? t.ontologyUi.unknownProvider} /{" "}
-                          {model ?? t.ontologyUi.unknownModel}
+                        <p className="truncate text-xs text-muted-foreground">
+                          {provider ?? t.ontologyUi.unknownProvider} / {model ?? t.ontologyUi.unknownModel}
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 self-start">
+                    <div className="flex shrink-0 items-center gap-2 self-start">
                       <Button asChild variant="outline" size="sm">
                         <Link href={`/ontology/builds/${build.id}`}>Details</Link>
                       </Button>
-                      {build.status === "failed" ? (
+                      {build.status !== "running" && build.status !== "pending" ? (
                         <Button
                           type="button"
                           size="icon"
@@ -174,7 +173,7 @@ export function BuildTable({ limit }: { limit?: number }) {
                           disabled={deleteMutation.isPending}
                           onClick={() => {
                             const confirmed = window.confirm(
-                              `Delete failed ontology build ${build.id.slice(0, 8)}?`,
+                              t.ontologyBuild.deleteConfirm.replace("{id}", build.id.slice(0, 8)),
                             );
                             if (!confirmed) return;
                             deleteMutation.mutate(build.id);

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Binary,
-  FileSearch,
+  Brain,
   FileText,
   Home,
   MessageSquare,
@@ -57,10 +57,10 @@ export function getNavGroups(caps: ReturnType<typeof useCapabilities>): NavGroup
           available: caps.documentsAvailable,
         },
         {
-          href: "/evidence",
-          label: "evidence",
-          icon: FileSearch,
-          available: caps.evidenceAvailable,
+          href: "/knowledge",
+          label: "knowledgePacks",
+          icon: Brain,
+          available: caps.documentsAvailable,
         },
         {
           href: "/ontology/builds",

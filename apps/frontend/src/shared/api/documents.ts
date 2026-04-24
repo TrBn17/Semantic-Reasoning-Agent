@@ -9,8 +9,11 @@ import type {
   DocumentUploadFailure,
 } from "@/shared/api/types";
 
-export function listDocuments(): Promise<DocumentResponse[]> {
-  return apiFetch<DocumentResponse[]>("/documents", { method: "GET" });
+export function listDocuments(workspaceId?: string | null): Promise<DocumentResponse[]> {
+  return apiFetch<DocumentResponse[]>("/documents", {
+    method: "GET",
+    searchParams: workspaceId ? { workspace_id: workspaceId } : undefined,
+  });
 }
 
 export function getDocumentIngestionCapabilities(): Promise<DocumentIngestionCapabilitiesResponse> {
@@ -43,6 +46,8 @@ export interface UploadDocumentInput {
   workspaceId?: string;
   tags?: string[];
   ingestionMode?: "ontology" | "retrieval" | "both";
+  knowledgePackId?: string;
+  knowledgePackName?: string;
 }
 
 export function uploadDocument(input: UploadDocumentInput): Promise<DocumentResponse> {
@@ -54,6 +59,8 @@ export function uploadDocument(input: UploadDocumentInput): Promise<DocumentResp
     form.append("tags", input.tags.join(","));
   }
   if (input.ingestionMode) form.append("ingestion_mode", input.ingestionMode);
+  if (input.knowledgePackId) form.append("knowledge_pack_id", input.knowledgePackId);
+  if (input.knowledgePackName) form.append("knowledge_pack_name", input.knowledgePackName);
   return apiFetch<DocumentResponse>("/documents/upload", {
     method: "POST",
     body: form,
@@ -65,6 +72,8 @@ export interface UploadDocumentsInput {
   workspaceId?: string;
   tags?: string[];
   ingestionMode?: "ontology" | "retrieval" | "both";
+  knowledgePackId?: string;
+  knowledgePackName?: string;
 }
 
 export function uploadDocuments(input: UploadDocumentsInput): Promise<DocumentBatchUploadResponse> {
@@ -75,6 +84,8 @@ export function uploadDocuments(input: UploadDocumentsInput): Promise<DocumentBa
         workspaceId: input.workspaceId,
         tags: input.tags,
         ingestionMode: input.ingestionMode,
+        knowledgePackId: input.knowledgePackId,
+        knowledgePackName: input.knowledgePackName,
       }),
     ),
   ).then((results) => {
