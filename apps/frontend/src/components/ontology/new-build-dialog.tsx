@@ -160,6 +160,8 @@ export function NewBuildDialog() {
                 labels={{
                   providerPlaceholder: t.agentsSettings.picker.providerPlaceholder,
                   allProviders: t.agentsSettings.picker.allProviders,
+                  typePlaceholder: t.agentsSettings.picker.typePlaceholder,
+                  allTypes: t.agentsSettings.picker.allTypes,
                   searchModelPlaceholder: t.agentsSettings.picker.searchModelPlaceholder,
                   selectModelPlaceholder: t.ontologyUi.pickExtractionModel,
                   noModelMatch: t.agentsSettings.picker.noModelMatch,

@@ -22,6 +22,9 @@ class DynamicModelResponse(BaseModel):
     supports_streaming: bool = True
     supports_structured_output: bool = False
     description: str | None = None
+    model_type: str | None = None
+    input_type: str | None = None
+    output_type: str | None = None
 
 
 class ProviderModelsResponse(BaseModel):
@@ -92,6 +95,9 @@ async def list_provider_models(
                     supports_streaming=m.supports_streaming,
                     supports_structured_output=m.supports_structured_output,
                     description=m.description,
+                    model_type=m.model_type,
+                    input_type=m.input_type,
+                    output_type=m.output_type,
                 )
                 for m in models
             ],
@@ -156,6 +162,9 @@ async def list_all_provider_models(
                             supports_streaming=m.supports_streaming,
                             supports_structured_output=m.supports_structured_output,
                             description=m.description,
+                            model_type=m.model_type,
+                            input_type=m.input_type,
+                            output_type=m.output_type,
                         )
                         for m in models
                     ],
@@ -174,6 +183,9 @@ async def list_all_provider_models(
                             supports_streaming=m.supports_streaming,
                             supports_structured_output=m.supports_structured_output,
                             description=m.description,
+                            model_type=m.model_type,
+                            input_type=m.input_type,
+                            output_type=m.output_type,
                         )
                         for m in models
                     ],

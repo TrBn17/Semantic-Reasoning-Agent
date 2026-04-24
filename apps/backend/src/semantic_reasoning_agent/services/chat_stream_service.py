@@ -101,6 +101,7 @@ class ChatStreamService:
         return ChatReply(
             conversation_id=updated.id,
             reply=updated.messages[-1],
+            orchestration_mode=task_result.orchestration_mode,
             citations=task_result.citations,
             tool_calls=task_result.tool_calls,
         )

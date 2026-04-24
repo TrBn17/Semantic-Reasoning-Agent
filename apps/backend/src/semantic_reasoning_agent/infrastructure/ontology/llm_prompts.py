@@ -12,7 +12,7 @@ _ENTITY_USER_PROMPT = """Extract candidate entities from the document.
 Rules:
 - You may propose ANY entity_type justified by the text.
 - Prior entity types are descriptive hints only: {known_entity_types}
-- Return 6-40 entities when possible; return fewer only if text is sparse.
+- Return {entity_count_min}-{entity_count_max} entities when the text supports that range; return fewer when the text is sparse.
 - Every entity must include direct evidence_text copied from the document.
 - confidence is in [0, 1].
 - resolution_key must be stable snake_case.
@@ -75,16 +75,17 @@ Document text:
 
 _RELATION_SYSTEM_PROMPT = """You are an ontology extraction service.
 You MUST return ONLY valid JSON object output and no extra text.
-Do NOT include analysis, reasoning, markdown fences, or explanations.
-Only produce relations between provided entity resolution keys."""
+Do NOT include analysis, reasoning, markdown fences, or explanations."""
 
 _RELATION_USER_PROMPT = """Extract candidate relations from the document.
 
 Rules:
 - Prior relation types are descriptive hints only: {known_relation_types}
-- Use only entities from this whitelist:
+- Existing entities observed so far (hints only, not a hard constraint):
 {entity_whitelist}
-- Only emit relation when evidence_text explicitly supports it.
+- You may propose additional entities as relation endpoints when strongly grounded in the text; keep resolution_key stable snake_case.
+- You may infer relations that are clearly implied by the document: structure (headings, phases, tables), roles and staffing, timelines, cost rows, and narrative flow, even when a single quote does not name both endpoints. When inferring, use confidence below 1.0 if needed, and in evidence_text briefly state the table/section and the inference (e.g. "Staffing plan rows 1-3: role X and milestone Y in the same project plan").
+- Do not invent relations with no defensible link to the document; prefer fewer, grounded edges.
 - confidence is in [0, 1].
 - Include query_rules when a relation encodes operational policy/trigger semantics.
 - Include facts for non-graphable measurements/events tied to this relation.
@@ -99,7 +100,7 @@ Return STRICT JSON exactly in this shape:
       "target_name": "<canonical>",
       "relation_type": "<proposed type>",
       "confidence": 0.0,
-      "evidence_text": "<short quote from document>",
+      "evidence_text": "<short quote or 1-2 line justification: quote(s) and/or structural basis per rules above>",
       "query_rules": [],
       "facts": []
     }}
@@ -137,6 +138,8 @@ def build_entity_extraction_prompt(
     text: str,
     known_entity_types: Sequence[str],
     prompt_version: str,
+    entity_count_min: int,
+    entity_count_max: int,
 ) -> tuple[str, str]:
     return (
         _ENTITY_SYSTEM_PROMPT,
@@ -144,6 +147,8 @@ def build_entity_extraction_prompt(
             text=text,
             known_entity_types=_format_list(known_entity_types),
             prompt_version=prompt_version,
+            entity_count_min=entity_count_min,
+            entity_count_max=entity_count_max,
         ),
     )
 
@@ -186,12 +191,16 @@ def build_open_domain_prompt(
     known_entity_types: Sequence[str],
     known_relation_types: Sequence[str],
     prompt_version: str,
+    entity_count_min: int = 3,
+    entity_count_max: int = 50,
 ) -> str:
     """Backward compatibility helper for legacy tests."""
     system, user = build_entity_extraction_prompt(
         text=text,
         known_entity_types=known_entity_types,
         prompt_version=prompt_version,
+        entity_count_min=entity_count_min,
+        entity_count_max=entity_count_max,
     )
     return (
         f"{system}\n\n"

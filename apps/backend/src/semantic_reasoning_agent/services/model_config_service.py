@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -800,6 +799,9 @@ class ModelConfigService:
             required_env_fields=[field.key for field in provider_spec.fields],
             missing_env_fields=missing_env_fields,
             reason=reason,
+            model_type=provider_model.model_type,
+            input_type=provider_model.input_type,
+            output_type=provider_model.output_type,
         )
 
     def _build_provider_response(
@@ -920,6 +922,9 @@ class ModelConfigService:
             supports_streaming=model.supports_streaming,
             supports_structured_output=model.supports_structured_output,
             context_window=model.context_window,
+            model_type=model.model_type,
+            input_type=model.input_type,
+            output_type=model.output_type,
         )
 
     def _to_public_provider(self, provider: ProviderConfigResponse) -> SettingsProviderResponse:

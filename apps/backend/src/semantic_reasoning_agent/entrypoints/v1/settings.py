@@ -75,6 +75,9 @@ async def list_settings_models_by_provider(
             supports_streaming=model.supports_streaming,
             supports_structured_output=model.supports_structured_output,
             context_window=model.context_window,
+            model_type=model.model_type,
+            input_type=model.input_type,
+            output_type=model.output_type,
         )
         for model in models
     ]

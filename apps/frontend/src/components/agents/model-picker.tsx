@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { SettingsModelOption } from "@/shared/api/types";
 import { composeModelValue, parseModelValue } from "@/shared/utils/model-value";
 import { Input } from "@/components/ui/input";
@@ -104,12 +104,10 @@ export const TaskModelPicker = memo(function TaskModelPicker({
         </Select>
         <Input
           value={searchText}
-          onChange={(event) =>
-            startTransition(() => {
-              setSearchText(event.target.value);
-            })
-          }
+          onChange={(event) => setSearchText(event.target.value)}
           placeholder={labels.searchModelPlaceholder}
+          autoComplete="off"
+          className="bg-background text-foreground"
         />
       </div>
 

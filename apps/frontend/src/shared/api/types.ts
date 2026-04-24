@@ -22,6 +22,23 @@ export type TaskOutputClass =
   | "artifact";
 export type TaskRunStatus = "pending" | "running" | "completed" | "failed";
 export type WorkflowMode = "deterministic" | "agentic";
+export type OrchestrationMode = "legacy_static_plan" | "react_two_agent";
+
+export interface OrchestratorConfig {
+  strategy: OrchestrationMode;
+  enabled: boolean;
+}
+
+export interface OrchestrationStopPolicy {
+  max_iterations: number;
+}
+
+export interface OrchestrationConfig {
+  version: string;
+  mode: OrchestrationMode;
+  orchestrator: OrchestratorConfig;
+  stop_policy: OrchestrationStopPolicy;
+}
 
 export interface WorkspaceSummary {
   id: string;
@@ -107,6 +124,7 @@ export interface SendMessageRequest {
   document_ids?: string[];
   top_k?: number;
   enabled_tool_names?: string[] | null;
+  orchestration_mode?: OrchestrationMode | null;
 }
 
 export interface Citation {
@@ -127,6 +145,7 @@ export interface Citation {
 export interface ChatReply {
   conversation_id: string;
   reply: Message;
+  orchestration_mode: OrchestrationMode;
   citations: Citation[];
   tool_calls: ChatToolCallSummary[];
 }
@@ -163,6 +182,9 @@ export interface ModelOption {
   supports_streaming: boolean;
   supports_structured_output: boolean;
   context_window?: number | null;
+  model_type?: string | null;
+  input_type?: string | null;
+  output_type?: string | null;
   recommended_for: string[];
   required_env_fields: string[];
   missing_env_fields: string[];
@@ -309,6 +331,7 @@ export interface AgentProfileResponse {
   tool_policy: ToolPolicySchema;
   knowledge_pack_ids: string[];
   evidence_policy: EvidencePolicySchema;
+  orchestration_config: OrchestrationConfig;
   task_models: AgentProfileTaskModelAssignment[];
   tool_assignments: AgentProfileToolAssignment[];
   created_at: string;
@@ -328,6 +351,7 @@ export interface AgentProfileCreateRequest {
   tool_policy?: ToolPolicySchema;
   knowledge_pack_ids?: string[];
   evidence_policy?: EvidencePolicySchema;
+  orchestration_config?: OrchestrationConfig;
   task_models?: AgentProfileTaskModelAssignment[];
   tool_assignments?: AgentProfileToolAssignment[];
 }
@@ -343,6 +367,7 @@ export interface AgentProfileUpdateRequest {
   tool_policy?: ToolPolicySchema;
   knowledge_pack_ids?: string[];
   evidence_policy?: EvidencePolicySchema;
+  orchestration_config?: OrchestrationConfig;
   task_models?: AgentProfileTaskModelAssignment[];
   tool_assignments?: AgentProfileToolAssignment[];
 }
@@ -357,6 +382,9 @@ export interface SettingsModelOption {
   supports_streaming: boolean;
   supports_structured_output: boolean;
   context_window?: number | null;
+  model_type?: string | null;
+  input_type?: string | null;
+  output_type?: string | null;
 }
 
 export interface SettingsProviderFieldValue {
@@ -648,6 +676,7 @@ export interface OntologyBuildResponse {
   published_version_id?: string | null;
   entity_count: number;
   relation_count: number;
+  has_publishable_entities?: boolean;
   pending_entity_count: number;
   pending_relation_count: number;
   steps: OntologyBuildStepResponse[];
@@ -1002,6 +1031,7 @@ export interface TaskResolveRequest {
   document_ids?: string[];
   top_k?: number;
   enabled_tool_names?: string[] | null;
+  orchestration_mode?: OrchestrationMode | null;
   debug?: boolean;
 }
 
@@ -1009,6 +1039,7 @@ export interface TaskResolveResponse {
   task_id: string;
   output_type: string;
   workflow_id?: string | null;
+  orchestration_mode: OrchestrationMode;
   stop_reason?: string | null;
   grounded: boolean;
   content: string;

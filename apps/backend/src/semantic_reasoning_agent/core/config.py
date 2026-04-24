@@ -78,7 +78,29 @@ class Settings(BaseSettings):
         alias="ONTOLOGY_EXTRACTION_REASONING_EFFORT",
     )
     ontology_extraction_max_chunks: int = Field(default=8, alias="ONTOLOGY_EXTRACTION_MAX_CHUNKS")
-
+    # 0 = one pass over the bounded markdown (see ontology_markdown_char_limit). >0 = sliding window.
+    ontology_extraction_window: int = Field(default=0, alias="ONTOLOGY_EXTRACTION_WINDOW")
+    ontology_extraction_overlap: int = Field(default=500, alias="ONTOLOGY_EXTRACTION_OVERLAP")
+    ontology_extraction_entity_count_min: int = Field(
+        default=3,
+        alias="ONTOLOGY_EXTRACTION_ENTITY_COUNT_MIN",
+    )
+    ontology_extraction_entity_count_max: int = Field(
+        default=50,
+        alias="ONTOLOGY_EXTRACTION_ENTITY_COUNT_MAX",
+    )
+    ontology_classify_deferred_token: str = Field(
+        default="pending",
+        alias="ONTOLOGY_CLASSIFY_DEFERRED_TOKEN",
+    )
+    task_runtime_orchestration_mode: str = Field(
+        default="legacy_static_plan",
+        alias="TASK_RUNTIME_ORCHESTRATION_MODE",
+    )
+    task_runtime_react_enabled: bool = Field(
+        default=True,
+        alias="TASK_RUNTIME_REACT_ENABLED",
+    )
     object_store_backend: str = Field(default="postgres", alias="OBJECT_STORE_BACKEND")
     object_store_bucket: str = Field(default="semantic-artifacts", alias="OBJECT_STORE_BUCKET")
     minio_endpoint: str = Field(default="localhost:9000", alias="MINIO_ENDPOINT")
@@ -92,7 +114,6 @@ class Settings(BaseSettings):
 
     vector_store_backend: str = Field(default="qdrant", alias="VECTOR_STORE_BACKEND")
     qdrant_url: str = Field(default="http://localhost:6333", alias="QDRANT_URL")
-    qdrant_collection_name: str = Field(default="document_chunks", alias="QDRANT_COLLECTION_NAME")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

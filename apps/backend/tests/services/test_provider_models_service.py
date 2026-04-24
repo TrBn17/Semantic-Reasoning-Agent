@@ -83,3 +83,33 @@ def test_cloudflare_models_client_filters_to_chat_models_and_uses_name_slug() ->
     assert CloudflareModelsClient._is_chat_model(chat_item) is True
     assert CloudflareModelsClient._is_chat_model(embedding_item) is False
     assert chat_item["name"].startswith("@cf/")
+
+
+def test_cloudflare_schema_payload_supports_list_and_dict_results() -> None:
+    client = CloudflareModelsClient(api_key="token", account_id="acc")
+    list_payload = {
+        "success": True,
+        "result": [
+            {
+                "name": "@cf/openai/gpt-oss-120b",
+                "input": {"type": "object"},
+                "output": {"type": "string"},
+            }
+        ],
+    }
+    dict_payload = {
+        "success": True,
+        "result": {
+            "@cf/openai/gpt-oss-120b": {
+                "input": {"type": "object"},
+                "output": {"type": "string"},
+            }
+        },
+    }
+
+    normalized_list = client._normalize_schema_payload(list_payload)
+    normalized_dict = client._normalize_schema_payload(dict_payload)
+
+    expected = {"input_type": "object", "output_type": "string"}
+    assert normalized_list["@cf/openai/gpt-oss-120b"] == expected
+    assert normalized_dict["@cf/openai/gpt-oss-120b"] == expected

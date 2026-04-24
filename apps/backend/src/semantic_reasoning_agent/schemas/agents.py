@@ -23,6 +23,9 @@ class ModelOption(BaseModel):
     supports_streaming: bool
     supports_structured_output: bool
     context_window: int | None = None
+    model_type: str | None = None
+    input_type: str | None = None
+    output_type: str | None = None
     recommended_for: list[TaskType] = Field(default_factory=list)
     required_env_fields: list[str] = Field(default_factory=list)
     missing_env_fields: list[str] = Field(default_factory=list)

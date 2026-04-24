@@ -16,6 +16,10 @@ from semantic_reasoning_agent.domain.contracts.tool_envelope import OntologyCont
 from semantic_reasoning_agent.infrastructure.llm.registry import AdapterRegistry
 from semantic_reasoning_agent.schemas.agent_profiles import AgentProfileResponse
 from semantic_reasoning_agent.schemas.chat import SendMessageRequest
+from semantic_reasoning_agent.schemas.orchestration import (
+    OrchestrationMode,
+    OrchestrationConfigSchema,
+)
 from semantic_reasoning_agent.schemas.retrieval import Citation
 from semantic_reasoning_agent.schemas.tasks import TaskResolveRequest, TaskResolveResponse
 from semantic_reasoning_agent.schemas.tools import EvidenceSchema
@@ -36,12 +40,16 @@ from semantic_reasoning_agent.services.output_router import OutputRouter
 from semantic_reasoning_agent.services.runtime_audit_service import RuntimeAuditService
 from semantic_reasoning_agent.services.task_interpreter import TaskInterpreter
 from semantic_reasoning_agent.services.evidence_normalization import citation_from_evidence, evidence_to_schema
+from semantic_reasoning_agent.services.llama_react_orchestrator_service import (
+    LlamaReActOrchestratorService,
+)
 from semantic_reasoning_agent.services.tool_runtime import ToolRuntime
 from semantic_reasoning_agent.services.workflow_selector import WorkflowSelector
 
 
 @dataclass(frozen=True)
 class TaskRuntimeResult:
+    orchestration_mode: OrchestrationMode
     workflow_id: str
     content: str
     citations: list[Citation]
@@ -108,6 +116,7 @@ class TaskRuntimeService:
         self._output_router = OutputRouter()
         self._workflow_selector = WorkflowSelector()
         self._agentic_loop = AgenticLoopService()
+        self._react_orchestrator = LlamaReActOrchestratorService(settings, tool_runtime)
 
     def resolve_request(
         self,
@@ -118,6 +127,7 @@ class TaskRuntimeService:
         system_prompt: str | None = None,
     ) -> TaskRuntimeResult:
         workspace_id, profile = self._resolve_workspace_and_agent_profile(request)
+        orchestration_mode = self._resolve_orchestration_mode(request, profile)
         scope = self._build_execution_scope(
             profile,
             workspace_id=workspace_id,
@@ -133,38 +143,89 @@ class TaskRuntimeService:
         grounding = self._grounding_service.ground(request.content, interpretation)
         selection = self._workflow_selector.select(interpretation=interpretation, grounding=grounding)
         workflow_id = selection.workflow_id
-        trace: list[dict[str, str]] = [
+        trace: list[dict[str, str | int | None]] = [
+            {"stage": "orchestration", "mode": orchestration_mode},
             {"stage": "interpret", "intent": interpretation.intent},
             {"stage": "grounding", "status": grounding.grounding_status},
             {"stage": "workflow", "workflow_id": workflow_id, "reason": selection.reason},
         ]
-        validated_plan = self._agentic_loop.validate_plan(plan, scope)
-        for step in validated_plan[: self._agentic_loop.max_steps_for(request)]:
-            if step.tool_name not in scope.allowed_tool_names:
-                if step.required:
-                    next_action_hints.append(f"blocked:{step.tool_name}")
-                continue
-            result = self._invoke_step(
-                step,
+        rag_binding = next((item for item in scope.slot_bindings if item.slot == "rag"), None)
+        ontology_binding = next(
+            (item for item in scope.slot_bindings if item.slot == "ontology_search"),
+            None,
+        )
+
+        react_content: str | None = None
+        used_react = False
+        if orchestration_mode == "react_two_agent":
+            react_result = self._react_orchestrator.run(
+                request=request,
                 workspace_id=workspace_id,
                 task_id=task_id,
                 workflow_id=workflow_id,
-                request=request,
+                provider=provider,
+                model=model,
+                rag_binding=rag_binding,
+                ontology_binding=ontology_binding,
             )
-            trace.append(
-                {
-                    "stage": "tool_call",
-                    "tool_name": step.tool_name,
-                    "status": result.status,
-                }
-            )
-            for item in result.evidence:
-                if item.source_type not in scope.evidence_sources:
+            if react_result is not None:
+                used_react = True
+                react_content = react_result.content
+                next_action_hints.extend(react_result.next_action_hints)
+                for result in react_result.tool_results:
+                    self._collect_tool_result(
+                        result,
+                        scope=scope,
+                        evidence=evidence,
+                        citations=citations,
+                        next_action_hints=next_action_hints,
+                    )
+                trace.extend(
+                    {
+                        "stage": "tool_call",
+                        "tool_name": str(item.get("tool_name", "")),
+                        "status": str(item.get("status", "")),
+                        "latency_ms": str(item.get("latency_ms", "")),
+                    }
+                    for item in react_result.tool_calls
+                )
+            else:
+                trace.append(
+                    {
+                        "stage": "orchestration_fallback",
+                        "reason": "react_unavailable",
+                    }
+                )
+
+        if not used_react:
+            validated_plan = self._agentic_loop.validate_plan(plan, scope)
+            for step in validated_plan[: self._agentic_loop.max_steps_for(request)]:
+                if step.tool_name not in scope.allowed_tool_names:
+                    if step.required:
+                        next_action_hints.append(f"blocked:{step.tool_name}")
                     continue
-                evidence.append(evidence_to_schema(item))
-                if item.source_type == "internal_chunk":
-                    citations.append(citation_from_evidence(item))
-            next_action_hints.extend(result.next_action_hints)
+                result = self._invoke_step(
+                    step,
+                    workspace_id=workspace_id,
+                    task_id=task_id,
+                    workflow_id=workflow_id,
+                    request=request,
+                )
+                trace.append(
+                    {
+                        "stage": "tool_call",
+                        "tool_name": step.tool_name,
+                        "status": result.status,
+                        "latency_ms": str(result.latency_ms),
+                    }
+                )
+                self._collect_tool_result(
+                    result,
+                    scope=scope,
+                    evidence=evidence,
+                    citations=citations,
+                    next_action_hints=next_action_hints,
+                )
 
         bundle = self._context_assembler.assemble(citations=citations, evidence=evidence)
         sufficiency = self._evidence_judge.evaluate(bundle)
@@ -172,8 +233,18 @@ class TaskRuntimeService:
         route = self._output_router.route(sufficiency, conflict_report)
         trace.append({"stage": "route", "output_type": route.output_type, "reason": route.reason})
 
-        content = self._compose_answer(request.content, citations=list(bundle.citations), evidence=list(bundle.evidence))
-        if route.output_type == "fallback_answer" and scope.allow_model_only_fallback:
+        content = self._compose_answer(
+            request.content,
+            citations=list(bundle.citations),
+            evidence=list(bundle.evidence),
+        )
+        if react_content:
+            content = react_content
+        if (
+            route.output_type == "fallback_answer"
+            and scope.allow_model_only_fallback
+            and not react_content
+        ):
             content = self._fallback_answer(
                 prompt=request.content,
                 workspace_id=workspace_id,
@@ -202,12 +273,22 @@ class TaskRuntimeService:
             )
 
         return TaskRuntimeResult(
+            orchestration_mode=orchestration_mode,
             workflow_id=workflow_id,
             content=content,
             citations=list(bundle.citations),
             evidence=list(bundle.evidence),
             next_action_hints=sorted(set(next_action_hints + list(bundle.trace_notes))),
-            tool_calls=[{"step": item.get("stage"), "tool_name": item.get("tool_name")} for item in trace if item.get("stage") == "tool_call"],
+            tool_calls=[
+                {
+                    "step": item.get("stage"),
+                    "tool_name": item.get("tool_name"),
+                    "status": item.get("status"),
+                    "latency_ms": item.get("latency_ms"),
+                }
+                for item in trace
+                if item.get("stage") == "tool_call"
+            ],
         )
 
     def resolve_api_request(self, request: TaskResolveRequest) -> TaskResolveResponse:
@@ -220,6 +301,7 @@ class TaskRuntimeService:
             task_id=str(uuid4()),
             output_type="answer",
             workflow_id=result.workflow_id,
+            orchestration_mode=result.orchestration_mode,
             stop_reason="completed",
             grounded=bool(result.citations or result.evidence),
             content=result.content,
@@ -248,11 +330,49 @@ class TaskRuntimeService:
                 document_ids=payload.document_ids,
                 top_k=payload.top_k,
                 enabled_tool_names=payload.enabled_tool_names,
+                orchestration_mode=payload.orchestration_mode,
             ),
             provider=provider,
             model=model,
             system_prompt=system_prompt,
         )
+
+    def _resolve_orchestration_mode(
+        self,
+        request: TaskResolveRequest,
+        profile: AgentProfileResponse | None,
+    ) -> OrchestrationMode:
+        if request.orchestration_mode is not None:
+            return request.orchestration_mode
+
+        if profile is not None:
+            try:
+                config = OrchestrationConfigSchema.model_validate(profile.orchestration_config)
+            except Exception:  # noqa: BLE001 - keep runtime resilient
+                config = OrchestrationConfigSchema()
+            if config.orchestrator.enabled:
+                return config.mode
+
+        if self._settings.task_runtime_orchestration_mode == "react_two_agent":
+            return "react_two_agent"
+        return "legacy_static_plan"
+
+    @staticmethod
+    def _collect_tool_result(
+        result,
+        *,
+        scope: AgentExecutionScope,
+        evidence: list[EvidenceSchema],
+        citations: list[Citation],
+        next_action_hints: list[str],
+    ) -> None:
+        for item in result.evidence:
+            if item.source_type not in scope.evidence_sources:
+                continue
+            evidence.append(evidence_to_schema(item))
+            if item.source_type == "internal_chunk":
+                citations.append(citation_from_evidence(item))
+        next_action_hints.extend(result.next_action_hints)
 
     def _resolve_workspace_and_agent_profile(
         self,

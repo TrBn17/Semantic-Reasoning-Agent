@@ -328,6 +328,8 @@ export type Dictionary = {
     picker: {
       providerPlaceholder: string;
       allProviders: string;
+      typePlaceholder: string;
+      allTypes: string;
       searchModelPlaceholder: string;
       selectModelPlaceholder: string;
       noModelMatch: string;
@@ -493,6 +495,8 @@ export type Dictionary = {
     relationsBadge: string;
     publishedPrefix: string;
     noPublishedGraph: string;
+    searchNoMatches: string;
+    clearSearch: string;
     searchNodesPlaceholder: string;
     filterTypesHint: string;
     clearFilters: string;
@@ -746,6 +750,21 @@ export type Dictionary = {
     publishing: string;
     publishSuccess: string;
     publishFailed: string;
+    publishUnavailableNoEntities: string;
+    extractEntitiesStepHelp: string;
+    resolveEntitiesStepHelp: string;
+    mergeStatsHeading: string;
+    mergeStatRawEntityRows: string;
+    mergeStatCanonicalEntities: string;
+    mergeStatRawRelationRows: string;
+    mergeStatCanonicalRelations: string;
+    mergeStatEntityDeduped: string;
+    mergeStatRelationDeduped: string;
+    mergeStatResolutionRule: string;
+    traceErrorsHeading: string;
+    chunkingSummaryHeading: string;
+    technicalMetadata: string;
+    promptVersionLabel: string;
   };
 };
 
@@ -1105,6 +1124,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       picker: {
         providerPlaceholder: "Provider",
         allProviders: "All providers",
+        typePlaceholder: "Type",
+        allTypes: "All types",
         searchModelPlaceholder: "Search model name",
         selectModelPlaceholder: "Select model",
         noModelMatch: "No model matched provider/filter. Try another provider or clear search.",
@@ -1300,7 +1321,7 @@ export const dictionaries: Record<Language, Dictionary> = {
     },
     graph: {
       title: "Graph workbench",
-      subtitle: "Published ontology, schema mix, and evidence-backed relation inspection.",
+      subtitle: "Interactive ontology graph focused on entities, relations, and context.",
       modeGraphOnly: "Graph only",
       modeSplit: "Split view",
       modeInspector: "Inspector",
@@ -1310,6 +1331,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       relationsBadge: "relations",
       publishedPrefix: "Published",
       noPublishedGraph: "No published graph",
+      searchNoMatches: "No nodes match your search. Try different keywords.",
+      clearSearch: "Clear search",
       searchNodesPlaceholder: "Search nodes",
       filterTypesHint: "Entity types",
       clearFilters: "Clear",
@@ -1479,6 +1502,23 @@ export const dictionaries: Record<Language, Dictionary> = {
       publishing: "Publishing...",
       publishSuccess: "Published to graph.",
       publishFailed: "Failed to publish ontology.",
+      publishUnavailableNoEntities: "This build has no publishable ontology entities yet.",
+      extractEntitiesStepHelp:
+        "The extraction model reads the document (one full pass, or several chunks if the text is long). For each segment it returns JSON entities: surface name, canonical name, entity_type, resolution_key (stable snake_case id used later to merge), evidence_text (a short quote from the document), confidence, optional aliases / query_rules / facts. Schema hints from your workspace are optional—the model may propose new types when the text supports them.",
+      resolveEntitiesStepHelp:
+        "This step does not call the LLM again. Every entity row from all chunks with the same resolution_key (case-insensitive; fallback canonical_name) is merged into one canonical entity: aliases are combined; name, type, evidence, and confidence come from the highest-confidence row. Relations are merged on (source key, relation type, target key). Fewer canonical rows than LLM rows usually means duplicates across chunks or sections were folded together.",
+      mergeStatsHeading: "Merge statistics",
+      mergeStatRawEntityRows: "Entity rows from LLM (all chunks)",
+      mergeStatCanonicalEntities: "Canonical entities after merge",
+      mergeStatRawRelationRows: "Relation rows from LLM (all chunks)",
+      mergeStatCanonicalRelations: "Canonical relations after merge",
+      mergeStatEntityDeduped: "Entity rows merged away",
+      mergeStatRelationDeduped: "Relation rows merged away",
+      mergeStatResolutionRule: "Merge rule",
+      traceErrorsHeading: "Warnings / parse issues",
+      chunkingSummaryHeading: "Document chunking",
+      technicalMetadata: "Raw step metadata (JSON)",
+      promptVersionLabel: "Prompt version",
     },
     ontologyUi: {
       unknownError: "Unknown error",
@@ -1924,6 +1964,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       picker: {
         providerPlaceholder: "Provider",
         allProviders: "Tất cả provider",
+        typePlaceholder: "Loại",
+        allTypes: "Tất cả loại",
         searchModelPlaceholder: "Tìm model",
         selectModelPlaceholder: "Chọn model",
         noModelMatch: "Không có model phù hợp bộ lọc. Hãy thử provider khác hoặc xóa từ khóa tìm kiếm.",
@@ -2119,7 +2161,7 @@ export const dictionaries: Record<Language, Dictionary> = {
     },
     graph: {
       title: "Workbench đồ thị",
-      subtitle: "Ontology đã xuất bản, kiểu schema và quan hệ có bằng chứng.",
+      subtitle: "Đồ thị ontology trực quan, tập trung vào thực thể, quan hệ và ngữ cảnh.",
       modeGraphOnly: "Chỉ đồ thị",
       modeSplit: "Chia màn hình",
       modeInspector: "Inspector",
@@ -2129,6 +2171,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       relationsBadge: "quan hệ",
       publishedPrefix: "Xuất bản",
       noPublishedGraph: "Chưa có đồ thị đã xuất bản",
+      searchNoMatches: "Không có nút nào khớp từ khóa. Thử từ khác.",
+      clearSearch: "Xóa tìm kiếm",
       searchNodesPlaceholder: "Tìm nút",
       filterTypesHint: "Loại thực thể",
       clearFilters: "Xóa lọc",
@@ -2268,6 +2312,23 @@ export const dictionaries: Record<Language, Dictionary> = {
       publishing: "Đang publish...",
       publishSuccess: "Đã publish vào graph.",
       publishFailed: "Không thể publish ontology.",
+      publishUnavailableNoEntities: "Build này chưa có ontology entity khả dụng để publish.",
+      extractEntitiesStepHelp:
+        "Model trích xuất đọc tài liệu (một lần cả file, hoặc nhiều chunk nếu quá dài). Mỗi đoạn trả về JSON thực thể: tên hiển thị, canonical name, entity_type, resolution_key (snake_case ổn định để gộp sau), evidence_text (trích ngắn từ văn bản), confidence, có thể có aliases / query_rules / facts. Gợi ý schema workspace chỉ là hint—model có thể đề xuất type mới nếu văn bản cho phép.",
+      resolveEntitiesStepHelp:
+        "Bước này không gọi LLM nữa. Mọi dòng thực thể từ các chunk trùng resolution_key (không phân biệt hoa thường; fallback canonical_name) được gộp thành một thực thể chuẩn: alias hợp nhất; tên, loại, evidence và confidence lấy từ dòng có confidence cao nhất. Quan hệ gộp theo (source key, relation type, target key). Số dòng canonical ít hơn số dòng LLM thường do trùng lặp giữa các chunk/đoạn đã được gộp.",
+      mergeStatsHeading: "Thống kê gộp (merge)",
+      mergeStatRawEntityRows: "Dòng thực thể từ LLM (mọi chunk)",
+      mergeStatCanonicalEntities: "Thực thể chuẩn sau merge",
+      mergeStatRawRelationRows: "Dòng quan hệ từ LLM (mọi chunk)",
+      mergeStatCanonicalRelations: "Quan hệ chuẩn sau merge",
+      mergeStatEntityDeduped: "Dòng thực thể đã gộp bớt",
+      mergeStatRelationDeduped: "Dòng quan hệ đã gộp bớt",
+      mergeStatResolutionRule: "Quy tắc gộp",
+      traceErrorsHeading: "Cảnh báo / lỗi parse",
+      chunkingSummaryHeading: "Chunk tài liệu",
+      technicalMetadata: "Metadata bước (JSON)",
+      promptVersionLabel: "Phiên bản prompt",
     },
     ontologyUi: {
       unknownError: "Lỗi không xác định",

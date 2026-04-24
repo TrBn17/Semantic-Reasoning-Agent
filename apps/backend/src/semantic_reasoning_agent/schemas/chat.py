@@ -4,6 +4,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from semantic_reasoning_agent.core.runtime_constants import DEFAULT_TASK_TOP_K
+from semantic_reasoning_agent.schemas.orchestration import OrchestrationMode
 from semantic_reasoning_agent.core.time import utc_now
 from semantic_reasoning_agent.schemas.retrieval import Citation
 
@@ -72,11 +73,13 @@ class SendMessageRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
     top_k: int = DEFAULT_TASK_TOP_K
     enabled_tool_names: list[str] | None = None
+    orchestration_mode: OrchestrationMode | None = None
 
 
 class ChatReply(BaseModel):
     conversation_id: str
     reply: Message
+    orchestration_mode: OrchestrationMode = "legacy_static_plan"
     citations: list[Citation] = Field(default_factory=list)
     tool_calls: list[dict[str, str | int | None]] = Field(default_factory=list)
 

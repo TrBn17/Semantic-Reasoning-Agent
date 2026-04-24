@@ -32,6 +32,9 @@ class ProviderModel:
     supports_streaming: bool = True
     supports_structured_output: bool = False
     description: str | None = None
+    model_type: str | None = None
+    input_type: str | None = None
+    output_type: str | None = None
 
 
 class OpenAIModelsClient:
@@ -112,6 +115,61 @@ class CloudflareModelsClient:
         task_name = str(task.get("name") or "").strip().lower()
         return task_name == "text generation"
 
+    @staticmethod
+    def _extract_schema_type(schema_node: object) -> str | None:
+        if not isinstance(schema_node, dict):
+            return None
+        type_value = schema_node.get("type")
+        if type_value is None:
+            return None
+        as_text = str(type_value).strip()
+        return as_text or None
+
+    def _normalize_schema_payload(self, payload: dict) -> dict[str, dict[str, str | None]]:
+        result = payload.get("result")
+        schemas: dict[str, dict[str, str | None]] = {}
+
+        if isinstance(result, list):
+            items = result
+        elif isinstance(result, dict):
+            items = []
+            for key, value in result.items():
+                if not isinstance(value, dict):
+                    continue
+                item = dict(value)
+                item.setdefault("name", key)
+                items.append(item)
+        else:
+            return schemas
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            model_name = str(item.get("name") or "").strip()
+            if not model_name:
+                continue
+            schemas[model_name] = {
+                "input_type": self._extract_schema_type(item.get("input")),
+                "output_type": self._extract_schema_type(item.get("output")),
+            }
+        return schemas
+
+    async def _fetch_model_schemas(self, session: aiohttp.ClientSession) -> dict[str, dict[str, str | None]]:
+        schema_url = (
+            f"https://api.cloudflare.com/client/v4/accounts/{self.account_id}/ai/models/schema"
+        )
+        try:
+            async with session.get(schema_url) as response:
+                if response.status != 200:
+                    return {}
+                payload = await response.json()
+        except (aiohttp.ClientError, ValueError):
+            return {}
+
+        if not payload.get("success", False):
+            return {}
+        return self._normalize_schema_payload(payload)
+
     async def get_models(self) -> list[ProviderModel]:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         page = 1
@@ -121,6 +179,7 @@ class CloudflareModelsClient:
 
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
+                model_schemas = await self._fetch_model_schemas(session)
                 while True:
                     async with session.get(
                         self.base_url,
@@ -155,6 +214,9 @@ class CloudflareModelsClient:
                         if not model_id or model_id in seen_model_ids:
                             continue
                         seen_model_ids.add(model_id)
+                        task_info = item.get("task") if isinstance(item.get("task"), dict) else {}
+                        task_name = str(task_info.get("name") or "").strip() or None
+                        schema = model_schemas.get(model_id, {})
                         result.append(
                             ProviderModel(
                                 id=model_id,
@@ -163,6 +225,9 @@ class CloudflareModelsClient:
                                 supports_streaming=True,
                                 supports_structured_output=False,
                                 description=item.get("description"),
+                                model_type=task_name,
+                                input_type=schema.get("input_type"),
+                                output_type=schema.get("output_type"),
                             )
                         )
 

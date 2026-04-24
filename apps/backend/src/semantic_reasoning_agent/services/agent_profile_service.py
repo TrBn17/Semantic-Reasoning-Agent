@@ -24,6 +24,10 @@ from semantic_reasoning_agent.schemas.agent_profiles import (
     AgentProfileToolAssignment,
     AgentProfileUpdateRequest,
 )
+from semantic_reasoning_agent.schemas.orchestration import (
+    OrchestrationConfigSchema,
+    default_orchestration_config,
+)
 from semantic_reasoning_agent.services.agent_capability_service import (
     merge_policy_config,
     resolve_capability_config,
@@ -77,12 +81,15 @@ class AgentProfileService:
                 allow_chat_model_override=payload.allow_chat_model_override,
                 is_default=payload.is_default,
                 status=payload.status,
-                policy_config=merge_policy_config(
+                policy_config=self._merge_orchestration_config(
+                    merge_policy_config(
                     payload.policy_config,
                     capability_preset=payload.capability_preset,
                     tool_policy=payload.tool_policy,
                     knowledge_pack_ids=payload.knowledge_pack_ids,
                     evidence_policy=payload.evidence_policy,
+                    ),
+                    payload.orchestration_config,
                 ),
                 tool_assignments=self._normalize_tool_assignments(
                     payload.tool_assignments,
@@ -134,6 +141,10 @@ class AgentProfileService:
                 tool_policy=payload.tool_policy,
                 knowledge_pack_ids=payload.knowledge_pack_ids,
                 evidence_policy=payload.evidence_policy,
+            )
+            profile.policy_config = self._merge_orchestration_config(
+                profile.policy_config,
+                payload.orchestration_config,
             )
             effective_tool_policy = payload.tool_policy or ToolPolicySchema.model_validate(
                 (profile.policy_config or {}).get("tool_policy") or {}
@@ -219,6 +230,11 @@ class AgentProfileService:
     @classmethod
     def _to_schema(cls, profile: AgentProfileORM) -> AgentProfileResponse:
         capability = resolve_capability_config(profile.policy_config)
+        orchestration_config = OrchestrationConfigSchema.model_validate(
+            (profile.policy_config or {}).get("orchestration_config")
+            or (profile.policy_config or {}).get("orchestration")
+            or default_orchestration_config().model_dump()
+        )
         return AgentProfileResponse(
             id=profile.id,
             workspace_id=profile.workspace_id,
@@ -232,6 +248,7 @@ class AgentProfileService:
             tool_policy=ToolPolicySchema.model_validate(capability.tool_policy),
             knowledge_pack_ids=list(capability.knowledge_pack_ids),
             evidence_policy=EvidencePolicySchema.model_validate(capability.evidence_policy),
+            orchestration_config=orchestration_config,
             policy_config=profile.policy_config or {},
             task_models=[
                 AgentProfileTaskModelAssignment(
@@ -333,3 +350,15 @@ class AgentProfileService:
             for item in (assignments or [])
             if isinstance(item, dict)
         ]
+
+    @staticmethod
+    def _merge_orchestration_config(
+        policy_config: dict | None,
+        orchestration_config: OrchestrationConfigSchema | None,
+    ) -> dict:
+        merged = dict(policy_config or {})
+        if orchestration_config is not None:
+            merged["orchestration_config"] = orchestration_config.model_dump()
+        elif "orchestration_config" not in merged:
+            merged["orchestration_config"] = default_orchestration_config().model_dump()
+        return merged

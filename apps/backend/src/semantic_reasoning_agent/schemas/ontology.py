@@ -179,6 +179,7 @@ class OntologyBuildResponse(BaseModel):
     published_version_id: str | None = None
     entity_count: int = 0
     relation_count: int = 0
+    has_publishable_entities: bool = False
     pending_entity_count: int = 0
     pending_relation_count: int = 0
     entity_type_definitions: list[OntologyEntityTypeDefinitionResponse] = Field(default_factory=list)

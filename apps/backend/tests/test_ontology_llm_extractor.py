@@ -97,12 +97,14 @@ def test_open_domain_llm_extractor_supports_ready_non_anthropic_provider() -> No
     extractor = OpenDomainLLMExtractor(
         settings=SimpleNamespace(
             ontology_llm_enabled=True,
-            ontology_chunk_limit=24,
             ontology_markdown_char_limit=50000,
             ontology_prompt_version="v2",
             ontology_extraction_max_tokens=6000,
             ontology_extraction_reasoning_effort="low",
             ontology_extraction_max_chunks=8,
+            ontology_extraction_entity_count_min=3,
+            ontology_extraction_entity_count_max=50,
+            ontology_classify_deferred_token="pending",
             default_workspace_id="workspace-demo",
         ),
         model_config_service=_FakeModelResolver(),

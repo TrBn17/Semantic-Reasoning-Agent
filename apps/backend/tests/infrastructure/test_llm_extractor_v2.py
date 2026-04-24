@@ -39,12 +39,14 @@ def _build_extractor(responses: list[LLMResponse]) -> tuple[OpenDomainLLMExtract
     extractor = OpenDomainLLMExtractor(
         settings=SimpleNamespace(
             ontology_llm_enabled=True,
-            ontology_chunk_limit=24,
             ontology_markdown_char_limit=50000,
             ontology_prompt_version="v2",
             ontology_extraction_max_tokens=6000,
             ontology_extraction_reasoning_effort="low",
             ontology_extraction_max_chunks=8,
+            ontology_extraction_entity_count_min=3,
+            ontology_extraction_entity_count_max=50,
+            ontology_classify_deferred_token="pending",
             default_workspace_id="workspace-demo",
         ),
         model_config_service=_FakeResolver(),
@@ -290,3 +292,98 @@ def test_extractor_keeps_initial_payload_when_retry_is_empty() -> None:
     assert result.trace["chunks"][0]["retried"] is True
     assert "using_initial_payload" in str(result.trace["chunks"][0].get("parse_error"))
     assert len(adapter.calls) == 3
+
+
+def test_extractor_merges_duplicate_entity_rows_without_dropping_rules_or_facts() -> None:
+    extractor, adapter = _build_extractor(
+        [
+            LLMResponse(
+                content=json.dumps(
+                    {
+                        "domain": "ops",
+                        "entities": [
+                            {
+                                "name": "OpenRouter API Key",
+                                "canonical_name": "OpenRouter API Key",
+                                "resolution_key": "openrouter-api-key",
+                                "entity_type": "api_key",
+                                "confidence": 0.72,
+                                "evidence_text": "Minimum monthly cost is $20.",
+                                "aliases": ["OpenRouter Key"],
+                                "query_rules": [
+                                    {
+                                        "rule_id": "cost-rule-a",
+                                        "scope": "api_key",
+                                        "query_route": "sql_facts",
+                                    }
+                                ],
+                                "facts": [
+                                    {
+                                        "metric_key": "minimum_monthly_cost",
+                                        "value_num": 20,
+                                        "unit": "USD",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                provider="openrouter",
+                model="test-model",
+            ),
+            LLMResponse(
+                content=json.dumps(
+                    {
+                        "domain": "ops",
+                        "entities": [
+                            {
+                                "name": "OpenRouter API Key",
+                                "canonical_name": "OpenRouter API Key",
+                                "resolution_key": "openrouter-api-key",
+                                "entity_type": "api_key",
+                                "confidence": 0.91,
+                                "evidence_text": "Budget floor remains 20 USD monthly.",
+                                "aliases": ["OpenRouter API Token"],
+                                "query_rules": [
+                                    {
+                                        "rule_id": "cost-rule-b",
+                                        "scope": "api_key",
+                                        "query_route": "sql_facts",
+                                    }
+                                ],
+                                "facts": [
+                                    {
+                                        "metric_key": "budget_floor",
+                                        "value_num": 20,
+                                        "unit": "USD",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                provider="openrouter",
+                model="test-model",
+            ),
+        ]
+    )
+
+    extractor._FULL_PASS_MAX_INPUT_TOKENS = 0
+    extractor._split_by_tokens = lambda text, max_tokens: ["chunk-a", "chunk-b"]  # type: ignore[method-assign]
+
+    result = extractor.extract_ontology_candidates(
+        OntologyDocument(document_id="doc-1", markdown="OpenRouter API Key appears multiple times."),
+        workspace_id="ws-1",
+        provider="openrouter",
+        model="test-model",
+    )
+
+    assert len(result.entities) == 1
+    merged = result.entities[0]
+    assert merged.confidence == 0.91
+    assert merged.evidence_text == "Budget floor remains 20 USD monthly."
+    assert merged.aliases == {"OpenRouter Key", "OpenRouter API Token"}
+    assert {rule.rule_id for rule in merged.query_rules} == {"cost-rule-a", "cost-rule-b"}
+    assert {fact.metric_key for fact in merged.facts} == {"minimum_monthly_cost", "budget_floor"}
+    assert len(result.relations) == 0
+    assert len(adapter.calls) == 2

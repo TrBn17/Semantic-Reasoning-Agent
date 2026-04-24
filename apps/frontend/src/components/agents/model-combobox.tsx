@@ -29,6 +29,8 @@ type ModelComboboxProps = {
     selectModelPlaceholder?: string;
     noModelMatch?: string;
     assignmentUnavailable?: string;
+    typePlaceholder?: string;
+    allTypes?: string;
     readyBadge?: string;
     blockedBadge?: string;
     capabilityStreaming?: string;
@@ -58,6 +60,7 @@ export const ModelCombobox = memo(function ModelCombobox({
     [models],
   );
   const [providerFilter, setProviderFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [searchText, setSearchText] = useState("");
   const [modelsOpen, setModelsOpen] = useState(!collapseOnSelect);
   const deferredSearchText = useDeferredValue(searchText);
@@ -82,6 +85,8 @@ export const ModelCombobox = memo(function ModelCombobox({
     const scoped = models.filter((model) => {
       if (onlyReady && !model.ready) return false;
       if (providerFilter !== "all" && model.provider !== providerFilter) return false;
+      const modelType = model.model_type?.trim().toLowerCase();
+      if (typeFilter !== "all" && modelType !== typeFilter) return false;
       return true;
     });
     const ranked: RankedModel[] = deferredSearchText.trim()
@@ -99,12 +104,26 @@ export const ModelCombobox = memo(function ModelCombobox({
       return a.item.label.localeCompare(b.item.label);
     });
     return ranked;
-  }, [deferredSearchText, models, onlyReady, providerFilter]);
+  }, [deferredSearchText, models, onlyReady, providerFilter, typeFilter]);
+
+  const modelTypes = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          models
+            .map((item) => item.model_type?.trim())
+            .filter((value): value is string => Boolean(value)),
+        ),
+      )
+        .sort((a, b) => a.localeCompare(b))
+        .map((value) => ({ value: value.toLowerCase(), label: value })),
+    [models],
+  );
 
   return (
     <div className="min-w-0 space-y-2">
       <Command className="max-w-full min-w-0 overflow-hidden rounded-md border">
-        <div className="grid gap-2 border-b p-2 md:grid-cols-[180px_minmax(0,1fr)]">
+        <div className="grid gap-2 border-b p-2 md:grid-cols-[180px_180px_minmax(0,1fr)]">
         <Select value={providerFilter} onValueChange={setProviderFilter}>
             <SelectTrigger>
             <SelectValue placeholder={labels?.providerPlaceholder ?? "Provider"} />
@@ -118,11 +137,24 @@ export const ModelCombobox = memo(function ModelCombobox({
             ))}
           </SelectContent>
         </Select>
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger>
+            <SelectValue placeholder={labels?.typePlaceholder ?? "Type"} />
+          </SelectTrigger>
+          <SelectContent className="max-h-64 max-w-[min(90vw,20rem)]">
+            <SelectItem value="all">{labels?.allTypes ?? "All types"}</SelectItem>
+            {modelTypes.map((modelType) => (
+              <SelectItem key={modelType.value} value={modelType.value}>
+                {modelType.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
           <Command.Input
             value={searchText}
             onValueChange={setSearchText}
             placeholder={labels?.searchModelPlaceholder ?? "Search model"}
-            className="h-9 w-full rounded-md border bg-transparent px-3 text-sm outline-none"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
         <button
@@ -166,6 +198,11 @@ export const ModelCombobox = memo(function ModelCombobox({
                       <Badge variant="outline" className="text-[10px]">
                         {item.provider}
                       </Badge>
+                      {item.model_type ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          {item.model_type}
+                        </Badge>
+                      ) : null}
                       {item.context_window ? (
                         <Badge variant="outline" className="text-[10px]">
                           {Math.round(item.context_window / 1000)}k ctx

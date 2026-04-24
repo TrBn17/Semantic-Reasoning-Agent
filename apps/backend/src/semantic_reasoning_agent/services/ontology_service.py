@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from collections import defaultdict
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from uuid import uuid4
 
 from sqlalchemy import delete, desc, select
@@ -27,7 +27,11 @@ from semantic_reasoning_agent.persistence.models import (
     OntologyRelationTypeDefinitionORM,
     OntologyVersionORM,
 )
-from semantic_reasoning_agent.domain.ontology.models import OntologyDocument
+from semantic_reasoning_agent.domain.ontology.models import (
+    ExtractedEntity,
+    ExtractedRelation,
+    OntologyDocument,
+)
 from semantic_reasoning_agent.domain.ontology.pipeline_steps import ONTOLOGY_BUILD_STEP_NAMES
 from semantic_reasoning_agent.ports.object_store import ObjectStorePort
 from semantic_reasoning_agent.ports.ontology_extractor import OntologyExtractorPort
@@ -51,7 +55,6 @@ from semantic_reasoning_agent.schemas.ontology import (
     OntologyMergeMode,
     OntologyRelationTypeDefinitionResponse,
     OntologyRelationTypeDefinitionUpdateRequest,
-    OntologyPublishPreviewResponse,
     OntologyPublishResponse,
     OntologyRelationResponse,
     OntologyStepStatus,
@@ -86,6 +89,14 @@ class OntologyGraphError(ValueError):
 
 class OntologyDraftError(ValueError):
     """Raised when ontology draft edits are invalid."""
+
+
+@dataclass(slots=True)
+class _DraftPatchBundle:
+    node_patches: list[dict]
+    relation_patches: list[dict]
+    entity_type_patches: list[dict]
+    relation_type_patches: list[dict]
 
 
 class OntologyService:
@@ -375,9 +386,10 @@ class OntologyService:
         try:
             self._mark_step_running(build_id, "classify_document_domain")
             preliminary_domain = self._ontology_extractor.classify_document_domain(document)
+            deferred_domain = self._settings.ontology_classify_deferred_token
             classify_detail = (
                 "Document domain classification is deferred to ontology extraction."
-                if preliminary_domain == "pending"
+                if preliminary_domain == deferred_domain
                 else f"Detected document domain '{preliminary_domain}'."
             )
             self._mark_step_completed(
@@ -388,7 +400,7 @@ class OntologyService:
             self._update_build_state(
                 build_id,
                 status=OntologyBuildStatus.running.value,
-                domain=None if preliminary_domain == "pending" else preliminary_domain,
+                domain=None if preliminary_domain == deferred_domain else preliminary_domain,
             )
 
             self._mark_step_running(build_id, "extract_entities")
@@ -408,7 +420,7 @@ class OntologyService:
                     "Ontology extraction model is unavailable for the selected provider/model. "
                     "Verify provider settings, credentials, and runtime readiness, then retry."
                 )
-            if resolved_domain and resolved_domain != "pending":
+            if resolved_domain and resolved_domain != deferred_domain:
                 self._update_build_state(
                     build_id,
                     status=OntologyBuildStatus.running.value,
@@ -458,20 +470,52 @@ class OntologyService:
             )
 
             self._mark_step_running(build_id, "resolve_entities")
+            trace_payload = extraction.trace if isinstance(extraction.trace, dict) else {}
+            merge_stats = trace_payload.get("merge_stats") if isinstance(trace_payload.get("merge_stats"), dict) else {}
+            if merge_stats:
+                resolve_detail = (
+                    f"Merged {merge_stats.get('raw_entity_rows_from_llm', 0)} LLM entity row(s) → "
+                    f"{merge_stats.get('canonical_entities_after_merge', len(extraction.entities))} canonical; "
+                    f"{merge_stats.get('raw_relation_rows_from_llm', 0)} relation row(s) → "
+                    f"{merge_stats.get('canonical_relations_after_merge', len(extraction.relations))} canonical."
+                )
+            else:
+                resolve_detail = (
+                    f"Canonicalized {len(extraction.entities)} entities and {len(extraction.relations)} relations "
+                    "(per-chunk rows were merged by resolution keys; detailed counts unavailable for this run)."
+                )
             self._mark_step_completed(
                 build_id,
                 "resolve_entities",
-                detail=f"Resolved {len(extraction.entities)} canonical entities.",
+                detail=resolve_detail,
+                metadata={
+                    "merge_stats": merge_stats,
+                    "prompt_version": self._settings.ontology_prompt_version,
+                },
             )
 
             self._mark_step_running(build_id, "build_graph_upsert_plan")
+            publish_seed = self._build_publish_seed_bundle(
+                build_id=build.id,
+                document_id=build.document_id,
+                extraction_entities=extraction.entities,
+                extraction_relations=extraction.relations,
+            )
             self._mark_step_completed(
                 build_id,
                 "build_graph_upsert_plan",
                 detail=(
-                    "Candidate persistence is disabled. "
-                    f"Extraction finished with {len(extraction.entities)} entities and {len(extraction.relations)} relations."
+                    "Materialized extraction candidates for publish-ready draft patches. "
+                    f"Prepared {len(publish_seed.node_patches)} entities and {len(publish_seed.relation_patches)} relations."
                 ),
+                metadata={
+                    "publish_seed": {
+                        "node_patches": publish_seed.node_patches,
+                        "relation_patches": publish_seed.relation_patches,
+                        "entity_type_patches": publish_seed.entity_type_patches,
+                        "relation_type_patches": publish_seed.relation_type_patches,
+                    }
+                },
             )
 
             self._mark_step_running(build_id, "sync_neo4j")
@@ -493,7 +537,7 @@ class OntologyService:
             self._update_build_state(
                 build_id,
                 status=OntologyBuildStatus.completed.value,
-                domain=None if resolved_domain == "pending" else resolved_domain,
+                domain=None if resolved_domain == deferred_domain else resolved_domain,
                 finished_at=utc_now(),
                 error_message=None,
             )
@@ -787,6 +831,22 @@ class OntologyService:
                 "relations_updated": 0,
                 "relations_deleted": 0,
             }
+            if build is not None:
+                build_seed = self._load_build_publish_seed(session, build.id)
+                if (
+                    build_seed.node_patches
+                    or build_seed.relation_patches
+                    or build_seed.entity_type_patches
+                    or build_seed.relation_type_patches
+                ):
+                    self._apply_draft_to_mutable_records(
+                        entity_records=entity_records,
+                        relation_records=relation_records,
+                        entity_type_records=entity_type_records,
+                        relation_type_records=relation_type_records,
+                        draft=build_seed,
+                        diff_summary=diff_summary,
+                    )
 
             if draft is not None:
                 self._apply_draft_to_mutable_records(
@@ -1257,6 +1317,145 @@ class OntologyService:
             for item in snapshot.relation_type_definitions
         }
 
+    @staticmethod
+    def _build_seed_from_metadata(metadata: dict[str, object] | None) -> _DraftPatchBundle:
+        if not isinstance(metadata, dict):
+            return _DraftPatchBundle([], [], [], [])
+        payload = metadata.get("publish_seed")
+        if not isinstance(payload, dict):
+            return _DraftPatchBundle([], [], [], [])
+
+        def _dict_items(value: object) -> list[dict]:
+            if not isinstance(value, list):
+                return []
+            return [item for item in value if isinstance(item, dict)]
+
+        return _DraftPatchBundle(
+            node_patches=_dict_items(payload.get("node_patches")),
+            relation_patches=_dict_items(payload.get("relation_patches")),
+            entity_type_patches=_dict_items(payload.get("entity_type_patches")),
+            relation_type_patches=_dict_items(payload.get("relation_type_patches")),
+        )
+
+    def _load_build_publish_seed(self, session, build_id: str) -> _DraftPatchBundle:  # noqa: ANN001
+        step = session.scalar(
+            select(OntologyBuildStepORM).where(
+                OntologyBuildStepORM.build_id == build_id,
+                OntologyBuildStepORM.name == "build_graph_upsert_plan",
+            )
+        )
+        if step is None:
+            return _DraftPatchBundle([], [], [], [])
+        return self._build_seed_from_metadata(step.metadata_json)
+
+    def _build_publish_seed_bundle(
+        self,
+        *,
+        build_id: str,
+        document_id: str,
+        extraction_entities: list[ExtractedEntity],
+        extraction_relations: list[ExtractedRelation],
+    ) -> _DraftPatchBundle:
+        entity_records: dict[str, dict] = {}
+
+        for entity in extraction_entities:
+            raw_resolution_key = str(entity.resolution_key or "").strip()
+            candidate_name = str(entity.canonical_name or entity.name or "").strip()
+            if not candidate_name:
+                continue
+            resolution_key = self._slugify(raw_resolution_key or candidate_name)
+            existing = entity_records.get(resolution_key)
+            aliases = {item for item in entity.aliases if str(item).strip()}
+            aliases.add(candidate_name)
+            aliases.add(str(entity.name).strip())
+            facts_payload = self._serialize_facts(entity.facts)
+            query_rules = self._serialize_query_rules(entity.query_rules)
+            source_chunk_id = str(entity.source_chunk_id or "").strip() or None
+
+            if existing is None:
+                entity_records[resolution_key] = {
+                    "id": f"build-{build_id}-node-{resolution_key}",
+                    "op": "upsert",
+                    "name": candidate_name,
+                    "entity_type": str(entity.entity_type or "entity"),
+                    "resolution_key": resolution_key,
+                    "aliases": sorted(x for x in aliases if x),
+                    "query_rules": query_rules,
+                    "facts": facts_payload,
+                    "source_document_id": document_id,
+                    "source_build_id": build_id,
+                    "source_chunk_id": source_chunk_id,
+                }
+                continue
+
+            existing["aliases"] = sorted(set(existing.get("aliases", [])) | {x for x in aliases if x})
+            existing["query_rules"] = self._merge_rule_dicts(existing.get("query_rules"), entity.query_rules)
+            existing["facts"] = self._fact_dicts(existing.get("facts")) + facts_payload
+            if source_chunk_id and not existing.get("source_chunk_id"):
+                existing["source_chunk_id"] = source_chunk_id
+
+        relation_records: list[dict] = []
+        for relation in extraction_relations:
+            source_key = self._slugify(str(relation.source_resolution_key or relation.source_name or "").strip())
+            target_key = self._slugify(str(relation.target_resolution_key or relation.target_name or "").strip())
+            relation_type = str(relation.relation_type or "").strip() or "related_to"
+            if source_key and source_key not in entity_records:
+                source_name = str(relation.source_name or relation.source_resolution_key or "Unknown Entity").strip()
+                entity_records[source_key] = {
+                    "id": f"build-{build_id}-node-{source_key}",
+                    "op": "upsert",
+                    "name": source_name,
+                    "entity_type": "entity",
+                    "resolution_key": source_key,
+                    "aliases": [source_name] if source_name else [],
+                    "query_rules": [],
+                    "facts": [],
+                    "source_document_id": document_id,
+                    "source_build_id": build_id,
+                    "source_chunk_id": str(relation.source_chunk_id or "").strip() or None,
+                }
+            if target_key and target_key not in entity_records:
+                target_name = str(relation.target_name or relation.target_resolution_key or "Unknown Entity").strip()
+                entity_records[target_key] = {
+                    "id": f"build-{build_id}-node-{target_key}",
+                    "op": "upsert",
+                    "name": target_name,
+                    "entity_type": "entity",
+                    "resolution_key": target_key,
+                    "aliases": [target_name] if target_name else [],
+                    "query_rules": [],
+                    "facts": [],
+                    "source_document_id": document_id,
+                    "source_build_id": build_id,
+                    "source_chunk_id": str(relation.source_chunk_id or "").strip() or None,
+                }
+            if source_key not in entity_records or target_key not in entity_records:
+                continue
+            relation_id = f"build-{build_id}-relation-{source_key}-{relation_type}-{target_key}"
+            relation_records.append(
+                {
+                    "id": relation_id,
+                    "op": "upsert",
+                    "source_entity_id": str(entity_records[source_key]["id"]),
+                    "target_entity_id": str(entity_records[target_key]["id"]),
+                    "relation_type": relation_type,
+                    "confidence": float(relation.confidence),
+                    "evidence_text": relation.evidence_text or "",
+                    "query_rules": self._serialize_query_rules(relation.query_rules),
+                    "facts": self._serialize_facts(relation.facts),
+                    "provenance": deepcopy(relation.provenance or {"source": "ontology_extractor"}),
+                    "source_document_id": document_id,
+                    "source_build_id": build_id,
+                }
+            )
+
+        return _DraftPatchBundle(
+            node_patches=list(entity_records.values()),
+            relation_patches=relation_records,
+            entity_type_patches=[],
+            relation_type_patches=[],
+        )
+
     def _apply_draft_to_mutable_records(
         self,
         *,
@@ -1264,7 +1463,7 @@ class OntologyService:
         relation_records: dict[tuple[str, str, str], dict],
         entity_type_records: dict[str, dict],
         relation_type_records: dict[str, dict],
-        draft: OntologyGraphDraftORM,
+        draft: OntologyGraphDraftORM | _DraftPatchBundle,
         diff_summary: dict[str, int] | None,
     ) -> None:
         resolution_lookup = {record.get("id", key): key for key, record in entity_records.items()}
@@ -1289,6 +1488,7 @@ class OntologyService:
                 "entity_type": patch["entity_type"],
                 "aliases": list(patch.get("aliases", [])),
                 "query_rules": deepcopy(patch.get("query_rules", [])),
+                "facts": self._fact_dicts(patch.get("facts")),
                 "source_build_id": patch.get("source_build_id", "draft"),
                 "source_document_id": patch.get("source_document_id", "draft"),
             }
@@ -1339,6 +1539,7 @@ class OntologyService:
                 "evidence_text": patch.get("evidence_text", ""),
                 "provenance": deepcopy(patch.get("provenance", {"source": "draft_editor"})),
                 "query_rules": deepcopy(patch.get("query_rules", [])),
+                "facts": self._fact_dicts(patch.get("facts")),
             }
             if diff_summary is not None:
                 diff_summary["relations_updated" if is_update else "relations_added"] += 1
@@ -1707,6 +1908,7 @@ class OntologyService:
         steps: list[OntologyBuildStepORM],
     ) -> OntologyBuildResponse:
         entity_count, relation_count = self._counts_from_steps(steps)
+        has_publishable_entities = self._has_publishable_entities(steps)
         return OntologyBuildResponse(
             id=build.id,
             document_id=build.document_id,
@@ -1726,6 +1928,10 @@ class OntologyService:
             published_version_id=build.published_version_id,
             entity_count=entity_count,
             relation_count=relation_count,
+            has_publishable_entities=(
+                build.status == OntologyBuildStatus.published.value
+                or has_publishable_entities
+            ),
             pending_entity_count=0,
             pending_relation_count=0,
             entity_type_definitions=[],
@@ -1753,6 +1959,17 @@ class OntologyService:
         return entity_count, relation_count
 
     @classmethod
+    def _has_publishable_entities(cls, steps: list[OntologyBuildStepORM]) -> bool:
+        for step in steps:
+            if step.name != "build_graph_upsert_plan":
+                continue
+            seed = cls._build_seed_from_metadata(step.metadata_json)
+            for patch in seed.node_patches:
+                if patch.get("op") != "delete":
+                    return True
+        return False
+
+    @classmethod
     def _serialize_query_rules(cls, rules: list[object] | None) -> list[dict]:
         payload: list[dict] = []
         for rule in rules or []:
@@ -1766,9 +1983,7 @@ class OntologyService:
                 continue
             if not isinstance(candidate, dict):
                 continue
-            route = str(candidate.get("query_route") or "").strip().lower()
-            if route not in {"graph", "sql_facts", "hybrid"}:
-                continue
+            route = str(candidate.get("query_route") or "").strip().lower() or "hybrid"
             scope = str(candidate.get("scope") or "entity_type").strip()
             rule_id = str(candidate.get("rule_id") or "").strip() or f"rule:{scope}:{route}:{len(payload)+1}"
             payload.append(
@@ -1781,7 +1996,11 @@ class OntologyService:
                     "required_fields": [str(x) for x in candidate.get("required_fields", []) if str(x).strip()],
                     "aggregation": str(candidate.get("aggregation") or "latest"),
                     "confidence_threshold": candidate.get("confidence_threshold"),
-                    "fallback_route": candidate.get("fallback_route"),
+                    "fallback_route": (
+                        str(candidate.get("fallback_route")).strip().lower()
+                        if str(candidate.get("fallback_route") or "").strip()
+                        else None
+                    ),
                     "metadata": candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {},
                 }
             )
@@ -1814,7 +2033,7 @@ class OntologyService:
                 continue
             metric_key = str(candidate.get("metric_key") or "").strip()
             if not metric_key:
-                continue
+                metric_key = f"fact_{len(payload) + 1}"
             payload.append(
                 {
                     "metric_key": metric_key,

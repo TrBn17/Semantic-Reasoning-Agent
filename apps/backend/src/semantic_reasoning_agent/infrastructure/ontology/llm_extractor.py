@@ -67,6 +67,32 @@ class _LLMOntologyNarrative(BaseModel):
     summary: str = ""
 
 
+def _is_ontology_input_context_exceeded_error(exc: BaseException) -> bool:
+    """True if the provider rejected the call because the prompt / context was too large."""
+    try:
+        text = f"{type(exc).__name__} {exc!s}".lower()
+    except Exception:  # noqa: BLE001
+        return False
+    markers = (
+        "context length",
+        "context_length",
+        "maximum context",
+        "max_tokens",
+        "token limit",
+        "too many tokens",
+        "string too long",
+        "string_too_long",
+        "reduce the length of the",
+        "input is too long",
+    )
+    if any(m in text for m in markers):
+        return True
+    if " 400" in text or " error 400" in text:
+        if "token" in text or "context" in text or "length" in text:
+            return True
+    return False
+
+
 def _safe_trace(
     *,
     response: LLMResponse,
@@ -106,6 +132,14 @@ def _safe_trace(
 
 
 class OpenDomainLLMExtractor:
+    _FULL_PASS_MAX_INPUT_TOKENS = 256_000
+    _FALLBACK_CHUNK_MAX_DOCUMENT_TOKENS = 32_768
+    _CHUNK_OVERLAP_TOKENS = 512
+    _TOKEN_ENCODING = "cl100k_base"
+    _CHARS_PER_TOKEN_FALLBACK = 4.0
+    _LEGACY_CHUNK_WINDOW_CHARS = 6000
+    _LEGACY_CHUNK_OVERLAP_CHARS = 500
+
     _UUID_PATTERN = re.compile(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
         re.IGNORECASE,
@@ -124,8 +158,59 @@ class OpenDomainLLMExtractor:
         self._schema_registry = schema_registry
         self._adapter_registry = adapter_registry
 
+    def _count_tokens(self, text: str) -> int:
+        try:
+            import tiktoken
+
+            enc = tiktoken.get_encoding(self._TOKEN_ENCODING)
+            return len(enc.encode(text))
+        except Exception:
+            return max(1, int(len(text) / self._CHARS_PER_TOKEN_FALLBACK + 0.5))
+
+    def _split_by_tokens(self, text: str, *, max_tokens: int) -> list[str]:
+        try:
+            import tiktoken
+
+            normalized = text.strip()
+            if not normalized:
+                return []
+            enc = tiktoken.get_encoding(self._TOKEN_ENCODING)
+            token_ids = enc.encode(normalized)
+            if len(token_ids) <= max_tokens:
+                return [normalized]
+            step = max(1, max_tokens - self._CHUNK_OVERLAP_TOKENS)
+            chunks: list[str] = []
+            start = 0
+            while start < len(token_ids) and len(chunks) < self._settings.ontology_extraction_max_chunks:
+                end = min(len(token_ids), start + max_tokens)
+                segment = enc.decode(token_ids[start:end]).strip()
+                if segment:
+                    chunks.append(segment)
+                if end >= len(token_ids):
+                    break
+                start += step
+            return chunks
+        except Exception:
+            return chunk_for_extraction(
+                text,
+                window=self._LEGACY_CHUNK_WINDOW_CHARS,
+                overlap=self._LEGACY_CHUNK_OVERLAP_CHARS,
+                max_chunks=self._settings.ontology_extraction_max_chunks,
+            )
+
+    @staticmethod
+    def _with_large_document_note(chunk: str, idx: int, total: int) -> str:
+        if total <= 1:
+            return chunk
+        note = (
+            "NOTE: The source document is large and has been split into chunks. "
+            f"You are processing chunk {idx + 1}/{total}. "
+            "Extract grounded entities/relations from this chunk and keep resolution keys stable across chunks."
+        )
+        return f"{note}\n\n{chunk}"
+
     def classify_document_domain(self, document: OntologyDocument) -> str:
-        return "pending"
+        return self._settings.ontology_classify_deferred_token
 
     def extract_ontology_candidates(
         self,
@@ -145,51 +230,188 @@ class OpenDomainLLMExtractor:
 
         text = document.markdown[: self._settings.ontology_markdown_char_limit]
         schema = self._schema_registry.for_workspace(workspace_id or self._settings.default_workspace_id)
-        chunks = chunk_for_extraction(
+        document_token_count = self._count_tokens(text)
+        full_pass = document_token_count <= self._FULL_PASS_MAX_INPUT_TOKENS
+        entity_segments = [text] if full_pass else self._split_by_tokens(
             text,
-            window=6000,
-            overlap=500,
-            max_chunks=self._settings.ontology_extraction_max_chunks,
+            max_tokens=self._FALLBACK_CHUNK_MAX_DOCUMENT_TOKENS,
         )
+        if not entity_segments:
+            entity_segments = [text]
+
         merged_entities: dict[str, ExtractedEntity] = {}
         merged_relations: dict[tuple[str, str, str], ExtractedRelation] = {}
         domains: list[str] = []
         traces: list[dict[str, Any]] = []
         errors: list[str] = []
+        raw_entity_rows_from_llm = 0
+        raw_relation_rows_from_llm = 0
 
-        for idx, chunk in enumerate(chunks):
-            entities_payload, entity_trace = self._extract_entities(chunk, idx, provider, model, schema.entity_types)
-            traces.append(entity_trace)
-            if isinstance(entity_trace.get("parse_error"), str):
-                errors.append(f"chunk[{idx}] entities: {entity_trace['parse_error']}")
-            if entities_payload.domain not in {"", "general", "pending"}:
-                domains.append(entities_payload.domain)
-            for raw in entities_payload.entities:
-                self._merge_entity(
-                    merged_entities,
-                    self._to_domain_entity(raw, document=document, provider=provider, model=model),
-                )
+        entity_retried = False
+        entity_note_mode = not full_pass
+        while True:
+            for idx, raw_chunk in enumerate(entity_segments):
+                chunk = self._with_large_document_note(raw_chunk, idx, len(entity_segments)) if entity_note_mode else raw_chunk
+                try:
+                    entities_payload, entity_trace = self._extract_entities(
+                        chunk, idx, provider, model, schema.entity_types
+                    )
+                except Exception as exc:
+                    if (
+                        not entity_retried
+                        and idx == 0
+                        and len(entity_segments) == 1
+                        and _is_ontology_input_context_exceeded_error(exc)
+                    ):
+                        entity_retried = True
+                        errors.append(
+                            f"entity_segment[0] context/length; retrying with token chunks: {exc!s}"
+                        )
+                        entity_segments = self._split_by_tokens(
+                            text,
+                            max_tokens=self._FALLBACK_CHUNK_MAX_DOCUMENT_TOKENS,
+                        )
+                        if not entity_segments:
+                            entity_segments = [text]
+                        entity_note_mode = len(entity_segments) > 1
+                        merged_entities = {}
+                        domains = []
+                        traces = []
+                        break
+                    raise
+                traces.append(entity_trace)
+                if isinstance(entity_trace.get("parse_error"), str):
+                    errors.append(f"entity_segment[{idx}] entities: {entity_trace['parse_error']}")
+                if entities_payload.domain not in frozenset(
+                    {
+                        "",
+                        "general",
+                        "pending",
+                        (self._settings.ontology_classify_deferred_token or "").strip() or "pending",
+                    }
+                ):
+                    domains.append(entities_payload.domain)
+                raw_entity_rows_from_llm += len(entities_payload.entities)
+                for raw in entities_payload.entities:
+                    self._merge_entity(
+                        merged_entities,
+                        self._to_domain_entity(raw, document=document, provider=provider, model=model),
+                    )
+            else:
+                break
 
-            if len(merged_entities) < 2:
-                continue
-            relation_payload, relation_trace = self._extract_relations(
-                chunk, idx, provider, model, schema.relation_types, list(merged_entities.values())
+        if len(merged_entities) < 2:
+            domain = Counter(domains).most_common(1)[0][0] if domains else "general"
+            canonical_entities = len(merged_entities)
+            merge_stats: dict[str, Any] = {
+                "raw_entity_rows_from_llm": raw_entity_rows_from_llm,
+                "canonical_entities_after_merge": canonical_entities,
+                "raw_relation_rows_from_llm": 0,
+                "canonical_relations_after_merge": 0,
+                "entity_dedup_savings": max(0, raw_entity_rows_from_llm - canonical_entities),
+                "resolution_rule": (
+                    "Entities with the same resolution_key (case-insensitive; fallback canonical_name) "
+                    "are merged across chunks: aliases union, higher confidence wins for name/type/evidence."
+                ),
+            }
+            return ExtractionResult(
+                domain=domain,
+                entities=list(merged_entities.values()),
+                relations=[],
+                trace={
+                    "chunks": traces,
+                    "errors": errors,
+                    "merge_stats": merge_stats,
+                    "chunking": {
+                        "document_token_count": document_token_count,
+                        "full_pass_token_threshold": self._FULL_PASS_MAX_INPUT_TOKENS,
+                        "entity_segment_count": len(entity_segments),
+                        "entity_mode": "chunked" if len(entity_segments) > 1 else "full",
+                    },
+                },
             )
-            traces.append(relation_trace)
-            if isinstance(relation_trace.get("parse_error"), str):
-                errors.append(f"chunk[{idx}] relations: {relation_trace['parse_error']}")
-            for raw in relation_payload.relations:
-                self._merge_relation(
-                    merged_relations,
-                    self._to_domain_relation(raw, document=document, provider=provider, model=model),
-                )
+
+        relation_segments = [text] if full_pass else self._split_by_tokens(
+            text,
+            max_tokens=self._FALLBACK_CHUNK_MAX_DOCUMENT_TOKENS,
+        )
+        if not relation_segments:
+            relation_segments = [text]
+        entity_values = list(merged_entities.values())
+        relation_retried = False
+        relation_note_mode = not full_pass
+        while True:
+            for idx, raw_chunk in enumerate(relation_segments):
+                chunk = self._with_large_document_note(raw_chunk, idx, len(relation_segments)) if relation_note_mode else raw_chunk
+                try:
+                    relation_payload, relation_trace = self._extract_relations(
+                        chunk, idx, provider, model, schema.relation_types, entity_values
+                    )
+                except Exception as exc:
+                    if (
+                        not relation_retried
+                        and idx == 0
+                        and len(relation_segments) == 1
+                        and _is_ontology_input_context_exceeded_error(exc)
+                    ):
+                        relation_retried = True
+                        errors.append(
+                            f"relation_segment[0] context/length; retrying with token chunks: {exc!s}"
+                        )
+                        relation_segments = self._split_by_tokens(
+                            text,
+                            max_tokens=self._FALLBACK_CHUNK_MAX_DOCUMENT_TOKENS,
+                        )
+                        if not relation_segments:
+                            relation_segments = [text]
+                        relation_note_mode = len(relation_segments) > 1
+                        merged_relations = {}
+                        break
+                    raise
+                traces.append(relation_trace)
+                if isinstance(relation_trace.get("parse_error"), str):
+                    errors.append(f"relation_segment[{idx}] relations: {relation_trace['parse_error']}")
+                raw_relation_rows_from_llm += len(relation_payload.relations)
+                for raw in relation_payload.relations:
+                    self._merge_relation(
+                        merged_relations,
+                        self._to_domain_relation(raw, document=document, provider=provider, model=model),
+                    )
+            else:
+                break
 
         domain = Counter(domains).most_common(1)[0][0] if domains else "general"
+        canonical_e = len(merged_entities)
+        canonical_r = len(merged_relations)
+        merge_stats_full: dict[str, Any] = {
+            "raw_entity_rows_from_llm": raw_entity_rows_from_llm,
+            "canonical_entities_after_merge": canonical_e,
+            "raw_relation_rows_from_llm": raw_relation_rows_from_llm,
+            "canonical_relations_after_merge": canonical_r,
+            "entity_dedup_savings": max(0, raw_entity_rows_from_llm - canonical_e),
+            "relation_dedup_savings": max(0, raw_relation_rows_from_llm - canonical_r),
+            "resolution_rule": (
+                "Entities: merge by resolution_key across chunks (aliases union, best confidence wins). "
+                "Relations: merge by (source_resolution_key, relation_type, target_resolution_key)."
+            ),
+        }
         return ExtractionResult(
             domain=domain,
             entities=list(merged_entities.values()),
             relations=list(merged_relations.values()),
-            trace={"chunks": traces, "errors": errors},
+            trace={
+                "chunks": traces,
+                "errors": errors,
+                "merge_stats": merge_stats_full,
+                "chunking": {
+                    "document_token_count": document_token_count,
+                    "full_pass_token_threshold": self._FULL_PASS_MAX_INPUT_TOKENS,
+                    "entity_segment_count": len(entity_segments),
+                    "relation_segment_count": len(relation_segments),
+                    "entity_mode": "chunked" if len(entity_segments) > 1 else "full",
+                    "relation_mode": "chunked" if len(relation_segments) > 1 else "full",
+                },
+            },
         )
 
     def summarize_ontology(
@@ -230,7 +452,11 @@ class OpenDomainLLMExtractor:
         self, chunk: str, chunk_index: int, provider: str, model: str, known_entity_types: list[str]
     ) -> tuple[_LLMEntityExtraction, dict[str, Any]]:
         system_prompt, user_prompt = build_entity_extraction_prompt(
-            text=chunk, known_entity_types=known_entity_types, prompt_version=self._settings.ontology_prompt_version
+            text=chunk,
+            known_entity_types=known_entity_types,
+            prompt_version=self._settings.ontology_prompt_version,
+            entity_count_min=self._settings.ontology_extraction_entity_count_min,
+            entity_count_max=self._settings.ontology_extraction_entity_count_max,
         )
         payload, trace = self._invoke_json(provider, model, system_prompt, user_prompt, chunk, "entities", chunk_index)
         if payload is None:
@@ -385,9 +611,7 @@ class OpenDomainLLMExtractor:
         for item in items or []:
             if not isinstance(item, dict):
                 continue
-            route = str(item.get("query_route") or "").strip().lower()
-            if route not in {"graph", "sql_facts", "hybrid"}:
-                continue
+            route = str(item.get("query_route") or "").strip().lower() or "hybrid"
             scope = str(item.get("scope") or "entity_type").strip()
             rule_id = str(item.get("rule_id") or "").strip() or f"rule:{scope}:{route}:{len(normalized)+1}"
             normalized.append(
@@ -400,7 +624,11 @@ class OpenDomainLLMExtractor:
                     required_fields=[str(x) for x in item.get("required_fields", []) if str(x).strip()],
                     aggregation=str(item.get("aggregation") or "latest"),
                     confidence_threshold=item.get("confidence_threshold"),
-                    fallback_route=item.get("fallback_route"),
+                    fallback_route=(
+                        str(item.get("fallback_route")).strip().lower()
+                        if str(item.get("fallback_route") or "").strip()
+                        else None
+                    ),
                     metadata=item.get("metadata") if isinstance(item.get("metadata"), dict) else {},
                 )
             )
@@ -414,7 +642,7 @@ class OpenDomainLLMExtractor:
                 continue
             metric_key = str(item.get("metric_key") or "").strip()
             if not metric_key:
-                continue
+                metric_key = f"fact_{len(normalized) + 1}"
             normalized.append(
                 ExtractedFact(
                     metric_key=metric_key,
@@ -439,6 +667,8 @@ class OpenDomainLLMExtractor:
             target[key] = entity
             return
         existing.aliases |= entity.aliases
+        existing.query_rules = OpenDomainLLMExtractor._merge_query_rules(existing.query_rules, entity.query_rules)
+        existing.facts = OpenDomainLLMExtractor._merge_facts(existing.facts, entity.facts)
         if entity.confidence > existing.confidence:
             existing.name = entity.name
             existing.canonical_name = entity.canonical_name
@@ -459,11 +689,45 @@ class OpenDomainLLMExtractor:
         existing = target.get(key)
         if existing is None:
             target[key] = relation
-        elif relation.confidence > existing.confidence:
+            return
+        existing.query_rules = OpenDomainLLMExtractor._merge_query_rules(existing.query_rules, relation.query_rules)
+        existing.facts = OpenDomainLLMExtractor._merge_facts(existing.facts, relation.facts)
+        if relation.confidence > existing.confidence:
             existing.source_name = relation.source_name
             existing.target_name = relation.target_name
             existing.confidence = relation.confidence
             existing.evidence_text = relation.evidence_text
+
+    @staticmethod
+    def _merge_query_rules(existing: list[QueryRuleSpec], incoming: list[QueryRuleSpec]) -> list[QueryRuleSpec]:
+        merged: list[QueryRuleSpec] = []
+        seen: set[tuple[str, str, str]] = set()
+        for rule in [*(existing or []), *(incoming or [])]:
+            key = (str(rule.rule_id).strip(), str(rule.scope).strip(), str(rule.query_route).strip())
+            if not all(key) or key in seen:
+                continue
+            seen.add(key)
+            merged.append(rule)
+        return merged
+
+    @staticmethod
+    def _merge_facts(existing: list[ExtractedFact], incoming: list[ExtractedFact]) -> list[ExtractedFact]:
+        merged: list[ExtractedFact] = []
+        seen: set[tuple[str, Any, Any, Any, Any, Any]] = set()
+        for fact in [*(existing or []), *(incoming or [])]:
+            key = (
+                str(fact.metric_key).strip(),
+                fact.value_num,
+                fact.value_text,
+                fact.value_bool,
+                fact.unit,
+                fact.observed_at,
+            )
+            if not key[0] or key in seen:
+                continue
+            seen.add(key)
+            merged.append(fact)
+        return merged
 
     @staticmethod
     def _fallback_narrative(document: OntologyDocument, *, domain: str | None = None) -> OntologyNarrative:

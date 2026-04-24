@@ -55,6 +55,15 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     const hostRef = useRef<HTMLDivElement | null>(null);
     const cyRef = useRef<Core | null>(null);
     const { resolvedTheme } = useTheme();
+    const nodeDegrees = useMemo(() => {
+      const degreeByNodeId = new Map<string, number>();
+      for (const node of nodes) degreeByNodeId.set(node.id, 0);
+      for (const edge of edges) {
+        degreeByNodeId.set(edge.sourceId, (degreeByNodeId.get(edge.sourceId) ?? 0) + 1);
+        degreeByNodeId.set(edge.targetId, (degreeByNodeId.get(edge.targetId) ?? 0) + 1);
+      }
+      return degreeByNodeId;
+    }, [nodes, edges]);
 
     const palette = useMemo(() => {
       void resolvedTheme;
@@ -94,7 +103,8 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
     useEffect(() => {
       if (!hostRef.current) return;
 
-      const layoutName = nodes.length > 200 ? "circle" : "cose";
+      const layoutName = nodes.length > 240 ? "concentric" : "cose";
+      const shouldAnimate = nodes.length < 140;
 
       const cy = cytoscape({
         container: hostRef.current,
@@ -105,6 +115,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               label: n.name,
               type: n.entityType,
               color: colorForType(n.entityType, palette),
+              degree: nodeDegrees.get(n.id) ?? 0,
               ref: n,
             },
           })),
@@ -128,15 +139,18 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               "background-color": "data(color)",
               label: "data(label)",
               color: readCssVar("--foreground", "#0f172a"),
-              "font-size": 11,
+              "font-size": 12,
               "font-weight": 600,
               "text-wrap": "wrap",
-              "text-max-width": "120px",
+              "text-max-width": "140px",
               "text-valign": "bottom",
-              "text-margin-y": 8,
-              width: 34,
-              height: 34,
-              "border-width": 2,
+              "text-margin-y": 9,
+              "text-background-color": readCssVar("--background", "#f8fafc"),
+              "text-background-opacity": 0.92,
+              "text-background-padding": "2px",
+              width: "mapData(degree, 0, 12, 30, 56)",
+              height: "mapData(degree, 0, 12, 30, 56)",
+              "border-width": 2.5,
               "border-color": readCssVar("--background", "#f8fafc"),
               "overlay-padding": 8,
             },
@@ -147,6 +161,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               "border-width": 4,
               "border-color": readCssVar("--primary", "#10231d"),
               opacity: 1,
+              "z-index": 999,
             },
           },
           {
@@ -157,13 +172,14 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
               "target-arrow-shape": "triangle",
               "curve-style": "bezier",
               label: "data(label)",
-              "font-size": 9,
+              "font-size": 10,
               color: readCssVar("--foreground", "#37534d"),
               "text-rotation": "autorotate",
               "text-background-color": readCssVar("--background", "#f8fafc"),
-              "text-background-opacity": 0.95,
+              "text-background-opacity": 0.88,
               "text-background-padding": "3px",
-              width: 2,
+              width: 1.8,
+              opacity: 0.78,
               "overlay-padding": 6,
             },
           },
@@ -178,11 +194,25 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         ],
         layout: {
           name: layoutName,
-          animate: false,
+          animate: shouldAnimate,
           padding: 60,
-          ...(layoutName === "cose" ? { idealEdgeLength: 140 } : {}),
+          ...(layoutName === "cose"
+            ? {
+                idealEdgeLength: 180,
+                nodeOverlap: 28,
+                nodeRepulsion: 320000,
+                gravity: 0.42,
+                componentSpacing: 120,
+              }
+            : {
+                minNodeSpacing: 80,
+                concentric: (node: NodeSingular) => Number(node.data("degree")) + 1,
+                levelWidth: () => 3,
+              }),
         },
         wheelSensitivity: 0.2,
+        minZoom: 0.18,
+        maxZoom: 3.2,
       });
 
       cy.on("tap", "node", (evt) => {
@@ -214,7 +244,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(
         cy.destroy();
         cyRef.current = null;
       };
-    }, [nodes, edges, onEdgeRename, onNodeRename, onSelect, palette]);
+    }, [nodes, edges, onEdgeRename, onNodeRename, onSelect, palette, nodeDegrees]);
 
     return <div ref={hostRef} className="h-full min-h-0 w-full" />;
   },

@@ -7,6 +7,10 @@ from semantic_reasoning_agent.schemas.agent_capabilities import (
     ToolPolicySchema,
 )
 from semantic_reasoning_agent.schemas.agents import TaskType
+from semantic_reasoning_agent.schemas.orchestration import (
+    OrchestrationConfigSchema,
+    default_orchestration_config,
+)
 
 
 def utc_now() -> datetime:
@@ -62,6 +66,9 @@ class AgentProfileResponse(BaseModel):
     tool_policy: ToolPolicySchema = Field(default_factory=ToolPolicySchema)
     knowledge_pack_ids: list[str] = Field(default_factory=list)
     evidence_policy: EvidencePolicySchema = Field(default_factory=EvidencePolicySchema)
+    orchestration_config: OrchestrationConfigSchema = Field(
+        default_factory=default_orchestration_config
+    )
     policy_config: dict = Field(default_factory=dict)
     task_models: list[AgentProfileTaskModelAssignment] = Field(default_factory=list)
     tool_assignments: list[AgentProfileToolAssignment] = Field(default_factory=list)
@@ -81,6 +88,9 @@ class AgentProfileCreateRequest(BaseModel):
     tool_policy: ToolPolicySchema = Field(default_factory=ToolPolicySchema)
     knowledge_pack_ids: list[str] = Field(default_factory=list)
     evidence_policy: EvidencePolicySchema = Field(default_factory=EvidencePolicySchema)
+    orchestration_config: OrchestrationConfigSchema = Field(
+        default_factory=default_orchestration_config
+    )
     policy_config: dict = Field(default_factory=dict)
     task_models: list[AgentProfileTaskModelAssignment] = Field(default_factory=list)
     tool_assignments: list[AgentProfileToolAssignment] = Field(default_factory=list)
@@ -96,6 +106,7 @@ class AgentProfileUpdateRequest(BaseModel):
     tool_policy: ToolPolicySchema | None = None
     knowledge_pack_ids: list[str] | None = None
     evidence_policy: EvidencePolicySchema | None = None
+    orchestration_config: OrchestrationConfigSchema | None = None
     policy_config: dict | None = None
     task_models: list[AgentProfileTaskModelAssignment] | None = None
     tool_assignments: list[AgentProfileToolAssignment] | None = None

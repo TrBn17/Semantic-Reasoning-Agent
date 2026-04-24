@@ -47,6 +47,7 @@ import type {
   KnowledgePackResponse,
   ToolPolicySchema,
   AgentProfileToolAssignment,
+  OrchestrationMode,
 } from "@/shared/api/types";
 
 type ProfileDraft = {
@@ -60,6 +61,9 @@ type ProfileDraft = {
   knowledgePackIds: string[];
   allowedSources: string[];
   allowModelOnlyFallback: boolean;
+  orchestrationMode: OrchestrationMode;
+  orchestrationEnabled: boolean;
+  orchestrationMaxIterations: number;
 };
 
 type KnowledgePackDraft = {
@@ -90,6 +94,9 @@ function makeProfileDraft(profile: AgentProfileResponse): ProfileDraft {
     knowledgePackIds: [...profile.knowledge_pack_ids],
     allowedSources: [...profile.evidence_policy.allowed_sources],
     allowModelOnlyFallback: profile.evidence_policy.allow_model_only_fallback,
+    orchestrationMode: profile.orchestration_config.mode,
+    orchestrationEnabled: profile.orchestration_config.orchestrator.enabled,
+    orchestrationMaxIterations: profile.orchestration_config.stop_policy.max_iterations,
   };
 }
 
@@ -100,6 +107,17 @@ function makeKnowledgePackDraft(pack?: KnowledgePackResponse | null): KnowledgeP
     status: pack?.status ?? "active",
     documentIds: [...(pack?.document_ids ?? [])],
   };
+}
+
+function hydrateProfileDraft(
+  profile: AgentProfileResponse,
+  defaultToolAssignments: AgentProfileToolAssignment[],
+): ProfileDraft {
+  const nextDraft = makeProfileDraft(profile);
+  if (nextDraft.toolAssignments.length === 0 && defaultToolAssignments.length > 0) {
+    nextDraft.toolAssignments = defaultToolAssignments;
+  }
+  return nextDraft;
 }
 
 function buildToolPolicy(draft: ProfileDraft): ToolPolicySchema {
@@ -181,13 +199,16 @@ export function AgentManagementView() {
       profiles?.find((item) => item.is_default) ??
       profiles?.[0];
     if (!selected) return;
-    setSelectedProfileId(selected.id);
-    setPreferredAgentProfileId(selected.id);
-    const nextDraft = makeProfileDraft(selected);
-    if (nextDraft.toolAssignments.length === 0 && defaultToolAssignments.length > 0) {
-      nextDraft.toolAssignments = defaultToolAssignments;
+    setSelectedProfileId((current) => (current === selected.id ? current : selected.id));
+    if (preferredAgentProfileId !== selected.id) {
+      setPreferredAgentProfileId(selected.id);
     }
-    setProfileDraft(nextDraft);
+    setProfileDraft((current) => {
+      if (current && selectedProfileId === selected.id) {
+        return current;
+      }
+      return hydrateProfileDraft(selected, defaultToolAssignments);
+    });
   }, [defaultToolAssignments, preferredAgentProfileId, profiles, selectedProfileId, setPreferredAgentProfileId]);
   const createProfileMutation = useMutation({
     mutationFn: () => {
@@ -206,6 +227,12 @@ export function AgentManagementView() {
         evidence_policy: {
           allowed_sources: ["internal_chunk", "graph_node", "graph_edge"],
           allow_model_only_fallback: true,
+        },
+        orchestration_config: {
+          version: "1.0",
+          mode: "legacy_static_plan",
+          orchestrator: { strategy: "legacy_static_plan", enabled: true },
+          stop_policy: { max_iterations: 4 },
         },
         task_models: [],
         tool_assignments: defaultToolAssignments,
@@ -235,6 +262,17 @@ export function AgentManagementView() {
         tool_assignments: profileDraft.toolAssignments,
         knowledge_pack_ids: profileDraft.knowledgePackIds,
         evidence_policy: buildEvidencePolicy(profileDraft),
+        orchestration_config: {
+          version: "1.0",
+          mode: profileDraft.orchestrationMode,
+          orchestrator: {
+            strategy: profileDraft.orchestrationMode,
+            enabled: profileDraft.orchestrationEnabled,
+          },
+          stop_policy: {
+            max_iterations: profileDraft.orchestrationMaxIterations,
+          },
+        },
       });
     },
     onSuccess: async () => {
@@ -337,11 +375,7 @@ export function AgentManagementView() {
                   onClick={() => {
                     setSelectedProfileId(profile.id);
                     setPreferredAgentProfileId(profile.id);
-                    const nextDraft = makeProfileDraft(profile);
-                    if (nextDraft.toolAssignments.length === 0 && defaultToolAssignments.length > 0) {
-                      nextDraft.toolAssignments = defaultToolAssignments;
-                    }
-                    setProfileDraft(nextDraft);
+                    setProfileDraft(hydrateProfileDraft(profile, defaultToolAssignments));
                   }}
                   className={`w-full rounded-2xl border p-4 text-left transition ${
                     selectedProfileId === profile.id
@@ -727,6 +761,76 @@ export function AgentManagementView() {
                   />
                   {t.agentManagement.modelOnlyFallback}
                 </label>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Orchestration</CardTitle>
+                <CardDescription>Configure runtime mode for this agent profile.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Mode</Label>
+                    <Select
+                      value={profileDraft.orchestrationMode}
+                      onValueChange={(value) =>
+                        setProfileDraft((current) =>
+                          current
+                            ? { ...current, orchestrationMode: value as OrchestrationMode }
+                            : current,
+                        )
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="legacy_static_plan">legacy_static_plan</SelectItem>
+                        <SelectItem value="react_two_agent">react_two_agent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Max iterations</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={profileDraft.orchestrationMaxIterations}
+                      onChange={(event) =>
+                        setProfileDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                orchestrationMaxIterations: Math.max(
+                                  1,
+                                  Math.min(12, Number(event.target.value || 1)),
+                                ),
+                              }
+                            : current,
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={profileDraft.orchestrationEnabled}
+                    onChange={(event) =>
+                      setProfileDraft((current) =>
+                        current ? { ...current, orchestrationEnabled: event.target.checked } : current,
+                      )
+                    }
+                  />
+                  Enable orchestrator
+                </label>
+                <div className="rounded-xl border p-3 text-xs text-muted-foreground">
+                  ReAct two-agent mapping: DocsAgent to supersearch.docs, GraphAgent to
+                  supersearch.graph.
+                </div>
               </CardContent>
             </Card>
           </div>
