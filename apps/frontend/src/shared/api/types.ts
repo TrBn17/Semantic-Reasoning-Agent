@@ -317,6 +317,14 @@ export interface AgentCapabilityToolSchema {
   requires_confirmation: boolean;
 }
 
+export interface LlmInferenceOverrides {
+  provider?: string | null;
+  model?: string | null;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  reasoning_effort?: "none" | "low" | "medium" | "high" | null;
+}
+
 export interface AgentProfileResponse {
   id: string;
   workspace_id: string;
@@ -326,6 +334,10 @@ export interface AgentProfileResponse {
   allow_chat_model_override: boolean;
   is_default: boolean;
   status: string;
+  /** When set, this profile is the seeded built-in orchestrator/graph/docs identity for this workspace */
+  builtin_agent_role?: string | null;
+  /** Per-slot LLM knobs for ReAct (stored in policy_config.llm_inference) */
+  llm_inference?: LlmInferenceOverrides | null;
   policy_config: Record<string, unknown>;
   capability_preset: string;
   tool_policy: ToolPolicySchema;
@@ -370,6 +382,7 @@ export interface AgentProfileUpdateRequest {
   orchestration_config?: OrchestrationConfig;
   task_models?: AgentProfileTaskModelAssignment[];
   tool_assignments?: AgentProfileToolAssignment[];
+  llm_inference?: LlmInferenceOverrides | null;
 }
 
 export interface SettingsModelOption {
@@ -604,6 +617,23 @@ export interface OntologyBuildCreateRequest {
 export interface OntologyDraftPublishRequest {
   workspace_id?: string | null;
   build_id?: string | null;
+  /** Publish into this Graphiti partition; omit for workspace-wide (legacy). */
+  ontology_graph_projection_id?: string | null;
+}
+
+export interface OntologyGraphProjectionCreateRequest {
+  workspace_id: string;
+  knowledge_pack_id: string;
+  name: string;
+}
+
+export interface OntologyGraphProjectionResponse {
+  id: string;
+  workspace_id: string;
+  knowledge_pack_id: string;
+  name: string;
+  graphiti_group_id: string;
+  created_at: string;
 }
 
 export interface OntologyBuildStepResponse {
@@ -758,6 +788,28 @@ export interface OntologyGraphResponse {
   relations: OntologyRelationResponse[];
   /** True when published ontology was synced into Graphiti for this workspace. */
   graphiti_indexed?: boolean;
+}
+
+/** Draft overlay on top of latest published ontology (PATCH/DELETE draft APIs). */
+export interface OntologyGraphDraftSummaryResponse {
+  based_on_version_id?: string | null;
+  has_changes?: boolean;
+  node_patch_count?: number;
+  relation_patch_count?: number;
+  entity_type_patch_count?: number;
+  relation_type_patch_count?: number;
+  updated_at?: string | null;
+}
+
+export interface OntologyGraphDraftResponse {
+  workspace_id: string;
+  version?: OntologyVersionResponse | null;
+  ontology_title?: string | null;
+  ontology_summary?: string | null;
+  has_changes?: boolean;
+  entities: OntologyEntityResponse[];
+  relations: OntologyRelationResponse[];
+  draft_summary?: OntologyGraphDraftSummaryResponse;
 }
 
 /** POST /knowledge-graph/extract */

@@ -5,6 +5,7 @@ from .agent_profiles import (
     KnowledgePackORM,
 )
 from .base import Base, utc_now
+from .builtin_agent_context import BuiltinAgentContextORM
 from .conversations import ConversationORM, MessageORM
 from .documents import (
     DocumentArtifactORM,
@@ -15,6 +16,7 @@ from .documents import (
     OntologySearchIndexORM,
 )
 from .ontology import (
+    OntologyGraphProjectionORM,
     OntologyBuildORM,
     OntologyBuildStepORM,
     OntologyEntityORM,
@@ -57,6 +59,7 @@ __all__ = [
     "DocumentArtifactORM",
     "DocumentExtractionRunORM",
     "OntologySearchIndexORM",
+    "OntologyGraphProjectionORM",
     "OntologyBuildORM",
     "OntologyBuildStepORM",
     "OntologyEntityORM",
@@ -72,6 +75,7 @@ __all__ = [
     "TaskModelConfigORM",
     "WorkspaceSearchSettingsORM",
     "SearchToolConfigORM",
+    "BuiltinAgentContextORM",
     "TaskRunORM",
     "TaskRunStepORM",
     "ToolCallAuditORM",

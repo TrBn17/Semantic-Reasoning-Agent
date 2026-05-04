@@ -332,9 +332,30 @@ class OntologyRelationTypeDefinitionUpdateRequest(BaseModel):
     deleted: bool | None = None
 
 
+class OntologyGraphProjectionCreateRequest(BaseModel):
+    """Create a logical graph partition (Graphiti ``group_id``) under one knowledge pack."""
+
+    workspace_id: str
+    knowledge_pack_id: str
+    name: str
+
+
+class OntologyGraphProjectionResponse(BaseModel):
+    id: str
+    workspace_id: str
+    knowledge_pack_id: str
+    name: str
+    graphiti_group_id: str = Field(
+        description="Neo4j/Graphiti `group_id`; add to supersearch.graph `ontology_graph_projection_ids`.",
+    )
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class OntologyDraftPublishRequest(BaseModel):
     workspace_id: str | None = None
     build_id: str | None = None
+    #: When set, published triples/episodes land in this projection's Graphiti partition (not workspace-wide).
+    ontology_graph_projection_id: str | None = None
 
 
 class OntologyPublishPreviewResponse(BaseModel):

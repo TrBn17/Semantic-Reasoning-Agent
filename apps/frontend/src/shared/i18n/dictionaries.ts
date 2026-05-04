@@ -246,6 +246,10 @@ export type Dictionary = {
     rerankerRrf: string;
     rerankerCrossEncoder: string;
     rerankerNone: string;
+    graphProjectionIdsLabel: string;
+    graphProjectionIdsHint: string;
+    graphProjectionIdsWorkspaceDefault: string;
+    graphProjectionBadge: string;
   };
   chat: {
     useRetrieval: string;
@@ -525,6 +529,12 @@ export type Dictionary = {
     zoomOut: string;
     fitView: string;
     graphitiIndexed: string;
+    draftEditsBadge: string;
+    deleteRelation: string;
+    deleteRelationConfirm: string;
+    deleteNode: string;
+    deleteNodeConfirm: string;
+    removeFromGraphHint: string;
   };
   evidenceUi: {
     title: string;
@@ -712,6 +722,36 @@ export type Dictionary = {
     saveProfile: string;
     toastKnowledgePackSaved: string;
     toastKnowledgePackSaveFailedPrefix: string;
+    builtinBadge: string;
+    builtinRoleOrchestrator: string;
+    builtinRoleGraph: string;
+    builtinRoleDocs: string;
+    setDefaultChatOnlyHint: string;
+    runtimeConfigTitle: string;
+    runtimeOrchestratorHint: string;
+    runtimeGraphHint: string;
+    runtimeDocsHint: string;
+    graphStoreTitle: string;
+    graphStoreDescription: string;
+    vecStoreTitle: string;
+    vecStoreDescription: string;
+    inferenceModelLabel: string;
+    inferenceModelHint: string;
+    inferenceModelClear: string;
+    temperatureLabel: string;
+    maxTokensLabel: string;
+    reasoningLabel: string;
+    reasoningNone: string;
+    reasoningLow: string;
+    reasoningMedium: string;
+    reasoningHigh: string;
+    orchestrationTitle: string;
+    orchestrationDescription: string;
+    orchestrationModeLabel: string;
+    orchestrationMaxIterationsLabel: string;
+    orchestrationEnabledLabel: string;
+    orchestrationBuiltinOrchestratorHint: string;
+    orchestrationReactHint: string;
   };
   ontologyBuild: {
     notFound: string;
@@ -765,6 +805,32 @@ export type Dictionary = {
     chunkingSummaryHeading: string;
     technicalMetadata: string;
     promptVersionLabel: string;
+    publishProjectionLabel: string;
+    publishProjectionHint: string;
+    publishProjectionWorkspaceDefault: string;
+  };
+  graphProjections: {
+    title: string;
+    description: string;
+    create: string;
+    empty: string;
+    loadFailed: string;
+    columnName: string;
+    columnPack: string;
+    columnGroupId: string;
+    columnCreated: string;
+    deleteAria: string;
+    deleteConfirm: string;
+    dialogTitle: string;
+    nameLabel: string;
+    namePlaceholder: string;
+    packLabel: string;
+    packPlaceholder: string;
+    noKnowledgePacks: string;
+    created: string;
+    createFailedPrefix: string;
+    deleted: string;
+    deleteFailedPrefix: string;
   };
 };
 
@@ -1032,6 +1098,11 @@ export const dictionaries: Record<Language, Dictionary> = {
       rerankerRrf: "RRF (light, no extra model)",
       rerankerCrossEncoder: "Cross-encoder",
       rerankerNone: "None",
+      graphProjectionIdsLabel: "Ontology graph partitions",
+      graphProjectionIdsHint:
+        "Limit supersearch to specific Graphiti partitions. Leave all unchecked to search the whole workspace graph (legacy).",
+      graphProjectionIdsWorkspaceDefault: "Whole workspace (default)",
+      graphProjectionBadge: "{count} partition(s)",
     },
     chat: {
       useRetrieval: "Use retrieval (RAG)",
@@ -1362,6 +1433,14 @@ export const dictionaries: Record<Language, Dictionary> = {
       zoomOut: "Zoom out",
       fitView: "Fit",
       graphitiIndexed: "Graphiti indexed",
+      draftEditsBadge: "Draft edits",
+      deleteRelation: "Remove relation",
+      deleteRelationConfirm:
+        "Remove this relationship from the graph? It stays as a draft until you publish the ontology.",
+      deleteNode: "Remove node",
+      deleteNodeConfirm:
+        "Remove this node and its draft connections? Publish later to persist changes to storage.",
+      removeFromGraphHint: "Removes from the workspace draft; publish from Ontology builds when ready.",
     },
     evidenceUi: {
       title: "Evidence",
@@ -1396,13 +1475,13 @@ export const dictionaries: Record<Language, Dictionary> = {
     agentManagement: {
       title: "Agent Management",
       description:
-        "Manage profiles, capability presets, tool policy, knowledge packs, and evidence scope from a single control plane.",
-      profilesTitle: "Profiles",
-      profilesDescription: "Create profiles here. Provider credentials belong in `/settings`.",
+        "Built-in workspace agents sync from the server — configure presets, tools, and knowledge packs instead of creating new identities.",
+      profilesTitle: "Agents",
+      profilesDescription:
+        "Each workspace receives orchestrator, graph, and docs agents automatically. Tune them here; provider credentials live in `/settings`.",
       newProfilePlaceholder: "New profile name",
       create: "Create",
-      noProfiles:
-        "No profiles yet. Create one to define capability preset, tool policy, and knowledge scope.",
+      noProfiles: "Agents are not loaded — check workspace or try again shortly.",
       selectProfileHint: "Select a profile to edit identity, capability, knowledge scope, and evidence policy.",
       defaultBadge: "Default",
       noDescription: "No description",
@@ -1464,6 +1543,42 @@ export const dictionaries: Record<Language, Dictionary> = {
       saveProfile: "Save profile",
       toastKnowledgePackSaved: "Knowledge pack saved.",
       toastKnowledgePackSaveFailedPrefix: "Knowledge pack save failed:",
+      builtinBadge: "Built-in",
+      builtinRoleOrchestrator: "Workspace orchestrator (chat)",
+      builtinRoleGraph: "Graph specialist (ReAct)",
+      builtinRoleDocs: "Docs specialist (ReAct)",
+      setDefaultChatOnlyHint: "Workspace default applies to orchestrator/chat; specialists stay as subgraph agents.",
+      runtimeConfigTitle: "Profile & inference",
+      runtimeOrchestratorHint:
+        "Chat orchestrator: delegates to the graph and docs specialists (one or both). Retrieval runs inside those subgraphs—configure them under their own agents.",
+      runtimeGraphHint:
+        "Graph specialist: preset for ontology / graph retrieval (Graphiti, supersearch.graph). SKILLS/memory are packaged with the role.",
+      runtimeDocsHint:
+        "Docs specialist: vector / RAG tools (dense retrieval, supersearch.docs) over knowledge packs you attach below.",
+      graphStoreTitle: "Graph retrieval",
+      graphStoreDescription: "Assign ontology / graph search backends for this subgraph agent.",
+      vecStoreTitle: "Vector retrieval",
+      vecStoreDescription: "Assign RAG / embedding search backends for grounded document lookup.",
+      inferenceModelLabel: "Inference model",
+      inferenceModelHint:
+        "Same workspace model catalog as Settings and chat. Leave unset to follow the conversation model at runtime.",
+      inferenceModelClear: "Clear override",
+      temperatureLabel: "Temperature",
+      maxTokensLabel: "Max tokens",
+      reasoningLabel: "Reasoning depth",
+      reasoningNone: "Default / unspecified",
+      reasoningLow: "Low",
+      reasoningMedium: "Medium",
+      reasoningHigh: "High",
+      orchestrationTitle: "Orchestration",
+      orchestrationDescription: "Workspace chat routing: ReAct invokes graph and docs specialists as needed.",
+      orchestrationModeLabel: "Planner mode",
+      orchestrationMaxIterationsLabel: "Max iterations",
+      orchestrationEnabledLabel: "Enable orchestrator loop",
+      orchestrationBuiltinOrchestratorHint:
+        "This profile only exposes delegate tools into the graph and docs specialists; choose react_two_agent to run the two-subgraph loop.",
+      orchestrationReactHint:
+        "ReAct maps DocsAgent to dense / supersearch.docs and GraphAgent to graph / supersearch.graph backends configured on their profiles.",
     },
     ontologyBuild: {
       notFound: "Build not found.",
@@ -1519,6 +1634,34 @@ export const dictionaries: Record<Language, Dictionary> = {
       chunkingSummaryHeading: "Document chunking",
       technicalMetadata: "Raw step metadata (JSON)",
       promptVersionLabel: "Prompt version",
+      publishProjectionLabel: "Publish target partition",
+      publishProjectionHint:
+        "Choose a graph partition tied to a knowledge pack, or workspace-wide (legacy behavior).",
+      publishProjectionWorkspaceDefault: "Workspace-wide (default)",
+    },
+    graphProjections: {
+      title: "Graph partitions",
+      description:
+        "Each partition is a separate Graphiti scope (like a RAG collection). Create one per knowledge pack you want to publish or search in isolation.",
+      create: "New partition",
+      empty: "No graph partitions yet.",
+      loadFailed: "Failed to load graph partitions.",
+      columnName: "Name",
+      columnPack: "Knowledge pack",
+      columnGroupId: "group_id",
+      columnCreated: "Created",
+      deleteAria: "Delete partition",
+      deleteConfirm: 'Delete graph partition "{name}"?',
+      dialogTitle: "Create graph partition",
+      nameLabel: "Display name",
+      namePlaceholder: "e.g. Ops domain graph",
+      packLabel: "Knowledge pack",
+      packPlaceholder: "Select a pack",
+      noKnowledgePacks: "Create a knowledge pack first (Agents → profile or documents flow).",
+      created: "Graph partition created.",
+      createFailedPrefix: "Could not create partition:",
+      deleted: "Graph partition removed.",
+      deleteFailedPrefix: "Could not delete partition:",
     },
     ontologyUi: {
       unknownError: "Unknown error",
@@ -1686,7 +1829,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       },
       sections: {
         recentDocuments: "Tài liệu gần đây",
-        ontologyBuilds: "Các build ontology",
+        ontologyBuilds: "Ontology",
         publishedGraph: "Đồ thị đã xuất bản",
         recentConversations: "Cuộc hội thoại gần đây",
         viewAll: "Xem tất cả",
@@ -1872,6 +2015,11 @@ export const dictionaries: Record<Language, Dictionary> = {
       rerankerRrf: "RRF (nhẹ, không cần model phụ)",
       rerankerCrossEncoder: "Cross-encoder",
       rerankerNone: "Không dùng",
+      graphProjectionIdsLabel: "Phân vùng graph ontology",
+      graphProjectionIdsHint:
+        "Giới hạn supersearch vào các partition Graphiti cụ thể. Bỏ chọn hết để tìm trên toàn workspace (hành vi cũ).",
+      graphProjectionIdsWorkspaceDefault: "Cả workspace (mặc định)",
+      graphProjectionBadge: "{count} partition",
     },
     chat: {
       useRetrieval: "Sử dụng truy xuất (RAG)",
@@ -2202,17 +2350,25 @@ export const dictionaries: Record<Language, Dictionary> = {
       zoomOut: "Thu nhỏ",
       fitView: "Vừa khung",
       graphitiIndexed: "Đã index Graphiti",
+      draftEditsBadge: "Bản nháp",
+      deleteRelation: "Xóa quan hệ",
+      deleteRelationConfirm:
+        "Xóa quan hệ này khỏi đồ thị? Thay đổi chỉ được lưu vào bản nháp cho đến khi xuất bản ontology.",
+      deleteNode: "Xóa nút",
+      deleteNodeConfirm:
+        "Xóa nút này và các kết nối nháp liên quan? Xuất bản sau để ghi vào storage.",
+      removeFromGraphHint: "Áp dụng vào bản nháp workspace; xuất bản trong trang Ontology builds khi sẵn sàng.",
     },
     agentManagement: {
       title: "Quản lý Agent",
       description:
-        "Quản lý hồ sơ, preset năng lực, chính sách công cụ, knowledge pack và phạm vi bằng chứng.",
-      profilesTitle: "Hồ sơ",
-      profilesDescription: "Tạo hồ sơ tại đây. Thông tin provider nằm trong `/settings`.",
+        "Các agent workspace có sẵn được đồng bộ từ server — cấu hình preset, công cụ và knowledge pack thay vì tạo hồ sơ mới.",
+      profilesTitle: "Agent",
+      profilesDescription:
+        "Mỗi workspace được tạo sẵn các agent orchestrator, graph và docs. Chỉnh tại đây; provider nằm trong `/settings`.",
       newProfilePlaceholder: "Tên hồ sơ mới",
       create: "Tạo",
-      noProfiles:
-        "Chưa có hồ sơ. Tạo một hồ sơ để định preset, chính sách công cụ và phạm vi tri thức.",
+      noProfiles: "Chưa tải được danh sách agent — kiểm tra workspace hoặc thử lại.",
       selectProfileHint: "Chọn hồ sơ để chỉnh danh tính, năng lực, knowledge và chính sách bằng chứng.",
       defaultBadge: "Mặc định",
       noDescription: "Không có mô tả",
@@ -2274,6 +2430,44 @@ export const dictionaries: Record<Language, Dictionary> = {
       saveProfile: "Lưu hồ sơ",
       toastKnowledgePackSaved: "Đã lưu knowledge pack.",
       toastKnowledgePackSaveFailedPrefix: "Lưu knowledge pack thất bại:",
+      builtinBadge: "Có sẵn",
+      builtinRoleOrchestrator: "Orchestrator workspace (chat)",
+      builtinRoleGraph: "Chuyên gia graph (ReAct)",
+      builtinRoleDocs: "Chuyên gia tài liệu (ReAct)",
+      setDefaultChatOnlyHint:
+        "Agent mặc định cho workspace chỉ áp dụng cho orchestrator/chat; các agent chuyên môn dùng trong ReAct.",
+      runtimeConfigTitle: "Hồ sơ & inference",
+      runtimeOrchestratorHint:
+        "Orchestrator chat: chỉ ủy quyền cho graph và docs (gọi 1 hoặc 2 chuyên gia). Truy vấn tri thức cấu hình riêng ở mỗi agent con.",
+      runtimeGraphHint:
+        "Graph: preset truy ontology / đồ thị (Graphiti, supersearch.graph); SKILLS/memory đi kèm vai trò.",
+      runtimeDocsHint:
+        "Docs: RAG vector (dense/supersearch.docs) trên các knowledge pack bạn chọn phía dưới.",
+      graphStoreTitle: "Truy graph",
+      graphStoreDescription: "Gán backend ontology / đồ thị cho agent chuyên gia graph.",
+      vecStoreTitle: "Truy vector (RAG)",
+      vecStoreDescription: "Gán backend nhúng / tài liệu dense cho retrieval.",
+      inferenceModelLabel: "Model inference",
+      inferenceModelHint:
+        "Danh sách model giống Settings và chat. Để trống để dùng model hội thoại lúc runtime.",
+      inferenceModelClear: "Bỏ ghi đè",
+      temperatureLabel: "Độ sáng tạo (temperature)",
+      maxTokensLabel: "Giới hạn tokens",
+      reasoningLabel: "Mức reasoning (Llama-style)",
+      reasoningNone: "Mặc định / không ghi đè",
+      reasoningLow: "Thấp",
+      reasoningMedium: "Trung bình",
+      reasoningHigh: "Cao",
+      orchestrationTitle: "Điều phối",
+      orchestrationDescription:
+        "Định tuyến chat workspace; ReAct gọi chuyên gia graph và docs khi cần.",
+      orchestrationModeLabel: "Chế độ planner",
+      orchestrationMaxIterationsLabel: "Số vòng tối đa",
+      orchestrationEnabledLabel: "Bật vòng orchestrator",
+      orchestrationBuiltinOrchestratorHint:
+        "Orchestrator chỉ có công cụ ủy quyền sang graph và docs; chọn react_two_agent để chạy vòng hai agent con.",
+      orchestrationReactHint:
+        "ReAct: DocsAgent dùng dense/supersearch.docs, GraphAgent dùng graph/supersearch.graph theo preset từng hồ sơ.",
     },
     ontologyBuild: {
       notFound: "Không tìm thấy build.",
@@ -2329,6 +2523,34 @@ export const dictionaries: Record<Language, Dictionary> = {
       chunkingSummaryHeading: "Chunk tài liệu",
       technicalMetadata: "Metadata bước (JSON)",
       promptVersionLabel: "Phiên bản prompt",
+      publishProjectionLabel: "Partition phát hành",
+      publishProjectionHint:
+        "Chọn partition graph gắn với knowledge pack, hoặc toàn workspace (hành vi cũ).",
+      publishProjectionWorkspaceDefault: "Toàn workspace (mặc định)",
+    },
+    graphProjections: {
+      title: "Phân vùng graph",
+      description:
+        "Mỗi partition là một scope Graphiti riêng (như collection RAG). Tạo một partition cho mỗi knowledge pack cần publish hoặc tìm tách biệt.",
+      create: "Partition mới",
+      empty: "Chưa có phân vùng graph nào.",
+      loadFailed: "Không tải được phân vùng graph.",
+      columnName: "Tên",
+      columnPack: "Knowledge pack",
+      columnGroupId: "group_id",
+      columnCreated: "Tạo lúc",
+      deleteAria: "Xóa partition",
+      deleteConfirm: 'Xóa phân vùng graph "{name}"?',
+      dialogTitle: "Tạo phân vùng graph",
+      nameLabel: "Tên hiển thị",
+      namePlaceholder: "vd. Graph miền Ops",
+      packLabel: "Knowledge pack",
+      packPlaceholder: "Chọn pack",
+      noKnowledgePacks: "Tạo knowledge pack trước (Agents → hồ sơ hoặc luồng documents).",
+      created: "Đã tạo phân vùng graph.",
+      createFailedPrefix: "Không thể tạo partition:",
+      deleted: "Đã xóa phân vùng graph.",
+      deleteFailedPrefix: "Không thể xóa partition:",
     },
     ontologyUi: {
       unknownError: "Lỗi không xác định",

@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 MAX_CHUNK_EPISODES = 5000
 
 
+def _graphiti_group_id(snapshot: PublishedOntologySnapshot) -> str:
+    return snapshot.graphiti_group_id or snapshot.workspace_id
+
+
 @dataclass(slots=True)
 class GraphitiDocumentChunk:
     chunk_id: str
@@ -100,7 +104,7 @@ class OntologyGraphPublisher:
                     relation_type=relation.relation_type,
                     fact=fact,
                     valid_at=relation.created_at,
-                    workspace_id=snapshot.workspace_id,
+                    group_id=_graphiti_group_id(snapshot),
                     source_entity_type=src.entity_type,
                     target_entity_type=tgt.entity_type,
                 )
@@ -119,7 +123,7 @@ class OntologyGraphPublisher:
                     name=entity.name,
                     entity_type=entity.entity_type,
                     aliases=list(entity.aliases or ()),
-                    workspace_id=snapshot.workspace_id,
+                    group_id=_graphiti_group_id(snapshot),
                     source_document_id=entity.source_document_id,
                 )
                 any_ok = True
@@ -135,7 +139,7 @@ class OntologyGraphPublisher:
                     name=f"ontology-doc-{chunk.document_id}",
                     episode_body=body[:120_000],
                     source_description=chunk.document_title or chunk.document_id,
-                    workspace_id=snapshot.workspace_id,
+                    group_id=_graphiti_group_id(snapshot),
                     reference_time=chunk.created_at,
                 )
                 any_ok = True

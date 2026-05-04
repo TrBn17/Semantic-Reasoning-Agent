@@ -7,6 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from semantic_reasoning_agent.core.config import Settings, get_settings
+from semantic_reasoning_agent.domain.builtin_agent_roles import (
+    BUILTIN_AGENT_PROFILE_SEED,
+    BUILTIN_AGENT_ROLES,
+    builtin_agent_profile_id,
+)
 from semantic_reasoning_agent.persistence.database import DatabaseManager
 from semantic_reasoning_agent.persistence.models import (
     AgentProfileORM,
@@ -24,6 +29,7 @@ from semantic_reasoning_agent.schemas.agent_profiles import (
     AgentProfileToolAssignment,
     AgentProfileUpdateRequest,
 )
+from semantic_reasoning_agent.schemas.llm_inference import llm_inference_from_policy
 from semantic_reasoning_agent.schemas.orchestration import (
     OrchestrationConfigSchema,
     default_orchestration_config,
@@ -55,15 +61,76 @@ class AgentProfileService:
         self._database_manager = database_manager
         self._settings = settings or get_settings()
 
+    @staticmethod
+    def _profile_sort_key(profile: AgentProfileORM) -> tuple:
+        order = {"orchestrator": 0, "graph": 1, "docs": 2}
+        role = profile.builtin_agent_role
+        if role in order:
+            return (0, order[role], profile.name.lower())
+        if role:
+            return (0, 99, profile.name.lower())
+        return (1, 0, profile.name.lower())
+
+    def _ensure_builtin_agent_profiles(self, session, workspace_id: str) -> None:
+        has_workspace_default = (
+            session.scalar(
+                select(AgentProfileORM.id).where(
+                    AgentProfileORM.workspace_id == workspace_id,
+                    AgentProfileORM.is_default.is_(True),
+                ).limit(1)
+            )
+            is not None
+        )
+        now = utc_now()
+        for role in BUILTIN_AGENT_ROLES:
+            pid = builtin_agent_profile_id(workspace_id, role)
+            existing = session.get(AgentProfileORM, pid)
+            seed = BUILTIN_AGENT_PROFILE_SEED[role]
+            merged_policy = self._merge_orchestration_config(
+                merge_policy_config(
+                    {},
+                    capability_preset="internal_qa",
+                    tool_policy=ToolPolicySchema(),
+                    knowledge_pack_ids=[],
+                    evidence_policy=EvidencePolicySchema(),
+                ),
+                None,
+            )
+            if existing is None:
+                is_def = role == "orchestrator" and not has_workspace_default
+                session.add(
+                    AgentProfileORM(
+                        id=pid,
+                        workspace_id=workspace_id,
+                        name=seed["name"],
+                        description=seed["description"],
+                        system_prompt="",
+                        allow_chat_model_override=True,
+                        is_default=is_def,
+                        status="active",
+                        builtin_agent_role=role,
+                        policy_config=merged_policy,
+                        tool_assignments=[],
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                if is_def:
+                    has_workspace_default = True
+            elif existing.builtin_agent_role != role:
+                existing.builtin_agent_role = role
+                existing.updated_at = now
+
     def list_profiles(self, workspace_id: str | None = None) -> list[AgentProfileResponse]:
         resolved_workspace_id = workspace_id or self._settings.default_workspace_id
         with self._database_manager.session() as session:
+            self._ensure_builtin_agent_profiles(session, resolved_workspace_id)
             profiles = session.scalars(
                 select(AgentProfileORM)
                 .options(selectinload(AgentProfileORM.task_models))
                 .where(AgentProfileORM.workspace_id == resolved_workspace_id)
             ).all()
-            profiles.sort(key=lambda item: (not item.is_default, item.name.lower()))
+            profiles.sort(key=self._profile_sort_key)
             return [self._to_schema(profile) for profile in profiles]
 
     def create_profile(self, payload: AgentProfileCreateRequest) -> AgentProfileResponse:
@@ -113,10 +180,28 @@ class AgentProfileService:
             )
             if profile is None:
                 raise AgentProfileNotFoundError(f"Agent profile '{profile_id}' was not found.")
+            self._ensure_builtin_agent_profiles(session, profile.workspace_id)
+            session.expire_all()
+            profile = session.scalar(
+                select(AgentProfileORM)
+                .options(selectinload(AgentProfileORM.task_models))
+                .where(AgentProfileORM.id == profile_id)
+            )
+            if profile is None:
+                raise AgentProfileNotFoundError(f"Agent profile '{profile_id}' was not found.")
             return self._to_schema(profile)
 
     def update_profile(self, profile_id: str, payload: AgentProfileUpdateRequest) -> AgentProfileResponse:
         with self._database_manager.session() as session:
+            profile = session.scalar(
+                select(AgentProfileORM)
+                .options(selectinload(AgentProfileORM.task_models))
+                .where(AgentProfileORM.id == profile_id)
+            )
+            if profile is None:
+                raise AgentProfileNotFoundError(f"Agent profile '{profile_id}' was not found.")
+            self._ensure_builtin_agent_profiles(session, profile.workspace_id)
+            session.expire_all()
             profile = session.scalar(
                 select(AgentProfileORM)
                 .options(selectinload(AgentProfileORM.task_models))
@@ -146,6 +231,10 @@ class AgentProfileService:
                 profile.policy_config,
                 payload.orchestration_config,
             )
+            if payload.llm_inference is not None:
+                merged_pol = dict(profile.policy_config or {})
+                merged_pol["llm_inference"] = payload.llm_inference.model_dump(exclude_none=True)
+                profile.policy_config = merged_pol
             effective_tool_policy = payload.tool_policy or ToolPolicySchema.model_validate(
                 (profile.policy_config or {}).get("tool_policy") or {}
             )
@@ -172,6 +261,11 @@ class AgentProfileService:
             profile = session.get(AgentProfileORM, profile_id)
             if profile is None:
                 raise AgentProfileNotFoundError(f"Agent profile '{profile_id}' was not found.")
+            self._ensure_builtin_agent_profiles(session, profile.workspace_id)
+            session.expire_all()
+            profile = session.get(AgentProfileORM, profile_id)
+            if profile is None:
+                raise AgentProfileNotFoundError(f"Agent profile '{profile_id}' was not found.")
             self._clear_default_profile(session, profile.workspace_id)
             profile.is_default = True
             profile.updated_at = utc_now()
@@ -180,6 +274,7 @@ class AgentProfileService:
     def get_default_profile(self, workspace_id: str | None = None) -> AgentProfileResponse | None:
         resolved_workspace_id = workspace_id or self._settings.default_workspace_id
         with self._database_manager.session() as session:
+            self._ensure_builtin_agent_profiles(session, resolved_workspace_id)
             profile = session.scalar(
                 select(AgentProfileORM)
                 .options(selectinload(AgentProfileORM.task_models))
@@ -244,7 +339,9 @@ class AgentProfileService:
             allow_chat_model_override=profile.allow_chat_model_override,
             is_default=profile.is_default,
             status=profile.status,
+            builtin_agent_role=profile.builtin_agent_role,
             capability_preset=capability.capability_preset,
+            llm_inference=llm_inference_from_policy(profile.policy_config),
             tool_policy=ToolPolicySchema.model_validate(capability.tool_policy),
             knowledge_pack_ids=list(capability.knowledge_pack_ids),
             evidence_policy=EvidencePolicySchema.model_validate(capability.evidence_policy),

@@ -46,23 +46,37 @@ export function ToolSlotBoard({
   tools,
   assignments,
   onChange,
+  visibleSlots,
 }: {
   tools: SearchToolConfigResponse[];
   assignments: AgentProfileToolAssignment[];
   onChange: (assignments: AgentProfileToolAssignment[]) => void;
+  /** When set, only these slots (graph vs vector backends) are configurable. */
+  visibleSlots?: SearchAssignableToolSlot[];
 }) {
   const [search, setSearch] = useState("");
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
+  const slotDefs = useMemo(() => {
+    if (!visibleSlots?.length) return SLOT_IDS;
+    const allow = new Set(visibleSlots);
+    return SLOT_IDS.filter((s) => allow.has(s.slot));
+  }, [visibleSlots]);
+
   const filteredTools = useMemo(() => {
+    let list = tools;
+    if (visibleSlots?.length) {
+      const allow = new Set(visibleSlots);
+      list = tools.filter((tool) => tool.assignable_slots.some((s) => allow.has(s)));
+    }
     const query = search.trim().toLowerCase();
-    return tools.filter((tool) => {
+    return list.filter((tool) => {
       if (!query) return true;
       return `${tool.name} ${tool.description} ${tool.tool_name} ${tool.embedding_model}`
         .toLowerCase()
         .includes(query);
     });
-  }, [search, tools]);
+  }, [search, tools, visibleSlots]);
 
   const assignmentBySlot = useMemo(() => {
     const mapping = new Map<SearchAssignableToolSlot, AgentProfileToolAssignment>();
@@ -103,7 +117,7 @@ export function ToolSlotBoard({
       <div className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="grid gap-4 md:grid-cols-2">
-            {SLOT_IDS.map((slot) => {
+            {slotDefs.map((slot) => {
               const assignment = assignmentBySlot.get(slot.slot) ?? null;
               const tool = assignment?.config_id ? toolById.get(assignment.config_id) ?? null : null;
               return (

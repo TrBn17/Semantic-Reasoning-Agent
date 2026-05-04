@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Loader2, Play, Plus, Trash2 } from "lucide-react";
 
@@ -31,6 +31,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { listGraphProjections } from "@/shared/api/ontology";
 import {
   createSearchTool,
   deleteSearchTool,
@@ -76,28 +77,6 @@ export function SearchToolsView() {
 
 function SearchToolSection({ toolType }: { toolType: SearchToolType }) {
   const { t } = useI18n();
-  useEffect(() => {
-    // #region agent log
-    fetch("http://127.0.0.1:7630/ingest/5124439d-c722-43d8-a824-62b24c1412e1", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5bfbef" },
-      body: JSON.stringify({
-        sessionId: "5bfbef",
-        runId: "baseline",
-        hypothesisId: "H1",
-        location: "search-tools-view.tsx:SearchToolSection",
-        message: "Section localization snapshot",
-        data: {
-          toolType,
-          docsHint: t.searchToolsPage.docsHint,
-          graphHint: t.searchToolsPage.graphHint,
-          loadFailedPrefix: t.searchToolsPage.loadFailedPrefix,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [toolType, t]);
   const query = useQuery({
     queryKey: queryKeys.searchTools.list(null, toolType),
     queryFn: () => listSearchTools({ toolType }),
@@ -139,11 +118,21 @@ function SearchToolSection({ toolType }: { toolType: SearchToolType }) {
   );
 }
 
+function ontologyProjectionIdsFromMetadata(meta: Record<string, unknown> | undefined): string[] {
+  const raw = meta?.ontology_graph_projection_ids;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is string => typeof x === "string");
+}
+
 function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
   const { t } = useI18n();
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<SearchToolRunResponse | null>(null);
+  const ontologyPartitionCount = useMemo(
+    () => ontologyProjectionIdsFromMetadata(config.config_metadata).length,
+    [config.config_metadata],
+  );
 
   const runMutation = useMutation({
     mutationFn: () => runSearchTool(config.id, { query }),
@@ -208,6 +197,14 @@ function SearchToolCard({ config }: { config: SearchToolConfigResponse }) {
                   search_type={config.graph_search_type}
                 </span>
                 <span className="rounded bg-muted px-1.5 py-0.5">reranker={config.reranker}</span>
+                {ontologyPartitionCount > 0 ? (
+                  <span className="rounded bg-muted px-1.5 py-0.5">
+                    {t.searchToolsPage.graphProjectionBadge.replace(
+                      "{count}",
+                      String(ontologyPartitionCount),
+                    )}
+                  </span>
+                ) : null}
               </>
             )}
           </div>
@@ -351,31 +348,6 @@ function emptyDraft(toolType: SearchToolType): DraftState {
 function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
   const { t } = useI18n();
   const workspaceId = useActiveWorkspaceId();
-  useEffect(() => {
-    // #region agent log
-    fetch("http://127.0.0.1:7630/ingest/5124439d-c722-43d8-a824-62b24c1412e1", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5bfbef" },
-      body: JSON.stringify({
-        sessionId: "5bfbef",
-        runId: "baseline",
-        hypothesisId: "H2",
-        location: "search-tools-view.tsx:CreateToolDialog",
-        message: "Dialog labels snapshot",
-        data: {
-          toolType,
-          newPrefix: t.searchToolsPage.newPrefix,
-          searchToolSuffix: t.searchToolsPage.searchToolSuffix,
-          embeddingProviderHint: t.searchToolsPage.embeddingProviderHint,
-          embeddingModelHint: t.searchToolsPage.embeddingModelHint,
-          hardcodedProviderPlaceholder: "cloudflare",
-          hardcodedModelPlaceholder: "@cf/baai/bge-base-en-v1.5",
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [toolType, t]);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<DraftState>(() => emptyDraft(toolType));
@@ -504,7 +476,7 @@ function CreateToolDialog({ toolType }: { toolType: SearchToolType }) {
               documents={documentsQuery.data ?? []}
             />
           ) : (
-            <GraphFields draft={draft} setDraft={setDraft} />
+            <GraphFields draft={draft} setDraft={setDraft} projectionsEnabled={open} />
           )}
         </div>
 
@@ -540,29 +512,6 @@ function DocsFields({
   documents: DocumentResponse[];
 }) {
   const { t } = useI18n();
-  useEffect(() => {
-    // #region agent log
-    fetch("http://127.0.0.1:7630/ingest/5124439d-c722-43d8-a824-62b24c1412e1", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "5bfbef" },
-      body: JSON.stringify({
-        sessionId: "5bfbef",
-        runId: "baseline",
-        hypothesisId: "H3",
-        location: "search-tools-view.tsx:DocsFields",
-        message: "Docs fields labels snapshot",
-        data: {
-          bm25Hint: t.searchToolsPage.bm25Hint,
-          enableBm25: t.searchToolsPage.enableBm25,
-          semanticOnly: t.searchToolsPage.semanticOnly,
-          bm25Only: t.searchToolsPage.bm25Only,
-          hybridRrf: t.searchToolsPage.hybridRrf,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [t]);
   const docIds = useMemo(() => new Set(draft.document_ids ?? []), [draft.document_ids]);
 
   return (
@@ -675,11 +624,24 @@ function DocsFields({
 function GraphFields({
   draft,
   setDraft,
+  projectionsEnabled,
 }: {
   draft: DraftState;
   setDraft: React.Dispatch<React.SetStateAction<DraftState>>;
+  projectionsEnabled: boolean;
 }) {
   const { t } = useI18n();
+  const workspaceId = useActiveWorkspaceId();
+  const projectionsQuery = useQuery({
+    queryKey: queryKeys.ontology.graphProjections(workspaceId),
+    queryFn: () => listGraphProjections(workspaceId ?? undefined),
+    enabled: projectionsEnabled && !!workspaceId,
+  });
+  const selectedProjections = useMemo(
+    () => new Set(ontologyProjectionIdsFromMetadata(draft.config_metadata)),
+    [draft.config_metadata],
+  );
+
   return (
     <>
       <Field label={t.searchToolsPage.ontologyScope}>
@@ -756,6 +718,53 @@ function GraphFields({
             <SelectItem value="none">{t.searchToolsPage.rerankerNone}</SelectItem>
           </SelectContent>
         </Select>
+      </Field>
+
+      <Field
+        label={t.searchToolsPage.graphProjectionIdsLabel}
+        hint={t.searchToolsPage.graphProjectionIdsHint}
+      >
+        {projectionsQuery.isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : (projectionsQuery.data ?? []).length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t.graphProjections.empty}</p>
+        ) : (
+          <div className="max-h-44 space-y-2 overflow-y-auto rounded-md border p-2">
+            <p className="text-[11px] text-muted-foreground">{t.searchToolsPage.graphProjectionIdsWorkspaceDefault}</p>
+            {(projectionsQuery.data ?? []).map((p) => {
+              const checked = selectedProjections.has(p.id);
+              return (
+                <label
+                  key={p.id}
+                  className="flex cursor-pointer items-start gap-2 border-t pt-2 text-xs first:border-t-0 first:pt-0"
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={checked}
+                    onChange={() => {
+                      setDraft((d) => {
+                        const base = { ...(d.config_metadata ?? {}) };
+                        const set = new Set(ontologyProjectionIdsFromMetadata(base));
+                        if (set.has(p.id)) set.delete(p.id);
+                        else set.add(p.id);
+                        if (set.size === 0) delete base.ontology_graph_projection_ids;
+                        else base.ontology_graph_projection_ids = [...set];
+                        return { ...d, config_metadata: base };
+                      });
+                    }}
+                  />
+                  <span className="min-w-0">
+                    <span className="font-medium">{p.name}</span>
+                    <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground break-all">
+                      {p.graphiti_group_id}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
       </Field>
     </>
   );

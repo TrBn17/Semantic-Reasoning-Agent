@@ -11,7 +11,7 @@ from semantic_reasoning_agent.infrastructure.graphiti.graphiti_gateway import (
     RerankerMode,
     SearchType,
 )
-from semantic_reasoning_agent.infrastructure.graphiti.graphiti_mapper import map_edge_to_evidence, map_node_to_evidence
+from semantic_reasoning_agent.infrastructure.graphiti.graphiti_evidence import graphiti_matches_to_evidence
 from semantic_reasoning_agent.tools.base import Tool
 
 
@@ -100,33 +100,18 @@ class GraphitiSearchTool(Tool):
 
         matches = self._gateway.search(
             query=query,
-            workspace_id=envelope.workspace_id,
+            group_ids=[envelope.workspace_id],
             limit=max_results,
             search_type=search_type,
             center_node_uuid=center_node_uuid,
             valid_at=None,
             reranker=reranker,
         )
-        evidence = []
-        for match in matches:
-            if match.kind == "edge":
-                evidence.append(
-                    map_edge_to_evidence(
-                        match.item,
-                        workspace_id=envelope.workspace_id,
-                        tool_call_id=envelope.call_id,
-                        score=match.score,
-                    )
-                )
-            else:
-                evidence.append(
-                    map_node_to_evidence(
-                        match.item,
-                        workspace_id=envelope.workspace_id,
-                        tool_call_id=envelope.call_id,
-                        score=match.score,
-                    )
-                )
+        evidence = graphiti_matches_to_evidence(
+            matches,
+            workspace_id=envelope.workspace_id,
+            tool_call_id=envelope.call_id,
+        )
         return ToolResult(
             call_id=envelope.call_id,
             tool_name=self.tool_name,

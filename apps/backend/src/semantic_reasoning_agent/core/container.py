@@ -15,11 +15,15 @@ from semantic_reasoning_agent.infrastructure.storage import build_object_store
 from semantic_reasoning_agent.persistence.database import DatabaseManager, get_database_manager
 from semantic_reasoning_agent.persistence.repositories.ontology_repo import OntologyRepository
 from semantic_reasoning_agent.services.agent_profile_service import AgentProfileService
+from semantic_reasoning_agent.services.builtin_agent_context_service import BuiltinAgentContextService
 from semantic_reasoning_agent.services.agent_capability_service import AgentCapabilityService
 from semantic_reasoning_agent.services.chat_stream_service import ChatStreamService
 from semantic_reasoning_agent.services.conversation_service import ConversationService
 from semantic_reasoning_agent.services.knowledge_pack_service import KnowledgePackService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
+from semantic_reasoning_agent.services.ontology_graph_projection_service import (
+    OntologyGraphProjectionService,
+)
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.qdrant_collection_service import QdrantCollectionService
@@ -42,6 +46,7 @@ class AppContainer:
     secret_service: SecretService
     agent_profile_service: AgentProfileService
     knowledge_pack_service: KnowledgePackService
+    ontology_graph_projection_service: OntologyGraphProjectionService
     agent_capability_service: AgentCapabilityService
     model_config_service: ModelConfigService
     provider_models_service: ProviderModelsService
@@ -60,6 +65,7 @@ class AppContainer:
     chat_stream_service: ChatStreamService
     runtime_audit_service: RuntimeAuditService
     search_tool_service: SearchToolConfigService
+    builtin_agent_context_service: BuiltinAgentContextService
 
 
 @lru_cache
@@ -94,6 +100,10 @@ def get_app_container() -> AppContainer:
         # During cold-start test bootstrap, schema may not exist yet.
         adapter_registry.refresh(build_adapter_registry(settings).adapters)
     graphiti_gateway = build_graphiti_gateway(settings)
+    ontology_graph_projection_service = OntologyGraphProjectionService(
+        database_manager,
+        graphiti_gateway,
+    )
     runtime_audit_service = RuntimeAuditService(database_manager)
     markdown_converter = MarkdownConverterService()
     markdown_chunker = MarkdownChunker()
@@ -136,6 +146,7 @@ def get_app_container() -> AppContainer:
             schema_registry=schema_registry,
             adapter_registry=adapter_registry,
         ),
+        ontology_graph_projection_service=ontology_graph_projection_service,
         object_store=object_store,
     )
     search_tool_service = SearchToolConfigService(
@@ -144,6 +155,7 @@ def get_app_container() -> AppContainer:
         model_config_service=model_config_service,
         retrieval_service=retrieval_service,
         graphiti_gateway=graphiti_gateway,
+        ontology_graph_projection_service=ontology_graph_projection_service,
     )
     tool_registry = build_tool_registry(
         retrieval_service=retrieval_service,
@@ -152,6 +164,7 @@ def get_app_container() -> AppContainer:
         search_tool_service=search_tool_service,
     )
     tool_runtime = ToolRuntime(tool_registry)
+    builtin_agent_context_service = BuiltinAgentContextService(database_manager)
     agent_capability_service = AgentCapabilityService(tool_registry)
     task_runtime_service = TaskRuntimeService(
         settings=settings,
@@ -162,6 +175,9 @@ def get_app_container() -> AppContainer:
         agent_profile_service=agent_profile_service,
         knowledge_pack_service=knowledge_pack_service,
         runtime_audit_service=runtime_audit_service,
+        search_tool_service=search_tool_service,
+        builtin_agent_context_service=builtin_agent_context_service,
+        graphiti_gateway=graphiti_gateway,
     )
     workflow_registry_service = WorkflowRegistryService()
     chat_stream_service = ChatStreamService(
@@ -175,6 +191,7 @@ def get_app_container() -> AppContainer:
         secret_service=secret_service,
         agent_profile_service=agent_profile_service,
         knowledge_pack_service=knowledge_pack_service,
+        ontology_graph_projection_service=ontology_graph_projection_service,
         agent_capability_service=agent_capability_service,
         model_config_service=model_config_service,
         provider_models_service=provider_models_service,
@@ -193,4 +210,5 @@ def get_app_container() -> AppContainer:
         chat_stream_service=chat_stream_service,
         runtime_audit_service=runtime_audit_service,
         search_tool_service=search_tool_service,
+        builtin_agent_context_service=builtin_agent_context_service,
     )

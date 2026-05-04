@@ -19,3 +19,5 @@ class PublishedOntologySnapshot:
     relation_type_definitions: list[OntologyRelationTypeDefinitionResponse]
     entities: list[OntologyEntityResponse]
     relations: list[OntologyRelationResponse]
+    #: When set, Graphiti ``group_id`` (partition) for this publish; otherwise legacy ``workspace_id``.
+    graphiti_group_id: str | None = None

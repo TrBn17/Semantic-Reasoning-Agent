@@ -3,6 +3,9 @@
 #   docker compose up -d
 #
 # URLs: API http://localhost:8000 | Frontend http://localhost:3000
+#
+# Logs: `docker compose logs -f api` prints only FastAPI/Uvicorn (HTTP access lines).
+# `docker compose logs -f` without a service name merges EVERY service — worker/Celery is noisy.
 
 name: semantic-reasoning
 
@@ -134,6 +137,10 @@ services:
     env_file: *backend-env-file
     environment:
       <<: *backend-docker-overrides
+      PYTHONUNBUFFERED: "1"
+      # Override any .env disabling access logs (Compose env wins over env_file).
+      UVICORN_ACCESS_LOG: "true"
+      UVICORN_LOG_LEVEL: info
       UVICORN_RELOAD: ${UVICORN_RELOAD:-false}
     depends_on:
       postgres:
@@ -148,16 +155,7 @@ services:
         condition: service_healthy
       createbuckets:
         condition: service_completed_successfully
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\"",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 120s
+    # No HTTP healthcheck — polling /health spammed Uvicorn access logs. Use `curl http://localhost:8000/health` manually if needed.
 
   worker:
     build:
@@ -186,7 +184,7 @@ services:
       createbuckets:
         condition: service_completed_successfully
       api:
-        condition: service_healthy
+        condition: service_started
 
   frontend:
     build:
@@ -203,7 +201,7 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
 
 volumes:
   postgres_data:

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -174,6 +174,30 @@ class OntologyRelationORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     version: Mapped[OntologyVersionORM] = relationship(back_populates="relations")
+
+
+class OntologyGraphProjectionORM(Base):
+    """Queryable Graphiti partition: one projection per scoped graph under a knowledge pack."""
+
+    __tablename__ = "ontology_graph_projections"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "knowledge_pack_id",
+            "name",
+            name="uq_ontology_graph_projections_ws_pack_name",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    knowledge_pack_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("knowledge_packs.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class OntologyGraphDraftORM(Base):

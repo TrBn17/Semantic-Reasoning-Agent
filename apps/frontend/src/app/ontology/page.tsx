@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { BuildTable } from "@/components/ontology/build-table";
+import { GraphProjectionsCard } from "@/components/ontology/graph-projections-card";
 import { GraphStats } from "@/components/ontology/graph-stats";
 import { NewBuildDialog } from "@/components/ontology/new-build-dialog";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ export default function OntologyPage() {
         </div>
       </div>
       <GraphStats />
+      <GraphProjectionsCard />
       <div>
         <h2 className="mb-2 text-sm font-semibold">{t.pages.ontologyHub.recentBuilds}</h2>
         <BuildTable limit={5} />

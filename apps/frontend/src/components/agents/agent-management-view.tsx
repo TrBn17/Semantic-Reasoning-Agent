@@ -25,10 +25,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { ModelCombobox } from "@/components/agents/model-combobox";
 import { ToolSlotBoard } from "@/components/agents/tool-slot-board";
 import { getCapabilityCatalog } from "@/shared/api/agent-capabilities";
 import {
-  createAgentProfile,
   listAgentProfiles,
   setDefaultAgentProfile,
   updateAgentProfile,
@@ -37,10 +37,13 @@ import { listDocuments } from "@/shared/api/documents";
 import { createKnowledgePack, listKnowledgePacks, updateKnowledgePack } from "@/shared/api/knowledge-packs";
 import { listSearchTools } from "@/shared/api/search-tools";
 import { useActiveWorkspaceId } from "@/shared/hooks/use-active-workspace-id";
+import { useSettingsModelsQuery } from "@/shared/hooks/use-settings-models-query";
+import type { Dictionary } from "@/shared/i18n/dictionaries";
 import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
 import { notify } from "@/shared/ui/notify";
+import { composeModelValue, parseModelValue } from "@/shared/utils/model-value";
 import type {
   AgentProfileResponse,
   EvidencePolicySchema,
@@ -48,11 +51,18 @@ import type {
   ToolPolicySchema,
   AgentProfileToolAssignment,
   OrchestrationMode,
+  LlmInferenceOverrides,
 } from "@/shared/api/types";
 
 type ProfileDraft = {
+  profileName: string;
   description: string;
   systemPrompt: string;
+  llmProvider: string;
+  llmModel: string;
+  llmTemperature: string;
+  llmMaxTokens: string;
+  llmReasoningEffort: string;
   capabilityPreset: string;
   toolPolicyMode: string;
   allowedTools: string[];
@@ -83,9 +93,16 @@ const DEFAULT_ALLOWED_SOURCES = [
 ];
 
 function makeProfileDraft(profile: AgentProfileResponse): ProfileDraft {
+  const inf = profile.llm_inference;
   return {
+    profileName: profile.name,
     description: profile.description,
     systemPrompt: profile.system_prompt,
+    llmProvider: inf?.provider?.trim() ?? "",
+    llmModel: inf?.model?.trim() ?? "",
+    llmTemperature: inf?.temperature != null && !Number.isNaN(inf.temperature) ? String(inf.temperature) : "",
+    llmMaxTokens: inf?.max_tokens != null && !Number.isNaN(inf.max_tokens) ? String(inf.max_tokens) : "",
+    llmReasoningEffort: inf?.reasoning_effort ?? "none",
     capabilityPreset: profile.capability_preset,
     toolPolicyMode: profile.tool_policy.mode,
     allowedTools: [...profile.tool_policy.allowed_tools],
@@ -135,6 +152,54 @@ function buildEvidencePolicy(draft: ProfileDraft): EvidencePolicySchema {
   };
 }
 
+function buildLlmInferencePayload(draft: ProfileDraft): LlmInferenceOverrides | null {
+  const hasAny =
+    draft.llmProvider.trim() ||
+    draft.llmModel.trim() ||
+    draft.llmTemperature.trim() ||
+    draft.llmMaxTokens.trim() ||
+    (draft.llmReasoningEffort && draft.llmReasoningEffort !== "none");
+  if (!hasAny) {
+    return null;
+  }
+  const temp = draft.llmTemperature.trim() ? Number(draft.llmTemperature) : null;
+  const maxTok = draft.llmMaxTokens.trim() ? Number(draft.llmMaxTokens) : null;
+  return {
+    provider: draft.llmProvider.trim() || null,
+    model: draft.llmModel.trim() || null,
+    temperature: temp != null && !Number.isNaN(temp) ? temp : null,
+    max_tokens: maxTok != null && !Number.isNaN(maxTok) ? maxTok : null,
+    reasoning_effort:
+      draft.llmReasoningEffort === "none" || !draft.llmReasoningEffort
+        ? null
+        : (draft.llmReasoningEffort as LlmInferenceOverrides["reasoning_effort"]),
+  };
+}
+
+function inferenceComboFromDraft(provider: string, model: string): string {
+  const p = provider.trim();
+  const m = model.trim();
+  if (!p || !m) return "";
+  return composeModelValue(p, m);
+}
+
+function builtinRoleSubtitle(
+  profile: AgentProfileResponse,
+  agentManagement: Dictionary["agentManagement"],
+): string | null {
+  if (!profile.builtin_agent_role) return null;
+  switch (profile.builtin_agent_role) {
+    case "orchestrator":
+      return agentManagement.builtinRoleOrchestrator;
+    case "graph":
+      return agentManagement.builtinRoleGraph;
+    case "docs":
+      return agentManagement.builtinRoleDocs;
+    default:
+      return profile.builtin_agent_role;
+  }
+}
+
 export function AgentManagementView() {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -161,8 +226,16 @@ export function AgentManagementView() {
     queryKey: ["documents", "list", workspaceId ?? null],
     queryFn: () => listDocuments(workspaceId),
   });
+  const { data: settingsModels = [] } = useSettingsModelsQuery();
+  const sortedSettingsModels = useMemo(
+    () =>
+      [...settingsModels].sort((a, b) => {
+        if (a.ready !== b.ready) return a.ready ? -1 : 1;
+        return a.label.localeCompare(b.label);
+      }),
+    [settingsModels],
+  );
 
-  const [newProfileName, setNewProfileName] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null);
   const [knowledgeDialogOpen, setKnowledgeDialogOpen] = useState(false);
@@ -173,10 +246,16 @@ export function AgentManagementView() {
     () => profiles?.find((item) => item.id === selectedProfileId) ?? null,
     [profiles, selectedProfileId],
   );
+  const canSetWorkspaceDefault = useMemo(() => {
+    if (!selectedProfile) return false;
+    const role = selectedProfile.builtin_agent_role;
+    return !role || role === "orchestrator";
+  }, [selectedProfile]);
   const selectedPreset = useMemo(
     () => capabilityCatalog?.presets.find((item) => item.preset === profileDraft?.capabilityPreset) ?? null,
     [capabilityCatalog?.presets, profileDraft?.capabilityPreset],
   );
+  const builtinRole = selectedProfile?.builtin_agent_role ?? null;
   const defaultToolAssignments = useMemo(
     () =>
       searchTools
@@ -210,50 +289,13 @@ export function AgentManagementView() {
       return hydrateProfileDraft(selected, defaultToolAssignments);
     });
   }, [defaultToolAssignments, preferredAgentProfileId, profiles, selectedProfileId, setPreferredAgentProfileId]);
-  const createProfileMutation = useMutation({
-    mutationFn: () => {
-      if (!workspaceId) {
-        throw new Error("Workspace is not resolved.");
-      }
-      return createAgentProfile({
-        workspace_id: workspaceId,
-        name: newProfileName.trim(),
-        description: "",
-        system_prompt: "",
-        allow_chat_model_override: true,
-        capability_preset: capabilityCatalog?.presets[0]?.preset ?? "internal_qa",
-        tool_policy: { mode: "preset", allowed_tools: [], blocked_tools: [] },
-        knowledge_pack_ids: [],
-        evidence_policy: {
-          allowed_sources: ["internal_chunk", "graph_node", "graph_edge"],
-          allow_model_only_fallback: true,
-        },
-        orchestration_config: {
-          version: "1.0",
-          mode: "legacy_static_plan",
-          orchestrator: { strategy: "legacy_static_plan", enabled: true },
-          stop_policy: { max_iterations: 4 },
-        },
-        task_models: [],
-        tool_assignments: defaultToolAssignments,
-      });
-    },
-    onSuccess: async (profile) => {
-      setNewProfileName("");
-      setSelectedProfileId(profile.id);
-      setPreferredAgentProfileId(profile.id);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
-      notify.success(t.agentsSettings.toasts.agentProfileCreated);
-    },
-    onError: (error) => notify.error(`${t.agentsSettings.toasts.createFailedPrefix} ${(error as Error).message}`, t.common.error),
-  });
-
   const saveProfileMutation = useMutation({
     mutationFn: () => {
       if (!selectedProfile || !profileDraft) {
         throw new Error("Select a profile first.");
       }
       return updateAgentProfile(selectedProfile.id, {
+        name: profileDraft.profileName.trim(),
         description: profileDraft.description,
         system_prompt: profileDraft.systemPrompt,
         allow_chat_model_override: true,
@@ -273,10 +315,12 @@ export function AgentManagementView() {
             max_iterations: profileDraft.orchestrationMaxIterations,
           },
         },
+        llm_inference: buildLlmInferencePayload(profileDraft),
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (updated) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.agents.profiles(workspaceId) });
+      setProfileDraft(hydrateProfileDraft(updated, defaultToolAssignments));
       notify.success(t.agentsSettings.toasts.profileSaved);
     },
     onError: (error) => notify.error(`${t.agentsSettings.toasts.profileSaveFailedPrefix} ${(error as Error).message}`, t.common.error),
@@ -352,50 +396,44 @@ export function AgentManagementView() {
             <CardDescription>{t.agentManagement.profilesDescription}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <Input
-                value={newProfileName}
-                onChange={(event) => setNewProfileName(event.target.value)}
-                placeholder={t.agentManagement.newProfilePlaceholder}
-              />
-              <Button
-                onClick={() => createProfileMutation.mutate()}
-                disabled={createProfileMutation.isPending || !newProfileName.trim()}
-              >
-                <Plus className="h-4 w-4" />
-                {t.agentManagement.create}
-              </Button>
-            </div>
-
             <div className="space-y-2">
-              {(profiles ?? []).map((profile) => (
-                <button
-                  key={profile.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedProfileId(profile.id);
-                    setPreferredAgentProfileId(profile.id);
-                    setProfileDraft(hydrateProfileDraft(profile, defaultToolAssignments));
-                  }}
-                  className={`w-full rounded-2xl border p-4 text-left transition ${
-                    selectedProfileId === profile.id
-                      ? "border-primary bg-primary/5 ring-1 ring-primary/30"
-                      : "hover:border-primary/40"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">{profile.name}</span>
-                    {profile.is_default && <Badge variant="success">{t.agentManagement.defaultBadge}</Badge>}
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {profile.description || t.agentManagement.noDescription}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span>{formatPresetLabel(profile.capability_preset)}</span>
-                    <span>{summarizeKnowledgeScope(profile.knowledge_pack_ids.length)}</span>
-                  </div>
-                </button>
-              ))}
+              {(profiles ?? []).map((profile) => {
+                const roleSubtitle = builtinRoleSubtitle(profile, t.agentManagement);
+                return (
+                  <button
+                    key={profile.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedProfileId(profile.id);
+                      setPreferredAgentProfileId(profile.id);
+                      setProfileDraft(hydrateProfileDraft(profile, defaultToolAssignments));
+                    }}
+                    className={`w-full rounded-2xl border p-4 text-left transition ${
+                      selectedProfileId === profile.id
+                        ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                        : "hover:border-primary/40"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold">{profile.name}</span>
+                      {profile.builtin_agent_role ? (
+                        <Badge variant="secondary">{t.agentManagement.builtinBadge}</Badge>
+                      ) : null}
+                      {profile.is_default && <Badge variant="success">{t.agentManagement.defaultBadge}</Badge>}
+                    </div>
+                    {roleSubtitle ? (
+                      <p className="mt-1 text-xs text-muted-foreground">{roleSubtitle}</p>
+                    ) : null}
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {profile.description || t.agentManagement.noDescription}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span>{formatPresetLabel(profile.capability_preset)}</span>
+                      <span>{summarizeKnowledgeScope(profile.knowledge_pack_ids.length)}</span>
+                    </div>
+                  </button>
+                );
+              })}
               {(profiles ?? []).length === 0 && (
                 <div className="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
                   {t.agentManagement.noProfiles}
@@ -413,14 +451,31 @@ export function AgentManagementView() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>{t.agentManagement.identityTitle}</CardTitle>
-                <CardDescription>{t.agentManagement.identityDescription}</CardDescription>
+                <CardTitle>
+                  {builtinRole ? t.agentManagement.runtimeConfigTitle : t.agentManagement.identityTitle}
+                </CardTitle>
+                <CardDescription>
+                  {builtinRole === "orchestrator"
+                    ? t.agentManagement.runtimeOrchestratorHint
+                    : builtinRole === "graph"
+                      ? t.agentManagement.runtimeGraphHint
+                      : builtinRole === "docs"
+                        ? t.agentManagement.runtimeDocsHint
+                        : t.agentManagement.identityDescription}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>{t.agentManagement.name}</Label>
-                    <Input value={selectedProfile.name} disabled />
+                    <Input
+                      value={profileDraft.profileName}
+                      onChange={(event) =>
+                        setProfileDraft((current) =>
+                          current ? { ...current, profileName: event.target.value } : current,
+                        )
+                      }
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>{t.agentManagement.status}</Label>
@@ -437,6 +492,113 @@ export function AgentManagementView() {
                     placeholder={t.agentManagement.descriptionPlaceholder}
                   />
                 </div>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="space-y-2 md:col-span-2 lg:col-span-3">
+                  <div className="flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <Label>{t.agentManagement.inferenceModelLabel}</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">{t.agentManagement.inferenceModelHint}</p>
+                    </div>
+                    {inferenceComboFromDraft(profileDraft.llmProvider, profileDraft.llmModel) ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="shrink-0 text-xs"
+                        onClick={() =>
+                          setProfileDraft((current) =>
+                            current ? { ...current, llmProvider: "", llmModel: "" } : current,
+                          )
+                        }
+                      >
+                        {t.agentManagement.inferenceModelClear}
+                      </Button>
+                    ) : null}
+                  </div>
+                  <ModelCombobox
+                    models={sortedSettingsModels}
+                    value={inferenceComboFromDraft(profileDraft.llmProvider, profileDraft.llmModel)}
+                    onChange={(value) => {
+                      const parsed = parseModelValue(value);
+                      setProfileDraft((current) =>
+                        current
+                          ? {
+                              ...current,
+                              llmProvider: parsed?.provider ?? "",
+                              llmModel: parsed?.model ?? "",
+                            }
+                          : current,
+                      );
+                    }}
+                    collapseOnSelect
+                    labels={{
+                      providerPlaceholder: t.agentsSettings.picker.providerPlaceholder,
+                      allProviders: t.agentsSettings.picker.allProviders,
+                      searchModelPlaceholder: t.chatRuntimeControls.searchProviderModel,
+                      selectModelPlaceholder: t.chatRuntimeControls.selectModel,
+                      noModelMatch: t.agentsSettings.picker.noModelMatch,
+                      assignmentUnavailable: t.agentsSettings.picker.assignmentUnavailable,
+                      typePlaceholder: t.agentsSettings.picker.typePlaceholder,
+                      allTypes: t.agentsSettings.picker.allTypes,
+                      readyBadge: t.agentsSettings.taskRouting.ready,
+                      blockedBadge: t.agentsSettings.taskRouting.blocked,
+                      capabilityStreaming: t.agentsSettings.taskRouting.streaming,
+                      capabilityStructured: t.agentsSettings.taskRouting.structuredOutput,
+                    }}
+                  />
+                </div>
+                  <div className="space-y-2">
+                    <Label>{t.agentManagement.temperatureLabel}</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min={0}
+                      max={2}
+                      value={profileDraft.llmTemperature}
+                      onChange={(event) =>
+                        setProfileDraft((current) =>
+                          current ? { ...current, llmTemperature: event.target.value } : current,
+                        )
+                      }
+                      placeholder="0.2"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t.agentManagement.maxTokensLabel}</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={profileDraft.llmMaxTokens}
+                      onChange={(event) =>
+                        setProfileDraft((current) =>
+                          current ? { ...current, llmMaxTokens: event.target.value } : current,
+                        )
+                      }
+                      placeholder="4096"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t.agentManagement.reasoningLabel}</Label>
+                    <Select
+                      value={profileDraft.llmReasoningEffort || "none"}
+                      onValueChange={(value) =>
+                        setProfileDraft((current) =>
+                          current ? { ...current, llmReasoningEffort: value } : current,
+                        )
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">{t.agentManagement.reasoningNone}</SelectItem>
+                        <SelectItem value="low">{t.agentManagement.reasoningLow}</SelectItem>
+                        <SelectItem value="medium">{t.agentManagement.reasoningMedium}</SelectItem>
+                        <SelectItem value="high">{t.agentManagement.reasoningHigh}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
                 <div className="space-y-2">
                   <Label>{t.agentManagement.systemPromptLabel}</Label>
                   <Textarea
@@ -451,6 +613,45 @@ export function AgentManagementView() {
               </CardContent>
             </Card>
 
+            {builtinRole === "graph" ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t.agentManagement.graphStoreTitle}</CardTitle>
+                  <CardDescription>{t.agentManagement.graphStoreDescription}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ToolSlotBoard
+                    tools={searchTools}
+                    assignments={profileDraft.toolAssignments}
+                    onChange={(toolAssignments) =>
+                      setProfileDraft((current) => (current ? { ...current, toolAssignments } : current))
+                    }
+                    visibleSlots={["ontology_search"]}
+                  />
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {builtinRole === "docs" ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t.agentManagement.vecStoreTitle}</CardTitle>
+                  <CardDescription>{t.agentManagement.vecStoreDescription}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ToolSlotBoard
+                    tools={searchTools}
+                    assignments={profileDraft.toolAssignments}
+                    onChange={(toolAssignments) =>
+                      setProfileDraft((current) => (current ? { ...current, toolAssignments } : current))
+                    }
+                    visibleSlots={["rag"]}
+                  />
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {!builtinRole ? (
             <Card>
               <CardHeader>
                 <CardTitle>{t.agentManagement.capabilityTitle}</CardTitle>
@@ -528,7 +729,9 @@ export function AgentManagementView() {
                 />
               </CardContent>
             </Card>
+            ) : null}
 
+            {!builtinRole || builtinRole === "docs" ? (
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
@@ -717,7 +920,9 @@ export function AgentManagementView() {
                 )}
               </CardContent>
             </Card>
+            ) : null}
 
+            {!builtinRole ? (
             <Card>
               <CardHeader>
                 <CardTitle>{t.agentManagement.evidenceTitle}</CardTitle>
@@ -763,16 +968,18 @@ export function AgentManagementView() {
                 </label>
               </CardContent>
             </Card>
+            ) : null}
 
+            {!builtinRole || builtinRole === "orchestrator" ? (
             <Card>
               <CardHeader>
-                <CardTitle>Orchestration</CardTitle>
-                <CardDescription>Configure runtime mode for this agent profile.</CardDescription>
+                <CardTitle>{t.agentManagement.orchestrationTitle}</CardTitle>
+                <CardDescription>{t.agentManagement.orchestrationDescription}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Mode</Label>
+                    <Label>{t.agentManagement.orchestrationModeLabel}</Label>
                     <Select
                       value={profileDraft.orchestrationMode}
                       onValueChange={(value) =>
@@ -793,7 +1000,7 @@ export function AgentManagementView() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Max iterations</Label>
+                    <Label>{t.agentManagement.orchestrationMaxIterationsLabel}</Label>
                     <Input
                       type="number"
                       min={1}
@@ -825,14 +1032,16 @@ export function AgentManagementView() {
                       )
                     }
                   />
-                  Enable orchestrator
+                  {t.agentManagement.orchestrationEnabledLabel}
                 </label>
                 <div className="rounded-xl border p-3 text-xs text-muted-foreground">
-                  ReAct two-agent mapping: DocsAgent to supersearch.docs, GraphAgent to
-                  supersearch.graph.
+                  {builtinRole === "orchestrator"
+                    ? t.agentManagement.orchestrationBuiltinOrchestratorHint
+                    : t.agentManagement.orchestrationReactHint}
                 </div>
               </CardContent>
             </Card>
+            ) : null}
           </div>
         )}
       </div>
@@ -849,8 +1058,11 @@ export function AgentManagementView() {
             <div className="grid grid-cols-2 gap-2 sm:flex">
               <Button
                 variant="outline"
+                title={canSetWorkspaceDefault ? undefined : t.agentManagement.setDefaultChatOnlyHint}
                 onClick={() => setDefaultMutation.mutate()}
-                disabled={setDefaultMutation.isPending || selectedProfile.is_default}
+                disabled={
+                  setDefaultMutation.isPending || selectedProfile.is_default || !canSetWorkspaceDefault
+                }
               >
                 <Shield className="h-4 w-4" />
                 {t.agentManagement.setDefault}

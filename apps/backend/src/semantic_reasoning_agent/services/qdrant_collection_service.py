@@ -163,6 +163,8 @@ class QdrantCollectionService:
 
     def delete_document(self, workspace_id: str, knowledge_pack_id: str, document_id: str) -> None:
         collection_name = self.collection_name(workspace_id, knowledge_pack_id)
+        if not self.collection_exists(collection_name):
+            return
         self._request(
             "POST",
             f"/collections/{collection_name}/points/delete",
@@ -177,7 +179,9 @@ class QdrantCollectionService:
             },
         )
 
-    def list_documents(self, workspace_id: str, knowledge_pack_id: str) -> list[QdrantDocumentSummary]:
+    def list_documents(
+        self, workspace_id: str, knowledge_pack_id: str
+    ) -> list[QdrantDocumentSummary]:
         chunks = self.list_chunks(
             workspace_id=workspace_id,
             knowledge_pack_ids=[knowledge_pack_id],
@@ -275,7 +279,9 @@ class QdrantCollectionService:
     ) -> None:
         if not points:
             return
-        first_vector = next((point.get("vector") for point in points if isinstance(point.get("vector"), list)), None)
+        first_vector = next(
+            (point.get("vector") for point in points if isinstance(point.get("vector"), list)), None
+        )
         if not isinstance(first_vector, list):
             raise QdrantCollectionServiceError("Cannot copy document without vector payload.")
         collection_name = self.ensure_collection(
@@ -315,7 +321,9 @@ class QdrantCollectionService:
                     "limit": max(top_k, 1),
                     "with_payload": True,
                     "with_vector": False,
-                    "filter": self._build_filter(workspace_id=workspace_id, document_ids=document_ids),
+                    "filter": self._build_filter(
+                        workspace_id=workspace_id, document_ids=document_ids
+                    ),
                 },
             )
             for point in payload.get("result") or []:
@@ -405,7 +413,9 @@ class QdrantCollectionService:
                 return payload
             raise QdrantCollectionServiceError("Qdrant returned an unexpected response payload.")
         except Exception as exc:  # pragma: no cover - network/infra error
-            raise QdrantCollectionServiceError(f"Qdrant request failed: {method} {path}: {exc}") from exc
+            raise QdrantCollectionServiceError(
+                f"Qdrant request failed: {method} {path}: {exc}"
+            ) from exc
 
     def _request_memory(
         self,
@@ -418,7 +428,9 @@ class QdrantCollectionService:
         if segments == ["collections"] and method == "GET":
             return {
                 "result": {
-                    "collections": [{"name": name} for name in sorted(self._memory_collections.keys())]
+                    "collections": [
+                        {"name": name} for name in sorted(self._memory_collections.keys())
+                    ]
                 }
             }
         if len(segments) >= 2 and segments[0] == "collections":
@@ -426,7 +438,9 @@ class QdrantCollectionService:
             if len(segments) == 2:
                 if method == "GET":
                     if collection_name not in self._memory_collections:
-                        raise QdrantCollectionServiceError(f"Collection '{collection_name}' was not found.")
+                        raise QdrantCollectionServiceError(
+                            f"Collection '{collection_name}' was not found."
+                        )
                     return {"result": {"status": "green"}}
                 if method == "PUT":
                     self._memory_collections.setdefault(collection_name, {})
@@ -445,7 +459,7 @@ class QdrantCollectionService:
                 operation = segments[3]
                 if operation == "delete" and method == "POST":
                     collection = self._memory_collections.setdefault(collection_name, {})
-                    must = (((json_body or {}).get("filter") or {}).get("must") or [])
+                    must = ((json_body or {}).get("filter") or {}).get("must") or []
                     doc_id = _extract_filter_value(must, "document_id")
                     workspace_id = _extract_filter_value(must, "workspace_id")
                     for point_id, point in list(collection.items()):
@@ -458,7 +472,7 @@ class QdrantCollectionService:
                     return {"result": {"status": "acknowledged"}}
                 if operation == "scroll" and method == "POST":
                     collection = self._memory_collections.setdefault(collection_name, {})
-                    must = (((json_body or {}).get("filter") or {}).get("must") or [])
+                    must = ((json_body or {}).get("filter") or {}).get("must") or []
                     workspace_id = _extract_filter_value(must, "workspace_id")
                     document_ids = _extract_filter_any(must, "document_id")
                     points = []
@@ -472,9 +486,9 @@ class QdrantCollectionService:
                     return {"result": {"points": points, "next_page_offset": None}}
                 if operation == "search" and method == "POST":
                     collection = self._memory_collections.setdefault(collection_name, {})
-                    query_vector = ((json_body or {}).get("vector") or [])
+                    query_vector = (json_body or {}).get("vector") or []
                     limit = int((json_body or {}).get("limit") or 5)
-                    must = (((json_body or {}).get("filter") or {}).get("must") or [])
+                    must = ((json_body or {}).get("filter") or {}).get("must") or []
                     workspace_id = _extract_filter_value(must, "workspace_id")
                     document_ids = _extract_filter_any(must, "document_id")
                     scored = []
@@ -495,7 +509,9 @@ class QdrantCollectionService:
                         )
                     scored.sort(key=lambda item: item["score"], reverse=True)
                     return {"result": scored[:limit]}
-        raise QdrantCollectionServiceError(f"Unsupported in-memory Qdrant operation: {method} {path}")
+        raise QdrantCollectionServiceError(
+            f"Unsupported in-memory Qdrant operation: {method} {path}"
+        )
 
 
 def _as_int(value: object) -> int | None:
@@ -539,7 +555,9 @@ def _extract_filter_any(must: list[dict[str, Any]], key: str) -> set[str]:
 def _dense_cosine(left: list[float], right: list[float]) -> float:
     if not left or not right or len(left) != len(right):
         return 0.0
-    numerator = sum(left_value * right_value for left_value, right_value in zip(left, right, strict=False))
+    numerator = sum(
+        left_value * right_value for left_value, right_value in zip(left, right, strict=False)
+    )
     if numerator == 0:
         return 0.0
     left_norm = sum(value * value for value in left) ** 0.5
@@ -547,4 +565,3 @@ def _dense_cosine(left: list[float], right: list[float]) -> float:
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return numerator / (left_norm * right_norm)
-

@@ -8,6 +8,9 @@ from semantic_reasoning_agent.services.agent_capability_service import AgentCapa
 from semantic_reasoning_agent.services.agent_profile_service import AgentProfileService
 from semantic_reasoning_agent.services.knowledge_pack_service import KnowledgePackService
 from semantic_reasoning_agent.services.model_config_service import ModelConfigService
+from semantic_reasoning_agent.services.ontology_graph_projection_service import (
+    OntologyGraphProjectionService,
+)
 from semantic_reasoning_agent.services.ontology_service import OntologyService
 from semantic_reasoning_agent.services.provider_models_service import ProviderModelsService
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
@@ -58,6 +61,10 @@ def get_document_service() -> DocumentService:
 
 def get_ontology_service() -> OntologyService:
     return get_app_container().ontology_service
+
+
+def get_ontology_graph_projection_service() -> OntologyGraphProjectionService:
+    return get_app_container().ontology_graph_projection_service
 
 
 def get_retrieval_service() -> RetrievalService:

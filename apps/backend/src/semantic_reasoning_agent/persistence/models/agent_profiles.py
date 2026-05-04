@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -9,6 +9,9 @@ from .base import Base, utc_now
 
 class AgentProfileORM(Base):
     __tablename__ = "agent_profiles"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "builtin_agent_role", name="uq_agent_profiles_workspace_builtin_role"),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     workspace_id: Mapped[str] = mapped_column(String(64), index=True)
@@ -18,6 +21,7 @@ class AgentProfileORM(Base):
     allow_chat_model_override: Mapped[bool] = mapped_column(default=True)
     is_default: Mapped[bool] = mapped_column(default=False)
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    builtin_agent_role: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     policy_config: Mapped[dict] = mapped_column(JSON, default=dict)
     tool_assignments: Mapped[list[dict]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

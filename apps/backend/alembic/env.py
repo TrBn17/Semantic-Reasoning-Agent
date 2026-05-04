@@ -25,7 +25,8 @@ from semantic_reasoning_agent.persistence.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Default True would disable unrelated loggers (e.g. uvicorn.access); then HTTP access lines stop.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

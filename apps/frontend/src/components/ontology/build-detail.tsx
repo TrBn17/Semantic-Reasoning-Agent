@@ -1,13 +1,21 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { BuildStatusBadge, StepStatusBadge } from "@/components/ontology/status-badges";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { deleteBuild, getBuild, publishGraphDraft } from "@/shared/api/ontology";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { deleteBuild, getBuild, listGraphProjections, publishGraphDraft } from "@/shared/api/ontology";
 import { Time } from "@/shared/components/time";
 import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
@@ -228,9 +236,12 @@ function SummaryCard({
   );
 }
 
+const PUBLISH_PROJECTION_DEFAULT = "__default__" as const;
+
 export function BuildDetail({ buildId }: { buildId: string }) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const [publishProjectionId, setPublishProjectionId] = useState<string>(PUBLISH_PROJECTION_DEFAULT);
 
   const { data: build, isLoading } = useQuery({
     queryKey: queryKeys.ontology.build(buildId),
@@ -253,11 +264,19 @@ export function BuildDetail({ buildId }: { buildId: string }) {
     },
   });
 
+  const projectionsQuery = useQuery({
+    queryKey: queryKeys.ontology.graphProjections(build?.workspace_id),
+    queryFn: () => listGraphProjections(build?.workspace_id),
+    enabled: !!build?.workspace_id,
+  });
+
   const publishMutation = useMutation({
     mutationFn: () =>
       publishGraphDraft({
         workspace_id: build?.workspace_id,
         build_id: build?.id,
+        ontology_graph_projection_id:
+          publishProjectionId === PUBLISH_PROJECTION_DEFAULT ? null : publishProjectionId,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ontology.all });
@@ -318,6 +337,29 @@ export function BuildDetail({ buildId }: { buildId: string }) {
             <p className="text-sm text-amber-600">{t.ontologyBuild.publishUnavailableNoEntities}</p>
           ) : null}
           {build.error_message ? <p className="text-sm text-destructive">{build.error_message}</p> : null}
+          {(projectionsQuery.data ?? []).length > 0 ? (
+            <div className="space-y-1.5 max-w-md pt-1">
+              <Label htmlFor="publish-projection" className="text-xs text-muted-foreground">
+                {t.ontologyBuild.publishProjectionLabel}
+              </Label>
+              <Select value={publishProjectionId} onValueChange={setPublishProjectionId}>
+                <SelectTrigger id="publish-projection" className="w-full max-w-md">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={PUBLISH_PROJECTION_DEFAULT}>
+                    {t.ontologyBuild.publishProjectionWorkspaceDefault}
+                  </SelectItem>
+                  {(projectionsQuery.data ?? []).map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{t.ontologyBuild.publishProjectionHint}</p>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

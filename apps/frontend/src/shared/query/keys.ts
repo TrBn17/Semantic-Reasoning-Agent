@@ -63,6 +63,8 @@ export const queryKeys = {
   ontology: {
     all: ["ontology"] as const,
     graph: (workspaceId?: string) => ["ontology", "graph", workspaceId ?? null] as const,
+    graphProjections: (workspaceId?: string | null) =>
+      ["ontology", "graph-projections", workspaceId ?? null] as const,
     builds: (workspaceId?: string) =>
       ["ontology", "builds", workspaceId ?? null] as const,
     build: (id: string) => ["ontology", "builds", id] as const,

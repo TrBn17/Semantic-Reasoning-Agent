@@ -101,7 +101,10 @@ def test_resolve_api_request_uses_react_mode_when_requested(monkeypatch) -> None
         ),
     )
     monkeypatch.setattr(service, "_resolve_workspace_and_agent_profile", lambda request: ("workspace-demo", None))
-    monkeypatch.setattr(service._react_orchestrator, "run", lambda **kwargs: ReActRunResult(content="REACT_OK"))
+
+    service._react_orchestrator = SimpleNamespace(  # noqa: SLF001
+        run=lambda **kwargs: ReActRunResult(content="REACT_OK"),
+    )
 
     response = service.resolve_api_request(
         TaskResolveRequest(

@@ -45,6 +45,9 @@ class RuntimeAuditService:
                     created_at=utc_now(),
                 )
             )
+            # Parent row must exist before inserts into evidence_bundles / task_run_steps / …
+            # (Session uses autoflush=False; PG validates FK immediately on each INSERT.)
+            session.flush()
             for item in trace:
                 session.add(
                     TaskRunStepORM(

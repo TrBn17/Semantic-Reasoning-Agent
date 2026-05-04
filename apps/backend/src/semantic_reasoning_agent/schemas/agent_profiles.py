@@ -7,6 +7,7 @@ from semantic_reasoning_agent.schemas.agent_capabilities import (
     ToolPolicySchema,
 )
 from semantic_reasoning_agent.schemas.agents import TaskType
+from semantic_reasoning_agent.schemas.llm_inference import LlmInferenceOverrides
 from semantic_reasoning_agent.schemas.orchestration import (
     OrchestrationConfigSchema,
     default_orchestration_config,
@@ -62,7 +63,9 @@ class AgentProfileResponse(BaseModel):
     allow_chat_model_override: bool
     is_default: bool
     status: str
+    builtin_agent_role: str | None = None
     capability_preset: str = "internal_qa"
+    llm_inference: LlmInferenceOverrides | None = None
     tool_policy: ToolPolicySchema = Field(default_factory=ToolPolicySchema)
     knowledge_pack_ids: list[str] = Field(default_factory=list)
     evidence_policy: EvidencePolicySchema = Field(default_factory=EvidencePolicySchema)

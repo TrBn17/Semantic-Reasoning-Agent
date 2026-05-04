@@ -2,49 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from semantic_reasoning_agent.domain.contracts.evidence import Evidence
-from semantic_reasoning_agent.infrastructure.graphiti.graphiti_mapper import map_edge_to_evidence, map_node_to_evidence
+from semantic_reasoning_agent.infrastructure.graphiti.graphiti_evidence import graphiti_matches_to_evidence
 from semantic_reasoning_agent.services.evidence_from_retrieval import retrieval_result_to_evidence
 from semantic_reasoning_agent.services.retrieval_service import RetrievalService
+from semantic_reasoning_agent.retrieval.ranking import RRF_K, reciprocal_rank_fuse
 
 if TYPE_CHECKING:
     from semantic_reasoning_agent.infrastructure.graphiti.graphiti_gateway import GraphitiGateway
-
-RRF_K = 60
-
-
-def _evidence_fuse_key(evidence: Evidence) -> str:
-    if evidence.document_id and evidence.chunk_id:
-        return f"chunk:{evidence.document_id}:{evidence.chunk_id}"
-    if evidence.source_type in ("graph_node", "graph_edge") and evidence.provenance.source_id:
-        return f"graph:{evidence.provenance.source_id}"
-    return f"id:{evidence.evidence_id}"
-
-
-def reciprocal_rank_fuse(
-    ranked_lists: list[list[Evidence]],
-    *,
-    top_k: int,
-    k: int = RRF_K,
-) -> list[Evidence]:
-    scores: dict[str, float] = {}
-    best: dict[str, Evidence] = {}
-    for items in ranked_lists:
-        for rank, ev in enumerate(items, start=1):
-            key = _evidence_fuse_key(ev)
-            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
-            best.setdefault(key, ev)
-    ordered = sorted(scores.keys(), key=lambda key: scores[key], reverse=True)
-    out: list[Evidence] = []
-    for key in ordered[:top_k]:
-        base = best[key]
-        out.append(replace(base, score=scores[key]))
-    return out
 
 
 class HybridRetrievalService:
@@ -72,31 +41,15 @@ class HybridRetrievalService:
             return []
         matches = gw.search(
             query=query,
-            workspace_id=workspace_id,
+            group_ids=[workspace_id],
             limit=max(1, top_k),
             search_type="combined",
         )
-        evidence: list[Evidence] = []
-        for match in matches:
-            if match.kind == "edge":
-                evidence.append(
-                    map_edge_to_evidence(
-                        match.item,
-                        workspace_id=workspace_id,
-                        tool_call_id=tool_call_id,
-                        score=match.score,
-                    )
-                )
-            else:
-                evidence.append(
-                    map_node_to_evidence(
-                        match.item,
-                        workspace_id=workspace_id,
-                        tool_call_id=tool_call_id,
-                        score=match.score,
-                    )
-                )
-        return evidence
+        return graphiti_matches_to_evidence(
+            matches,
+            workspace_id=workspace_id,
+            tool_call_id=tool_call_id,
+        )
 
     def search_hybrid(
         self,
@@ -136,3 +89,6 @@ class HybridRetrievalService:
             return graph_evidence[:top_k]
         fused = reciprocal_rank_fuse([chunk_evidence, graph_evidence], top_k=top_k)
         return fused
+
+
+__all__ = ["HybridRetrievalService", "RRF_K", "reciprocal_rank_fuse"]

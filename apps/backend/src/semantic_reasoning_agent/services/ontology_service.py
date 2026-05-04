@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from collections import defaultdict
 from copy import deepcopy
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from uuid import uuid4
 
 from sqlalchemy import delete, desc, select
@@ -65,6 +65,10 @@ from semantic_reasoning_agent.services.ontology_graph_publisher import (
     OntologyGraphPublisher,
     OntologyGraphPublisherError,
 )
+from semantic_reasoning_agent.services.ontology_graph_projection_service import (
+    OntologyGraphProjectionError,
+    OntologyGraphProjectionService,
+)
 from semantic_reasoning_agent.workers.task_dispatcher import TaskDispatcher
 
 
@@ -107,6 +111,7 @@ class OntologyService:
         task_dispatcher: TaskDispatcher,
         graphiti_gateway: GraphitiGateway,
         ontology_extractor: OntologyExtractorPort,
+        ontology_graph_projection_service: OntologyGraphProjectionService,
         object_store: ObjectStorePort | None = None,
     ) -> None:
         self._settings = settings
@@ -115,6 +120,7 @@ class OntologyService:
         self._graphiti_gateway = graphiti_gateway
         self._graph_publisher = OntologyGraphPublisher(graphiti_gateway)
         self._ontology_extractor = ontology_extractor
+        self._ontology_graph_projection_service = ontology_graph_projection_service
         self._object_store = object_store or build_object_store(settings)
 
     def create_build(self, request: OntologyBuildCreateRequest) -> OntologyBuildResponse:
@@ -357,6 +363,15 @@ class OntologyService:
     def publish_graph_draft(self, request: OntologyDraftPublishRequest) -> OntologyPublishResponse:
         workspace_id = request.workspace_id or self._settings.default_workspace_id
         snapshot, _ = self._build_publish_snapshot(build_id=request.build_id, workspace_id=workspace_id)
+        try:
+            graphiti_gid = self._ontology_graph_projection_service.resolve_graphiti_group_id_for_publish(
+                workspace_id,
+                request.ontology_graph_projection_id,
+            )
+        except OntologyGraphProjectionError as exc:
+            raise OntologyPublishError(str(exc)) from exc
+        if graphiti_gid is not None:
+            snapshot = replace(snapshot, graphiti_group_id=graphiti_gid)
         graphiti_chunks = self._load_graphiti_chunks_for_snapshot(snapshot)
         try:
             self._graph_publisher.publish(snapshot, document_chunks=graphiti_chunks)

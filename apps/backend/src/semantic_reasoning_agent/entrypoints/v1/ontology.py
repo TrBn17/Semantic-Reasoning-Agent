@@ -1,6 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from semantic_reasoning_agent.entrypoints.dependencies import get_ontology_service
+from semantic_reasoning_agent.core.config import get_settings
+from semantic_reasoning_agent.entrypoints.dependencies import (
+    get_ontology_graph_projection_service,
+    get_ontology_service,
+)
 from semantic_reasoning_agent.schemas.ontology import (
     OntologyBuildCreateRequest,
     OntologyBuildResponse,
@@ -12,8 +16,15 @@ from semantic_reasoning_agent.schemas.ontology import (
     OntologyGraphDraftRelationUpdateRequest,
     OntologyGraphDraftResponse,
     OntologyEntityTypeDefinitionUpdateRequest,
+    OntologyGraphProjectionCreateRequest,
+    OntologyGraphProjectionResponse,
     OntologyPublishResponse,
     OntologyRelationTypeDefinitionUpdateRequest,
+)
+from semantic_reasoning_agent.services.ontology_graph_projection_service import (
+    OntologyGraphProjectionError,
+    OntologyGraphProjectionNotFoundError,
+    OntologyGraphProjectionService,
 )
 from semantic_reasoning_agent.services.ontology_service import (
     OntologyBuildError,
@@ -199,6 +210,41 @@ def reset_graph_draft(
     ontology_service: OntologyService = Depends(get_ontology_service),
 ) -> OntologyGraphDraftResponse:
     return ontology_service.reset_graph_draft(workspace_id=workspace_id)
+
+
+@router.get("/graph-projections", response_model=list[OntologyGraphProjectionResponse])
+def list_graph_projections(
+    workspace_id: str | None = Query(default=None),
+    projection_service: OntologyGraphProjectionService = Depends(get_ontology_graph_projection_service),
+) -> list[OntologyGraphProjectionResponse]:
+    resolved = workspace_id or get_settings().default_workspace_id
+    return projection_service.list_projections(resolved)
+
+
+@router.post(
+    "/graph-projections",
+    response_model=OntologyGraphProjectionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_graph_projection(
+    request: OntologyGraphProjectionCreateRequest,
+    projection_service: OntologyGraphProjectionService = Depends(get_ontology_graph_projection_service),
+) -> OntologyGraphProjectionResponse:
+    try:
+        return projection_service.create_projection(request)
+    except OntologyGraphProjectionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/graph-projections/{projection_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_graph_projection(
+    projection_id: str,
+    projection_service: OntologyGraphProjectionService = Depends(get_ontology_graph_projection_service),
+) -> None:
+    try:
+        projection_service.delete_projection(projection_id)
+    except OntologyGraphProjectionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post("/graph/draft/publish", response_model=OntologyPublishResponse)

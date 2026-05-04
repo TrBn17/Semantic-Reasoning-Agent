@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from neo4j import GraphDatabase
+
 from semantic_reasoning_agent.core.config import Settings
 
 
@@ -41,7 +43,7 @@ class GraphitiGateway:
         self,
         *,
         query: str,
-        workspace_id: str,
+        group_ids: list[str],
         limit: int = 5,
         search_type: SearchType = "combined",
         center_node_uuid: str | None = None,
@@ -50,11 +52,13 @@ class GraphitiGateway:
     ) -> list[GraphitiSearchMatch]:
         if not self.is_enabled():
             return []
+        if not group_ids:
+            return []
         graphiti = self._require_graphiti()
         results = self._execute_search(
             graphiti,
             query=query,
-            workspace_id=workspace_id,
+            group_ids=group_ids,
             limit=limit,
             search_type=search_type,
             center_node_uuid=center_node_uuid,
@@ -83,7 +87,7 @@ class GraphitiGateway:
         graphiti: Any,
         *,
         query: str,
-        workspace_id: str,
+        group_ids: list[str],
         limit: int,
         search_type: SearchType,
         center_node_uuid: str | None,
@@ -92,7 +96,7 @@ class GraphitiGateway:
     ) -> Any:
         sig = inspect.signature(graphiti.search_)
         if "config" not in sig.parameters:
-            return self._run_async(graphiti.search_(query=query, group_ids=[workspace_id]))
+            return self._run_async(graphiti.search_(query=query, group_ids=group_ids))
 
         try:
             from graphiti_core.search.search_config_recipes import (  # type: ignore
@@ -109,7 +113,7 @@ class GraphitiGateway:
                 SearchFilters,
             )
         except Exception:  # noqa: BLE001
-            return self._run_async(graphiti.search_(query=query, group_ids=[workspace_id]))
+            return self._run_async(graphiti.search_(query=query, group_ids=group_ids))
 
         use_rrf = reranker in ("rrf", "none")
         use_cross = reranker == "cross_encoder"
@@ -160,7 +164,7 @@ class GraphitiGateway:
             graphiti.search_(
                 query,
                 config,
-                [workspace_id],
+                group_ids,
                 center_node_uuid,
                 None,
                 search_filter,
@@ -173,7 +177,7 @@ class GraphitiGateway:
         name: str,
         episode_body: str,
         source_description: str,
-        workspace_id: str,
+        group_id: str,
         reference_time: datetime | None = None,
     ) -> dict[str, str]:
         if not self.is_enabled():
@@ -185,7 +189,7 @@ class GraphitiGateway:
                 episode_body=episode_body,
                 source_description=source_description,
                 reference_time=reference_time or datetime.now(timezone.utc),
-                group_id=workspace_id,
+                group_id=group_id,
             )
         )
         episode = getattr(result, "episode", None)
@@ -198,7 +202,7 @@ class GraphitiGateway:
         name: str,
         entity_type: str,
         aliases: list[str],
-        workspace_id: str,
+        group_id: str,
         source_document_id: str | None = None,
     ) -> None:
         """Materialize a standalone ontology entity in Graphiti via an episodic ingest."""
@@ -217,7 +221,7 @@ class GraphitiGateway:
             name=f"ontology-entity-{uuid}",
             episode_body=body,
             source_description="ontology_publish_entity",
-            workspace_id=workspace_id,
+            group_id=group_id,
             reference_time=datetime.now(timezone.utc),
         )
 
@@ -232,7 +236,7 @@ class GraphitiGateway:
         relation_type: str,
         fact: str,
         valid_at: datetime | None,
-        workspace_id: str,
+        group_id: str,
         source_entity_type: str = "Entity",
         target_entity_type: str = "Entity",
     ) -> None:
@@ -250,20 +254,20 @@ class GraphitiGateway:
         src = EntityNode(
             uuid=source_uuid,
             name=source_name or source_uuid,
-            group_id=workspace_id,
+            group_id=group_id,
             labels=[],
             attributes={"ontology_entity_type": source_entity_type},
         )
         tgt = EntityNode(
             uuid=target_uuid,
             name=target_name or target_uuid,
-            group_id=workspace_id,
+            group_id=group_id,
             labels=[],
             attributes={"ontology_entity_type": target_entity_type},
         )
         edge = EntityEdge(
             uuid=uuid,
-            group_id=workspace_id,
+            group_id=group_id,
             source_node_uuid=source_uuid,
             target_node_uuid=target_uuid,
             created_at=now,
@@ -275,6 +279,24 @@ class GraphitiGateway:
 
     def status_detail(self) -> str | None:
         return self._load_error
+
+    def delete_group_data(self, *, group_id: str) -> None:
+        """Remove all Graphiti-labeled nodes/edges for this ``group_id`` (Neo4j partition)."""
+        if not self.is_enabled() or not group_id.strip():
+            return
+        database = self._settings.graphiti_database or self._settings.neo4j_database
+        driver = GraphDatabase.driver(
+            self._settings.neo4j_uri,
+            auth=(self._settings.neo4j_user, self._settings.neo4j_password),
+        )
+        try:
+            with driver.session(database=database) as session:
+                session.run(
+                    "MATCH (n) WHERE n.group_id = $gid DETACH DELETE n",
+                    gid=group_id,
+                )
+        finally:
+            driver.close()
 
     def _require_graphiti(self):
         if self._graphiti is not None:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def main() -> int:
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     api_src = repo_root / "apps" / "backend" / "src"
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")

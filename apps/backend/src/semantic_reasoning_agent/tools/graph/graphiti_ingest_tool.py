@@ -72,7 +72,7 @@ class GraphitiIngestTool(Tool):
             name=name,
             episode_body=episode_body,
             source_description=source_description,
-            workspace_id=envelope.workspace_id,
+            group_id=envelope.workspace_id,
         )
         return ToolResult(
             call_id=envelope.call_id,

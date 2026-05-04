@@ -1,17 +1,21 @@
 "use client";
 
 import { useCallback, useDeferredValue, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
+import { Maximize2, Trash2, ZoomIn, ZoomOut } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { entityToNode, relationToEdge } from "@/shared/api/adapters/ontology";
-import { getGraph } from "@/shared/api/ontology";
+import {
+  deleteGraphDraftNode,
+  deleteGraphDraftRelation,
+  getGraphDraft,
+} from "@/shared/api/ontology";
 import { useI18n } from "@/shared/i18n/use-language";
 import { queryKeys } from "@/shared/query/keys";
 import { useWorkspaceStore } from "@/shared/state/workspace-store";
@@ -33,6 +37,7 @@ type Selection =
 
 export function GraphView() {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const workspaceId = useWorkspaceStore((state) => state.workspaceId);
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
   const [search, setSearch] = useState("");
@@ -40,8 +45,32 @@ export function GraphView() {
   const [selection, setSelection] = useState<Selection>(null);
   const { data, isLoading, isError, error } = useQuery({
     queryKey: queryKeys.ontology.graph(workspaceId ?? undefined),
-    queryFn: () => getGraph(workspaceId ?? undefined),
+    queryFn: () => getGraphDraft(workspaceId ?? undefined),
   });
+
+  const deleteRelationMutation = useMutation({
+    mutationFn: (relationId: string) =>
+      deleteGraphDraftRelation(relationId, workspaceId ?? undefined),
+    onSuccess: () => {
+      setSelection(null);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ontology.graph(workspaceId ?? undefined),
+      });
+    },
+  });
+
+  const deleteNodeMutation = useMutation({
+    mutationFn: (nodeId: string) =>
+      deleteGraphDraftNode(nodeId, workspaceId ?? undefined),
+    onSuccess: () => {
+      setSelection(null);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ontology.graph(workspaceId ?? undefined),
+      });
+    },
+  });
+
+  const draftHasChanges = Boolean(data?.has_changes ?? data?.draft_summary?.has_changes);
 
   const nodes = useMemo(() => (data?.entities ?? []).map(entityToNode), [data?.entities]);
   const edges = useMemo(() => (data?.relations ?? []).map(relationToEdge), [data?.relations]);
@@ -109,8 +138,14 @@ export function GraphView() {
         <div className="mx-auto flex max-w-7xl flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">{t.graph.title}</h1>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-2xl font-semibold tracking-tight">{t.graph.title}</h1>
+                {!isLoading && !isError && draftHasChanges ? (
+                  <Badge variant="secondary">{t.graph.draftEditsBadge}</Badge>
+                ) : null}
+              </div>
               <p className="text-sm text-muted-foreground">{t.graph.subtitle}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{t.graph.removeFromGraphHint}</p>
             </div>
             {!isLoading && !isError && hasGraphData ? (
               <div className="flex min-h-9 flex-wrap items-center gap-2">
@@ -226,6 +261,9 @@ export function GraphView() {
               allNodes={nodes}
               allEdges={edges}
               onFocusNode={focusNodeInCanvas}
+              onDeleteRelation={(id) => deleteRelationMutation.mutate(id)}
+              onDeleteNode={(id) => deleteNodeMutation.mutate(id)}
+              deleteBusy={deleteRelationMutation.isPending || deleteNodeMutation.isPending}
               labels={{
                 title: t.graph.inspectorTitle,
                 empty: t.graph.inspectorEmpty,
@@ -241,6 +279,10 @@ export function GraphView() {
                 confidence: t.graph.confidenceLabel,
                 evidence: t.graph.evidenceLabel,
                 noEvidence: t.graph.noEvidence,
+                deleteRelation: t.graph.deleteRelation,
+                deleteRelationConfirm: t.graph.deleteRelationConfirm,
+                deleteNode: t.graph.deleteNode,
+                deleteNodeConfirm: t.graph.deleteNodeConfirm,
               }}
             />
           </div>
@@ -265,6 +307,10 @@ type InspectorLabels = {
   confidence: string;
   evidence: string;
   noEvidence: string;
+  deleteRelation: string;
+  deleteRelationConfirm: string;
+  deleteNode: string;
+  deleteNodeConfirm: string;
 };
 
 function Inspector({
@@ -272,12 +318,18 @@ function Inspector({
   allNodes,
   allEdges,
   onFocusNode,
+  onDeleteRelation,
+  onDeleteNode,
+  deleteBusy,
   labels,
 }: {
   selection: Selection;
   allNodes: GraphNodeViewModel[];
   allEdges: GraphEdgeViewModel[];
   onFocusNode: (id: string) => void;
+  onDeleteRelation: (relationId: string) => void;
+  onDeleteNode: (nodeId: string) => void;
+  deleteBusy: boolean;
   labels: InspectorLabels;
 }) {
   if (!selection) {
@@ -346,6 +398,23 @@ function Inspector({
               {incoming.length === 0 && <li className="text-xs text-muted-foreground">—</li>}
             </ul>
           </div>
+          <div className="border-t pt-3">
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              className="w-full gap-2"
+              disabled={deleteBusy}
+              onClick={() => {
+                if (window.confirm(labels.deleteNodeConfirm)) {
+                  onDeleteNode(selection.node.id);
+                }
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+              {labels.deleteNode}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
@@ -393,6 +462,23 @@ function Inspector({
           <div className="rounded-xl bg-muted/30 px-3 py-3 whitespace-pre-wrap">
             {selection.edge.evidenceText || labels.noEvidence}
           </div>
+        </div>
+        <div className="border-t pt-3">
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className="w-full gap-2"
+            disabled={deleteBusy}
+            onClick={() => {
+              if (window.confirm(labels.deleteRelationConfirm)) {
+                onDeleteRelation(selection.edge.id);
+              }
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+            {labels.deleteRelation}
+          </Button>
         </div>
       </CardContent>
     </Card>
